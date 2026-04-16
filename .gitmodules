@@ -1,0 +1,3 @@
+[submodule "base_models"]
+	path = base_models
+	url = git@github.com:Fbot-Hydrone/base_models.git
