@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>hydrone_bringup</name>
+  <version>1.0.0</version>
+  <description>Launch files and configuration for the Hydrone competition stack</description>
+  <maintainer email="team@hydrone.com">Hydrone Team</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+  <exec_depend>hydrone_vision</exec_depend>
+  <exec_depend>hydrone_controller</exec_depend>
+  <exec_depend>hydrone_nav</exec_depend>
+  <exec_depend>hydrone_mission</exec_depend>
+  <exec_depend>hydrone_msgs</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
