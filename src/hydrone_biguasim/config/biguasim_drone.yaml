@@ -1,0 +1,70 @@
+/**:
+  ros__parameters:
+    biguasim_scenario:
+      # ── Simulador ────────────────────────────────────────────────────────
+      # SkyDive é o pacote do motor Unreal que contém o DjiMatrice
+      package_name: SkyDive
+      world: InfiniteFloor        # mundo aberto com chão plano — representa a arena
+      ticks_per_sec: 50           # física a 50 Hz
+      frames_per_sec: 50          # render a 50 Hz (time_warp = 1.0 → tempo real)
+      show_viewport: true         # janela gráfica visível
+      draw_arrow: false
+
+      agents:
+        # ── Drone principal — DJI Matrice ────────────────────────────────
+        - agent_name: drone-id0
+          agent_type: DjiMatrice
+
+          # cmd_pos_yaw: [x, y, z, yaw]  — 4 valores, perfeito para nossa stack
+          # O controller envia PoseStamped; o biguasim_bridge converte para Float64MultiArray
+          control_abstraction: cmd_pos_yaw
+
+          # Posição inicial — base de decolagem no origem do mapa
+          location: [0.0, 0.0, 0.5]    # x, y, z  (metres, Unreal NED → convertido pelo bridge)
+          rotation: [0.0, 0.0, 0.0]    # roll, pitch, yaw (graus)
+
+          publish_commands: false       # não precisamos ver os comandos de volta
+
+          sensors:
+            # ── Odometria completa (pose + twist + quaternion) ──────────
+            - sensor_type: DynamicsSensor
+              sensor_name: odom
+              ros_publish: true
+              configuration:
+                UseCOM: true
+                UseRPY: false           # queremos quaternion, não euler
+
+            # ── IMU ────────────────────────────────────────────────────
+            - sensor_type: DynamicsSensor
+              sensor_name: imu
+              ros_publish: true
+              configuration:
+                UseCOM: true
+                UseRPY: false
+
+            # ── Câmera RGB frontal (substitui ZED2 na simulação) ───────
+            - sensor_type: RGBCamera
+              sensor_name: camera
+              ros_publish: true
+              socket: CameraFront       # socket definido no modelo do DjiMatrice
+              configuration:
+                CaptureWidth: 640
+                CaptureHeight: 480
+
+            # ── Câmera de profundidade (substitui canal de depth da ZED) 
+            - sensor_type: DepthCamera
+              sensor_name: depth
+              ros_publish: true
+              socket: CameraFront
+              configuration:
+                CaptureWidth: 640
+                CaptureHeight: 480
+
+            # ── Localização ground-truth (para debug e validação) ──────
+            - sensor_type: LocationSensor
+              sensor_name: location_gt
+              ros_publish: true
+
+            - sensor_type: RotationSensor
+              sensor_name: rotation_gt
+              ros_publish: true

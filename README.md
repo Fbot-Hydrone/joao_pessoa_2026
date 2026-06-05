@@ -143,3 +143,80 @@ hydrone_ws/
 - [ ] Ajustar coordenadas dos waypoints do labirinto (`MAZE_*` em `nav_node.py`) com medição real da arena
 - [ ] Testar classificador de gestos com o operador real e ajustar limiares em `_classify_gesture()`
 - [ ] Adicionar nó `ardupilot` de interface com o SITL para testes em simulação (Gazebo)
+
+---
+
+## Simulação com BiguaSim
+
+### Instalar BiguaSim
+
+```bash
+# Clonar o simulador no workspace
+cd ~/hydrone_ws/src
+git clone https://github.com/hydrone-furg/biguasim-ros2.git
+
+# Instalar o pacote Python do motor (SkyDive/HoloOcean)
+pip install biguasim
+
+# Build completo
+cd ~/hydrone_ws
+colcon build --symlink-install
+source install/setup.bash
+```
+
+### Executar a simulação
+
+```bash
+# Tudo de uma vez: simulador + bridge + stack
+ros2 launch hydrone_biguasim sim.launch.py phase:=1
+
+# Com multiplicador open hardware:
+ros2 launch hydrone_biguasim sim.launch.py phase:=1 open_hardware:=true
+```
+
+### Como a integração funciona
+
+```
+BiguaSim (DjiMatrice)
+  drone_id0/odom/Odom   ──▶  bridge  ──▶  /mavros/local_position/pose
+  drone_id0/odom/IMU    ──▶  bridge  ──▶  /mavros/imu/data
+  drone_id0/camera      ──▶  bridge  ──▶  /zed2/.../rgb/image_rect_color
+  drone_id0/depth       ──▶  bridge  ──▶  /zed2/.../depth/depth_registered
+                                           ↓
+                                    hydrone_vision
+                                    hydrone_controller  ◀── /mavros/setpoint_position/local
+                                    hydrone_nav                        ↑
+                                    hydrone_mission             bridge converte
+                                                           PoseStamped → Float64[x,y,z,yaw]
+                                                           → drone_id0/command_control
+```
+
+O bridge também publica um `/mavros/state` falso com `armed=true` e `mode=GUIDED`
+para que o `hydrone_controller` não bloqueie esperando handshake MAVLink.
+
+### Iniciar missão na simulação
+
+```bash
+# Após o launch estar rodando (~5s de espera para init)
+ros2 service call /hydrone/mission/start hydrone_msgs/srv/SetPhase \
+  "{phase: 1, open_hardware: false, use_two_drones: false}"
+```
+
+### Monitorar tópicos úteis
+
+```bash
+# Pose atual do drone
+ros2 topic echo /mavros/local_position/pose
+
+# Estado da missão e pontuação
+ros2 topic echo /hydrone/mission_state
+
+# Bases detectadas pela visão
+ros2 topic echo /hydrone/vision/landing_bases
+
+# Status da navegação
+ros2 topic echo /hydrone/nav/status
+
+# Imagem de debug com anotações
+ros2 run rqt_image_view rqt_image_view /hydrone/vision/debug_image
+```
