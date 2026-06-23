@@ -1,0 +1,265 @@
+struct ArrayShort
+{
+    short var_array_short[10];
+};
+
+struct ArrayUShort
+{
+    unsigned short var_array_ushort[10];
+};
+
+struct ArrayLong
+{
+    long var_array_long[10];
+};
+
+struct ArrayULong
+{
+    unsigned long var_array_ulong[10];
+};
+
+struct ArrayLongLong
+{
+    long long var_array_longlong[10];
+};
+
+struct ArrayULongLong
+{
+    unsigned long long var_array_ulonglong[10];
+};
+
+struct ArrayFloat
+{
+    float var_array_float[10];
+};
+
+struct ArrayDouble
+{
+    double var_array_double[10];
+};
+
+struct ArrayBoolean
+{
+    boolean var_array_boolean[10];
+};
+
+struct ArrayOctet
+{
+    octet var_array_octet[10];
+};
+
+struct ArrayChar
+{
+    char var_array_char[10];
+};
+
+struct ArrayString
+{
+    string var_array_string[10];
+};
+
+struct ArrayShortArray
+{
+    short var_array_short_array[10][10];
+};
+
+struct ArrayMultiDimensionShort
+{
+    short var_array_short[10][10][10];
+};
+
+struct ArrayMultiDimensionUShort
+{
+    unsigned short var_array_ushort[10][10][10];
+};
+
+struct ArrayMultiDimensionLong
+{
+    long var_array_long[10][10][10];
+};
+
+struct ArrayMultiDimensionULong
+{
+    unsigned long var_array_ulong[10][10][10];
+};
+
+struct ArrayMultiDimensionLongLong
+{
+    long long var_array_longlong[10][10][10];
+};
+
+struct ArrayMultiDimensionULongLong
+{
+    unsigned long long var_array_ulonglong[10][10][10];
+};
+
+struct ArrayMultiDimensionFloat
+{
+    float var_array_float[10][10][10];
+};
+
+struct ArrayMultiDimensionDouble
+{
+    double var_array_double[10][10][10];
+};
+
+struct ArrayMultiDimensionBoolean
+{
+    boolean var_array_boolean[10][10][10];
+};
+
+struct ArrayMultiDimensionOctet
+{
+    octet var_array_octet[10][10][10];
+};
+
+struct ArrayMultiDimensionChar
+{
+    char var_array_char[10][10][10];
+};
+
+struct ArrayMultiDimensionString
+{
+    string var_array_string[10][10][10];
+};
+
+const long size_1 = 5;
+const long size_2 = 2;
+
+
+struct ArraySingleDimensionLiteralsShort
+{
+    short var_array_short[size_1];
+};
+
+struct ArraySingleDimensionLiteralsUnsignedShort
+{
+    unsigned short var_array_ushort[5 * 2];
+};
+
+struct ArraySingleDimensionLiteralsLong
+{
+    long var_array_long[5 + 5];
+};
+
+struct ArraySingleDimensionLiteralsUnsignedLong
+{
+    unsigned long var_array_ulong[size_1 * 2];
+};
+
+struct ArraySingleDimensionLiteralsLongLong
+{
+    long long var_array_longlong[size_1 + 5];
+};
+
+struct ArraySingleDimensionLiteralsUnsignedLongLong
+{
+    unsigned long long var_array_ulonglong[size_1 * size_2];
+};
+
+struct ArraySingleDimensionLiteralsFloat
+{
+    float var_array_float[size_1];
+};
+
+struct ArraySingleDimensionLiteralsDouble
+{
+    double var_array_double[5 * 2];
+};
+
+struct ArraySingleDimensionLiteralsBoolean
+{
+    boolean var_array_boolean[size_1];
+};
+
+struct ArraySingleDimensionLiteralsOctet
+{
+    octet var_array_octet[size_1 * 2];
+};
+
+struct ArraySingleDimensionLiteralsChar
+{
+    char var_array_char[size_1];
+};
+
+struct ArraySingleDimensionLiteralsString
+{
+    string var_array_string[size_1];
+};
+
+struct ArraySingleDimensionLiteralsShortArray
+{
+    short var_array_short_array[size_1 * size_2][size_1 + 5];
+};
+
+
+struct ArrayMultiDimensionLiteralsShort
+{
+    short var_array_short[size_1][5 + 5][size_2];
+};
+
+struct ArrayMultiDimensionLiteralsUShort
+{
+    unsigned short var_array_ushort[size_1][size_1 * 2][5];
+};
+
+struct ArrayMultiDimensionLiteralsLong
+{
+    long var_array_long[5 * 2][size_1][5];
+};
+
+struct ArrayMultiDimensionLiteralsULong
+{
+    unsigned long var_array_ulong[5 + 5][size_1 * size_2][size_1];
+};
+
+struct ArrayMultiDimensionLiteralsLongLong
+{
+    long long var_array_longlong[size_1][5 * 2][5];
+};
+
+struct ArrayMultiDimensionLiteralsULongLong
+{
+    unsigned long long var_array_ulonglong[size_1 + 5][size_1 * size_2][5 + 5];
+};
+
+struct ArrayMultiDimensionLiteralsFloat
+{
+    float var_array_float[5 * 2][size_1][5 + 5];
+};
+
+struct ArrayMultiDimensionLiteralsDouble
+{
+    double var_array_double[size_1][size_1 + 5][size_1];
+};
+
+struct ArrayMultiDimensionLiteralsBoolean
+{
+    boolean var_array_boolean[size_1 * size_2][size_1][5];
+};
+
+struct ArrayMultiDimensionLiteralsOctet
+{
+    octet var_array_octet[size_1][size_1 * 2][size_1];
+};
+
+struct ArrayMultiDimensionLiteralsChar
+{
+    char var_array_char[5 + 5][size_1][5 + 5];
+};
+
+struct ArrayMultiDimensionLiteralsString
+{
+    string var_array_string[size_1][5 * 2][5];
+};
+
+struct BoundedSmallArrays
+{
+    short var_array_small[1];
+};
+
+struct BoundedBigArrays
+{
+    short var_array_big[5000];
+};
+

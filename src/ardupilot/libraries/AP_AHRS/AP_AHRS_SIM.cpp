@@ -1,0 +1,262 @@
+#include "AP_AHRS_SIM.h"
+
+#if AP_AHRS_SIM_ENABLED
+
+#include "AP_AHRS.h"
+
+bool AP_AHRS_SIM::get_location(Location &loc) const
+{
+    if (_sitl == nullptr) {
+        return false;
+    }
+
+    const struct SITL::sitl_fdm &fdm = _sitl->state;
+    loc = {};
+    loc.lat = fdm.latitude * 1e7;
+    loc.lng = fdm.longitude * 1e7;
+    loc.alt = fdm.altitude*100;
+
+    return true;
+}
+
+bool AP_AHRS_SIM::airspeed_EAS(float &airspeed_ret) const
+{
+    if (_sitl == nullptr) {
+        return false;
+    }
+
+    airspeed_ret = _sitl->state.airspeed;
+
+    return true;
+}
+
+bool AP_AHRS_SIM::airspeed_EAS(uint8_t index, float &airspeed_ret) const
+{
+    return airspeed_EAS(airspeed_ret);
+}
+
+bool AP_AHRS_SIM::get_relative_position_NED_origin(Vector3p &vec) const
+{
+    if (_sitl == nullptr) {
+        return false;
+    }
+
+    Location loc, orgn;
+    if (!get_location(loc) ||
+        !get_origin(orgn)) {
+        return false;
+    }
+
+    const Vector2p diff2d = orgn.get_distance_NE_postype(loc);
+    const struct SITL::sitl_fdm &fdm = _sitl->state;
+    vec = Vector3p(diff2d.x, diff2d.y,
+                   -(fdm.altitude - orgn.alt*0.01f));
+
+    return true;
+}
+
+bool AP_AHRS_SIM::get_relative_position_NE_origin(Vector2p &posNE) const
+{
+    Location loc, orgn;
+    if (!get_location(loc) ||
+        !get_origin(orgn)) {
+        return false;
+    }
+    posNE = orgn.get_distance_NE_postype(loc);
+
+    return true;
+}
+
+bool AP_AHRS_SIM::get_relative_position_D_origin(postype_t &posD) const
+{
+    if (_sitl == nullptr) {
+        return false;
+    }
+    const struct SITL::sitl_fdm &fdm = _sitl->state;
+    Location orgn;
+    if (!get_origin(orgn)) {
+        return false;
+    }
+    posD = -(fdm.altitude - orgn.alt*0.01f);
+
+    return true;
+}
+
+bool AP_AHRS_SIM::get_filter_status(nav_filter_status &status) const
+{
+    memset(&status, 0, sizeof(status));
+    status.flags.attitude = true;
+    status.flags.horiz_vel = true;
+    status.flags.vert_vel = true;
+    status.flags.horiz_pos_rel = true;
+    status.flags.horiz_pos_abs = true;
+    status.flags.vert_pos = true;
+    status.flags.pred_horiz_pos_rel = true;
+    status.flags.pred_horiz_pos_abs = true;
+    status.flags.initalized = true;
+    status.flags.using_gps = true;
+    status.flags.terrain_alt = true;
+
+    return true;
+}
+
+void AP_AHRS_SIM::get_control_limits(float &ekfGndSpdLimit, float &ekfNavVelGainScaler) const
+{
+    // same as EKF2 for no optical flow
+    ekfGndSpdLimit = 400.0f;
+    ekfNavVelGainScaler = 1.0f;
+}
+
+bool AP_AHRS_SIM::get_origin(Location &ret) const
+{
+    if (_sitl == nullptr) {
+        return false;
+    }
+
+    ret = _sitl->state.home;
+
+    return true;
+}
+
+// return the innovations for the specified instance
+// An out of range instance (eg -1) returns data for the primary instance
+bool AP_AHRS_SIM::get_innovations(Vector3f &velInnov, Vector3f &posInnov, Vector3f &magInnov, float &tasInnov, float &yawInnov) const
+{
+    velInnov.zero();
+    posInnov.zero();
+    magInnov.zero();
+    tasInnov = 0.0f;
+    yawInnov = 0.0f;
+
+    return true;
+}
+
+void AP_AHRS_SIM::get_results(AP_AHRS_Backend::Estimates &results)
+{
+    if (_sitl == nullptr) {
+        _sitl = AP::sitl();
+        if (_sitl == nullptr) {
+            return;
+        }
+    }
+
+    // always initialised once sitl pointer is good
+    results.initialised = true;
+
+    // always healthy
+    results.healthy = true;
+
+    // not using a specific sensor:
+    results.primary_gyro = AP::ins().get_first_usable_gyro();
+    results.primary_accel = AP::ins().get_first_usable_accel();
+
+    const struct SITL::sitl_fdm &fdm = _sitl->state;
+    const AP_InertialSensor &_ins = AP::ins();
+
+    results.attitude_valid = true;
+
+    // populate vehicle body attitude:
+    results.quaternion = fdm.quaternion;
+    results.quaternion.rotate(-AP::ahrs().get_trim());
+
+    // update derived attitude values:
+    results.quaternion.rotation_matrix(results.dcm_matrix);
+    results.quaternion.to_euler(results.roll_rad, results.pitch_rad, results.yaw_rad);
+
+    results.gyro_estimate = _ins.get_gyro();
+    results.gyro_drift.zero();
+
+    /*
+     * acceleration estimates
+     */
+    // SIM exactly estimates accel bias:
+    results.accel_bias = AP::sitl()->accel_bias[results.primary_accel].get();
+
+    const Vector3f &accel = _ins.get_accel();
+    results.accel_ef = results.dcm_matrix * AP::ahrs().get_rotation_autopilot_body_to_vehicle_body() * accel;
+
+    results.velocity_NED = Vector3f(fdm.speedN, fdm.speedE, fdm.speedD);
+    results.velocity_NED_valid = true;
+
+    // ground velocity estimate in meters/second, in North/East order
+    results.velocity_NE = results.velocity_NED.xy();
+
+    // a derivative of the vertical position in m/s which is kinematically consistent with the vertical position is required by some control loops.
+    // This is different to the vertical velocity from the EKF which is not always consistent with the vertical position due to the various errors that are being corrected for.
+    results.vert_pos_rate_D_valid = true;
+    results.vert_pos_rate_D = _sitl->state.speedD;
+
+    /*
+     * position estimates
+     */
+    results.location_valid = get_location(results.location);
+
+    results.hagl_valid = true;
+    results.hagl = _sitl->state.altitude - AP::ahrs().get_home().alt*0.01f;
+
+    /*
+     * air data estimates
+     */
+    results.wind = _sitl->state.wind_ef;
+    results.wind_valid = true;
+
+    /*
+     * Sensor-related information
+     */
+    // true if the estimator will use GPS data in creating its
+    // estimate when the data is good:
+    results.configured_to_use_gps = true;
+    // true if GPS is configured as the horizontal position source
+    // for this estimator.  Used to decide whether GPS will set
+    // the navigation origin:
+    results.configured_to_use_gps_for_pos_XY = true;
+
+    // are we consuming yaw from an external (e.g. vision-based) source?
+    // results.using_extnav_for_yaw = false;
+
+    // are we consuming yaw from a source which is *not* a compass
+    // (e.g. the GSF)
+    // results.using_noncompass_for_yaw = false;
+
+    /*
+     * filter status and estimates quality values:
+     */
+    results.filter_status_valid = get_filter_status(results.filter_status);
+
+    // provides the innovations normalised between 0 and 1:
+    // velVar = 0;
+    // posVar = 0;
+    // hgtVar = 0;
+    // magVar.zero();
+    // tasVar = 0;
+    results.variances_valid = true;
+
+    // terrain_alt_variance = 0;
+    results.terrain_alt_variance_valid = true;
+
+#if HAL_NAVEKF3_AVAILABLE
+    if (_sitl->odom_enable) {
+        // use SITL states to write body frame odometry data at 20Hz
+        uint32_t timeStamp_ms = AP_HAL::millis();
+        if (timeStamp_ms - _last_body_odm_update_ms > 50) {
+            const float quality = 100.0f;
+            const Vector3f posOffset(0.0f, 0.0f, 0.0f);
+            const float delTime = 0.001f * (timeStamp_ms - _last_body_odm_update_ms);
+            _last_body_odm_update_ms = timeStamp_ms;
+            timeStamp_ms -= (timeStamp_ms - _last_body_odm_update_ms)/2; // correct for first order hold average delay
+            Vector3f delAng = _ins.get_gyro();
+
+            delAng *= delTime;
+            // rotate earth velocity into body frame and calculate delta position
+            Matrix3f Tbn;
+            Tbn.from_euler(radians(fdm.rollDeg),radians(fdm.pitchDeg),radians(fdm.yawDeg));
+            const Vector3f earth_vel(fdm.speedN,fdm.speedE,fdm.speedD);
+            const Vector3f delPos = Tbn.transposed() * (earth_vel * delTime);
+            // write to EKF
+            EKF3.writeBodyFrameOdom(quality, delPos, delAng, delTime, timeStamp_ms, 0, posOffset);
+        }
+    }
+#endif // HAL_NAVEKF3_AVAILABLE
+}
+
+#endif // AP_AHRS_SIM_ENABLED

@@ -1,0 +1,70 @@
+struct SequenceShort
+{
+    sequence<short> var_sequence_short;
+};
+
+struct SequenceUShort
+{
+    sequence<unsigned short> var_sequence_ushort;
+};
+
+struct SequenceLong
+{
+    sequence<long> var_sequence_long;
+};
+
+struct SequenceULong
+{
+    sequence<unsigned long> var_sequence_ulong;
+};
+
+struct SequenceLongLong
+{
+    sequence<long long> var_sequence_longlong;
+};
+
+struct SequenceULongLong
+{
+    sequence<unsigned long long> var_sequence_ulonglong;
+};
+
+struct SequenceFloat
+{
+    sequence<float> var_sequence_float;
+};
+
+struct SequenceDouble
+{
+    sequence<double> var_sequence_double;
+};
+
+struct SequenceBoolean
+{
+    sequence<boolean> var_sequence_boolean;
+};
+
+struct SequenceOctet
+{
+    sequence<octet> var_sequence_octet;
+};
+
+struct SequenceChar
+{
+    sequence<char> var_sequence_char;
+};
+
+struct SequenceString
+{
+    sequence<string> var_sequence_string;
+};
+
+struct BoundedSmallSequences
+{
+    sequence<short, 1> var_sequence_small;
+};
+
+struct BoundedBigSequences
+{
+    sequence<short, 41925> var_sequence_big;
+};
+

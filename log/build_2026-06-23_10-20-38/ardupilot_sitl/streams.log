@@ -1,0 +1,576 @@
+[0.008s] Invoking command in '/home/lh/Documents/joao_pessoa_2026/build/ardupilot_sitl': CMAKE_PREFIX_PATH=/home/lh/Documents/joao_pessoa_2026/install/micro_ros_agent:/home/lh/Documents/joao_pessoa_2026/install/micro_ros_msgs:/home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs:/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs:/home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl:/home/lh/Documents/joao_pessoa_2026/install/biguasim_interfaces:/home/lh/Documents/joao_pessoa_2026/install/hydrone_biguasim:/home/lh/Documents/joao_pessoa_2026/install/hydrone_bringup:/home/lh/Documents/joao_pessoa_2026/install/hydrone_vision:/home/lh/Documents/joao_pessoa_2026/install/hydrone_nav:/home/lh/Documents/joao_pessoa_2026/install/hydrone_mission:/home/lh/Documents/joao_pessoa_2026/install/hydrone_controller:/home/lh/Documents/joao_pessoa_2026/install/ardupilot_dds_tests:/home/lh/Documents/joao_pessoa_2026/install/biguasim_main:/opt/ros/humble LD_LIBRARY_PATH=/home/lh/Documents/joao_pessoa_2026/install/micro_ros_agent/lib:/home/lh/Documents/joao_pessoa_2026/install/micro_ros_msgs/lib:/home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/lib:/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/lib:/home/lh/Documents/joao_pessoa_2026/install/biguasim_interfaces/lib:/opt/ros/humble/opt/rviz_ogre_vendor/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib /usr/bin/cmake --build /home/lh/Documents/joao_pessoa_2026/build/ardupilot_sitl -- -j32 -l32
+[0.049s] Built target ament_cmake_python_symlink_ardupilot_sitl
+[0.156s] [32m[0mSetting top to                           :[0m [0m[32m[32m/home/lh/Documents/joao_pessoa_2026/src/ardupilot[0m [0m
+[0.156s] [32m[0mSetting out to                           :[0m [0m[32m[32m/home/lh/Documents/joao_pessoa_2026/src/ardupilot/build[0m [0m
+[0.159s] [32m[0mAutoconfiguration                        :[0m [0m[32m[32menabled[0m [0m
+[0.159s] [32m[0mChecking for program 'python'            :[0m [0m[32m[32m/usr/bin/python3[0m [0m
+[0.194s] running egg_info
+[0.194s] writing ardupilot_sitl.egg-info/PKG-INFO
+[0.195s] writing dependency_links to ardupilot_sitl.egg-info/dependency_links.txt
+[0.195s] writing top-level names to ardupilot_sitl.egg-info/top_level.txt
+[0.196s] reading manifest file 'ardupilot_sitl.egg-info/SOURCES.txt'
+[0.196s] writing manifest file 'ardupilot_sitl.egg-info/SOURCES.txt'
+[0.211s] Built target ament_cmake_python_build_ardupilot_sitl_egg
+[0.231s] [32m[0mChecking for python version >= 3.9.0     :[0m [0m[32m[32m3.10.12[0m [0m
+[0.232s] [32m[0mSetting board to                         :[0m [0m[32m[32msitl[0m [0m
+[0.232s] Processing /home/lh/Documents/joao_pessoa_2026/src/ardupilot/libraries/AP_HAL_SITL/hwdef/sitl/hwdef.dat
+[0.233s] Writing hwdef setup in /home/lh/Documents/joao_pessoa_2026/src/ardupilot/build/sitl/hwdef.h
+[0.233s] [32m[0mUsing toolchain                          :[0m [0m[32m[32mnative[0m [0m
+[0.249s] [32m[0mChecking for 'g++' (C++ compiler)        :[0m [0m[32m[32m/usr/lib/ccache/g++[0m [0m
+[0.264s] [32m[0mChecking for 'gcc' (C compiler)          :[0m [0m[32m[32m/usr/lib/ccache/gcc[0m [0m
+[0.270s] [32m[0mChecking for c flags '-MMD'              :[0m [0m[32m[32myes[0m [0m
+[0.274s] [32m[0mChecking for cxx flags '-MMD'            :[0m [0m[32m[32myes[0m [0m
+[0.275s] [32m[0mCXX Compiler                             :[0m [0m[32m[32mg++ 11.4.0[0m [0m
+[0.295s] [32m[0mChecking for need to link with librt     :[0m [0m[32m[32mnot necessary[0m [0m
+[0.320s] [32m[0mChecking for feenableexcept              :[0m [0m[32m[32myes[0m [0m
+[0.321s] [32m[0mEnabling -Werror                         :[0m [0m[32m[32myes[0m [0m
+[0.321s] [32m[0mEnabled OpenDroneID                      :[0m [0m[32m[33mno[0m [0m
+[0.321s] [32m[0mEnabled firmware ID checking             :[0m [0m[32m[33mno[0m [0m
+[0.321s] [32m[0mGPS Debug Logging                        :[0m [0m[32m[33mno[0m [0m
+[0.322s] [32m[0mEnabled custom controller                :[0m [0m[32m[32myes[0m [0m
+[0.322s] [32m[0mEnabled DDS                              :[0m [0m[32m[32myes[0m [0m
+[0.345s] [32m[0mChecking for HAVE_CMATH_ISFINITE         :[0m [0m[32m[32myes[0m [0m
+[0.372s] [32m[0mChecking for HAVE_CMATH_ISINF            :[0m [0m[32m[32myes[0m [0m
+[0.399s] [32m[0mChecking for HAVE_CMATH_ISNAN            :[0m [0m[32m[32myes[0m [0m
+[0.421s] [32m[0mChecking for NEED_CMATH_ISFINITE_STD_NAMESPACE :[0m [0m[32m[32myes[0m [0m
+[0.447s] [32m[0mChecking for NEED_CMATH_ISINF_STD_NAMESPACE    :[0m [0m[32m[32myes[0m [0m
+[0.470s] [32m[0mChecking for NEED_CMATH_ISNAN_STD_NAMESPACE    :[0m [0m[32m[32myes[0m [0m
+[0.497s] [32m[0mChecking for header endian.h                   :[0m [0m[32m[32myes[0m [0m
+[0.518s] [32m[0mChecking for header byteswap.h                 :[0m [0m[32m[32myes[0m [0m
+[0.542s] [32m[0mChecking for HAVE_MEMRCHR                      :[0m [0m[32m[32myes[0m [0m
+[0.542s] [32m[0mConfigured VSCode Intellisense:                :[0m [0m[32m[33mno[0m [0m
+[0.545s] [32m[0mDC_DSDL compiler in                            :[0m [0m[32m[32m/home/lh/Documents/joao_pessoa_2026/src/ardupilot/modules/DroneCAN/dronecan_dsdlc[0m [0m
+[0.545s] [32m[0mSource is git repository                       :[0m [0m[32m[32mno[0m [0m
+[0.545s] [32m[0mUpdate submodules                              :[0m [0m[32m[32mno[0m [0m
+[0.546s] [32m[0mChecking for program 'git'                     :[0m [0m[32m[32m/usr/bin/git[0m [0m
+[0.546s] [32m[0mLittlefs                                       :[0m [0m[32m[33mdisabled[0m [0m
+[0.547s] [32m[0mChecking for program 'size'                    :[0m [0m[32m[32m/usr/bin/size[0m [0m
+[0.547s] [32m[0mBenchmarks                                     :[0m [0m[32m[33mdisabled[0m [0m
+[0.547s] [32m[0mUnit tests                                     :[0m [0m[32m[32menabled[0m [0m
+[0.547s] [32m[0mScripting                                      :[0m [0m[32m[32mmaybe[0m [0m
+[0.555s] [32m[0mChecking for program 'microxrceddsgen'         :[0m [0m[32m[32m/home/lh/Micro-XRCE-DDS-Gen/scripts/microxrceddsgen[0m [0m
+[0.559s] [32m[0mScripting runtime checks                       :[0m [0m[32m[32menabled[0m [0m
+[0.559s] [32m[0mDebug build                                    :[0m [0m[32m[33mdisabled[0m [0m
+[0.559s] [32m[0mCoverage build                                 :[0m [0m[32m[33mdisabled[0m [0m
+[0.559s] [32m[0mConsistent build                               :[0m [0m[32m[33mdisabled[0m [0m
+[0.559s] [32m[0mForce 32-bit build                             :[0m [0m[32m[33mdisabled[0m [0m
+[0.560s] [32m[0mChecking for program 'rsync'                   :[0m [0m[32m[32m/usr/bin/rsync[0m [0m
+[0.560s] [32mRemoving target_list file /home/lh/Documents/joao_pessoa_2026/src/ardupilot/build/sitl/target_list[0m
+[0.577s] [32m'configure' finished successfully (0.422s)[0m
+[0.600s] Built target ardupilot_configure
+[0.807s] [32mWaf: Entering directory `/home/lh/Documents/joao_pessoa_2026/src/ardupilot/build/sitl'[0m
+[0.862s] Embedding file default_params/airsim-quadX.parm:Tools/autotest/default_params/airsim-quadX.parm
+[0.862s] Embedding file default_params/airsim-rover.parm:Tools/autotest/default_params/airsim-rover.parm
+[0.862s] Embedding file default_params/balancebot.parm:Tools/autotest/default_params/balancebot.parm
+[0.862s] Embedding file default_params/blimp-motor.parm:Tools/autotest/default_params/blimp-motor.parm
+[0.862s] Embedding file default_params/blimp.parm:Tools/autotest/default_params/blimp.parm
+[0.862s] Embedding file default_params/copter-X.parm:Tools/autotest/default_params/copter-X.parm
+[0.862s] Embedding file default_params/copter-beacon.parm:Tools/autotest/default_params/copter-beacon.parm
+[0.862s] Embedding file default_params/copter-bfx.parm:Tools/autotest/default_params/copter-bfx.parm
+[0.862s] Embedding file default_params/copter-coax.parm:Tools/autotest/default_params/copter-coax.parm
+[0.863s] Embedding file default_params/copter-cwx.parm:Tools/autotest/default_params/copter-cwx.parm
+[0.863s] Embedding file default_params/copter-deca-cwx.parm:Tools/autotest/default_params/copter-deca-cwx.parm
+[0.863s] Embedding file default_params/copter-deca.parm:Tools/autotest/default_params/copter-deca.parm
+[0.863s] Embedding file default_params/copter-djix.parm:Tools/autotest/default_params/copter-djix.parm
+[0.863s] Embedding file default_params/copter-dodecahexa.parm:Tools/autotest/default_params/copter-dodecahexa.parm
+[0.863s] Embedding file default_params/copter-dotriaconta_octaquad_x.parm:Tools/autotest/default_params/copter-dotriaconta_octaquad_x.parm
+[0.863s] Embedding file default_params/copter-gimbal.parm:Tools/autotest/default_params/copter-gimbal.parm
+[0.863s] Embedding file default_params/copter-gps-for-yaw-nmea.parm:Tools/autotest/default_params/copter-gps-for-yaw-nmea.parm
+[0.863s] Embedding file default_params/copter-gps-for-yaw.parm:Tools/autotest/default_params/copter-gps-for-yaw.parm
+[0.863s] Embedding file default_params/copter-heli-ddfptail.parm:Tools/autotest/default_params/copter-heli-ddfptail.parm
+[0.863s] Embedding file default_params/copter-heli-ddvptail.parm:Tools/autotest/default_params/copter-heli-ddvptail.parm
+[0.863s] Embedding file default_params/copter-heli-dual.parm:Tools/autotest/default_params/copter-heli-dual.parm
+[0.863s] Embedding file default_params/copter-heli-gas.parm:Tools/autotest/default_params/copter-heli-gas.parm
+[0.863s] Embedding file default_params/copter-heli.parm:Tools/autotest/default_params/copter-heli.parm
+[0.863s] Embedding file default_params/copter-hexa-cwx.parm:Tools/autotest/default_params/copter-hexa-cwx.parm
+[0.863s] Embedding file default_params/copter-hexa-dji.parm:Tools/autotest/default_params/copter-hexa-dji.parm
+[0.863s] Embedding file default_params/copter-hexa.parm:Tools/autotest/default_params/copter-hexa.parm
+[0.863s] Embedding file default_params/copter-hexadeca_octa.parm:Tools/autotest/default_params/copter-hexadeca_octa.parm
+[0.863s] Embedding file default_params/copter-hexadeca_octa_cwx.parm:Tools/autotest/default_params/copter-hexadeca_octa_cwx.parm
+[0.863s] Embedding file default_params/copter-octa-cwx.parm:Tools/autotest/default_params/copter-octa-cwx.parm
+[0.863s] Embedding file default_params/copter-octa-dji.parm:Tools/autotest/default_params/copter-octa-dji.parm
+[0.863s] Embedding file default_params/copter-octa.parm:Tools/autotest/default_params/copter-octa.parm
+[0.863s] Embedding file default_params/copter-octaquad-cor.parm:Tools/autotest/default_params/copter-octaquad-cor.parm
+[0.863s] Embedding file default_params/copter-octaquad-cw-cor.parm:Tools/autotest/default_params/copter-octaquad-cw-cor.parm
+[0.863s] Embedding file default_params/copter-octaquad-cwx.parm:Tools/autotest/default_params/copter-octaquad-cwx.parm
+[0.863s] Embedding file default_params/copter-octaquad.parm:Tools/autotest/default_params/copter-octaquad.parm
+[0.863s] Embedding file default_params/copter-optflow.parm:Tools/autotest/default_params/copter-optflow.parm
+[0.863s] Embedding file default_params/copter-ppp-periph.parm:Tools/autotest/default_params/copter-ppp-periph.parm
+[0.863s] Embedding file default_params/copter-ppp.parm:Tools/autotest/default_params/copter-ppp.parm
+[0.863s] Embedding file default_params/copter-rangefinder.parm:Tools/autotest/default_params/copter-rangefinder.parm
+[0.863s] Embedding file default_params/copter-single.parm:Tools/autotest/default_params/copter-single.parm
+[0.863s] Embedding file default_params/copter-tri.parm:Tools/autotest/default_params/copter-tri.parm
+[0.863s] Embedding file default_params/copter-vicon.parm:Tools/autotest/default_params/copter-vicon.parm
+[0.863s] Embedding file default_params/copter-winch.parm:Tools/autotest/default_params/copter-winch.parm
+[0.863s] Embedding file default_params/copter-wind-estimates.parm:Tools/autotest/default_params/copter-wind-estimates.parm
+[0.863s] Embedding file default_params/copter-y6.parm:Tools/autotest/default_params/copter-y6.parm
+[0.863s] Embedding file default_params/copter.parm:Tools/autotest/default_params/copter.parm
+[0.863s] Embedding file default_params/firefly.parm:Tools/autotest/default_params/firefly.parm
+[0.863s] Embedding file default_params/gazebo-iris.parm:Tools/autotest/default_params/gazebo-iris.parm
+[0.863s] Embedding file default_params/gazebo-zephyr.parm:Tools/autotest/default_params/gazebo-zephyr.parm
+[0.863s] Embedding file default_params/glider.parm:Tools/autotest/default_params/glider.parm
+[0.863s] Embedding file default_params/motorboat.parm:Tools/autotest/default_params/motorboat.parm
+[0.863s] Embedding file default_params/msposd.parm:Tools/autotest/default_params/msposd.parm
+[0.863s] Embedding file default_params/periph-ppp.parm:Tools/autotest/default_params/periph-ppp.parm
+[0.863s] Embedding file default_params/periph.parm:Tools/autotest/default_params/periph.parm
+[0.863s] Embedding file default_params/plane-dspoilers.parm:Tools/autotest/default_params/plane-dspoilers.parm
+[0.863s] Embedding file default_params/plane-elevons.parm:Tools/autotest/default_params/plane-elevons.parm
+[0.863s] Embedding file default_params/plane-ice.parm:Tools/autotest/default_params/plane-ice.parm
+[0.863s] Embedding file default_params/plane-jet.parm:Tools/autotest/default_params/plane-jet.parm
+[0.863s] Embedding file default_params/plane-jsbsim.parm:Tools/autotest/default_params/plane-jsbsim.parm
+[0.863s] Embedding file default_params/plane-redundant.parm:Tools/autotest/default_params/plane-redundant.parm
+[0.863s] Embedding file default_params/plane-soaring.parm:Tools/autotest/default_params/plane-soaring.parm
+[0.863s] Embedding file default_params/plane-tailsitter.parm:Tools/autotest/default_params/plane-tailsitter.parm
+[0.863s] Embedding file default_params/plane-vtail.parm:Tools/autotest/default_params/plane-vtail.parm
+[0.864s] Embedding file default_params/quad-can.parm:Tools/autotest/default_params/quad-can.parm
+[0.864s] Embedding file default_params/quad-periph.parm:Tools/autotest/default_params/quad-periph.parm
+[0.864s] Embedding file default_params/quadplane-can.parm:Tools/autotest/default_params/quadplane-can.parm
+[0.864s] Embedding file default_params/quadplane-cl84.parm:Tools/autotest/default_params/quadplane-cl84.parm
+[0.864s] Embedding file default_params/quadplane-copter_tailsitter.parm:Tools/autotest/default_params/quadplane-copter_tailsitter.parm
+[0.864s] Embedding file default_params/quadplane-ice.parm:Tools/autotest/default_params/quadplane-ice.parm
+[0.864s] Embedding file default_params/quadplane-periph.parm:Tools/autotest/default_params/quadplane-periph.parm
+[0.864s] Embedding file default_params/quadplane-ppp-periph.parm:Tools/autotest/default_params/quadplane-ppp-periph.parm
+[0.864s] Embedding file default_params/quadplane-ppp.parm:Tools/autotest/default_params/quadplane-ppp.parm
+[0.864s] Embedding file default_params/quadplane-tilt.parm:Tools/autotest/default_params/quadplane-tilt.parm
+[0.864s] Embedding file default_params/quadplane-tilthvec.parm:Tools/autotest/default_params/quadplane-tilthvec.parm
+[0.864s] Embedding file default_params/quadplane-tilttri.parm:Tools/autotest/default_params/quadplane-tilttri.parm
+[0.864s] Embedding file default_params/quadplane-tilttrivec.parm:Tools/autotest/default_params/quadplane-tilttrivec.parm
+[0.864s] Embedding file default_params/quadplane-tri.parm:Tools/autotest/default_params/quadplane-tri.parm
+[0.864s] Embedding file default_params/quadplane.parm:Tools/autotest/default_params/quadplane.parm
+[0.864s] Embedding file default_params/rover-omni3mecanum.parm:Tools/autotest/default_params/rover-omni3mecanum.parm
+[0.864s] Embedding file default_params/rover-skid.parm:Tools/autotest/default_params/rover-skid.parm
+[0.864s] Embedding file default_params/rover-vectored.parm:Tools/autotest/default_params/rover-vectored.parm
+[0.864s] Embedding file default_params/rover.parm:Tools/autotest/default_params/rover.parm
+[0.864s] Embedding file default_params/sailboat-motor.parm:Tools/autotest/default_params/sailboat-motor.parm
+[0.864s] Embedding file default_params/sailboat.parm:Tools/autotest/default_params/sailboat.parm
+[0.864s] Embedding file default_params/stratoblimp.parm:Tools/autotest/default_params/stratoblimp.parm
+[0.864s] Embedding file default_params/sub-6dof.parm:Tools/autotest/default_params/sub-6dof.parm
+[0.864s] Embedding file default_params/sub-gps-for-yaw-nmea.parm:Tools/autotest/default_params/sub-gps-for-yaw-nmea.parm
+[0.864s] Embedding file default_params/sub.parm:Tools/autotest/default_params/sub.parm
+[0.864s] Embedding file default_params/tracker-gps-for-yaw.parm:Tools/autotest/default_params/tracker-gps-for-yaw.parm
+[0.864s] Embedding file locations.txt:Tools/autotest/locations.txt
+[0.864s] Embedding file models/Callisto.json:Tools/autotest/models/Callisto.json
+[0.864s] Embedding file models/Callisto.parm:Tools/autotest/models/Callisto.parm
+[0.864s] Embedding file models/freestyle.json:Tools/autotest/models/freestyle.json
+[0.864s] Embedding file models/freestyle.parm:Tools/autotest/models/freestyle.parm
+[0.864s] Embedding file models/plane-3d.parm:Tools/autotest/models/plane-3d.parm
+[0.864s] Embedding file models/plane.parm:Tools/autotest/models/plane.parm
+[0.864s] Embedding file models/skywalker_2013.json:Tools/autotest/models/skywalker_2013.json
+[0.864s] Embedding file models/xplane_heli.json:Tools/autotest/models/xplane_heli.json
+[0.864s] Embedding file models/xplane_plane.json:Tools/autotest/models/xplane_plane.json
+[0.864s] Embedding file vehicleinfo.json:Tools/autotest/pysim/vehicleinfo.json
+[0.864s] Building /home/lh/Documents/joao_pessoa_2026/src/ardupilot/build/sitl/modules/Micro-XRCE-DDS-Client/include/uxr/client/config.h
+[0.864s] Building /home/lh/Documents/joao_pessoa_2026/src/ardupilot/build/sitl/modules/Micro-CDR/include/ucdr/config.h
+[1.424s] [22/23] Creating [01;34mbuild/sitl/ap_version.h[0m
+[1.462s] [32mNo target_list file found, creating[0m
+[1.462s] [32mGenerating compile_commands.json[0m
+[1.499s] [32mGenerating compile_commands.json[0m
+[1.527s] [32mGenerating compile_commands.json[0m
+[1.549s] [32mGenerating compile_commands.json[0m
+[1.586s] [32mGenerating compile_commands.json[0m
+[1.625s] [32mGenerating compile_commands.json[0m
+[1.665s] [32mGenerating compile_commands.json[0m
+[1.685s] [32mBuild commands will be stored in build/sitl/compile_commands.json[0m
+[1.739s] [32mGenerating compile_commands.json[0m
+[1.743s] [32mBuild commands will be stored in build/sitl/compile_commands.json[0m
+[1.783s] [32mBuild commands will be stored in build/sitl/compile_commands.json[0m
+[1.832s] [32mGenerating compile_commands.json[0m
+[1.835s] [32mBuild commands will be stored in build/sitl/compile_commands.json[0m
+[1.875s] [32mBuild commands will be stored in build/sitl/compile_commands.json[0m
+[1.922s] [32mGenerating compile_commands.json[0m
+[1.926s] [32mBuild commands will be stored in build/sitl/compile_commands.json[0m
+[1.965s] [32mBuild commands will be stored in build/sitl/compile_commands.json[0m
+[2.013s] [32mGenerating compile_commands.json[0m
+[2.017s] [32mBuild commands will be stored in build/sitl/compile_commands.json[0m
+[2.057s] [32mBuild commands will be stored in build/sitl/compile_commands.json[0m
+[2.097s] [32mBuild commands will be stored in build/sitl/compile_commands.json[0m
+[2.145s] [32mGenerating compile_commands.json[0m
+[2.149s] [32mBuild commands will be stored in build/sitl/compile_commands.json[0m
+[2.208s] [32mBuild commands will be stored in build/sitl/compile_commands.json[0m
+[2.254s] [32mGenerating compile_commands.json[0m
+[2.258s] [32mBuild commands will be stored in build/sitl/compile_commands.json[0m
+[2.302s] [  24/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.GetTransportStats_req.c[0m
+[2.303s] [  25/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/dronecan.remoteid.SecureCommand_req.c[0m
+[2.303s] [  26/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.hobbywing.esc.SetDirection_res.c[0m
+[2.304s] [  27/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.hex.equipment.flow.Measurement.c[0m
+[2.304s] [  28/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/ardupilot.equipment.trafficmonitor.TrafficReport.c[0m
+[2.304s] [  29/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/ardupilot.equipment.power.BatteryInfoAux.c[0m
+[2.305s] [  30/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.GetNodeInfo_res.c[0m
+[2.305s] [  31/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.GetNodeInfo_req.c[0m
+[2.306s] [  32/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/dronecan.remoteid.OperatorID.c[0m
+[2.306s] [  33/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.GetDataTypeInfo_req.c[0m
+[2.307s] [  34/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.hobbywing.esc.SetDirection_req.c[0m
+[2.307s] [  35/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.CANIfaceStats.c[0m
+[2.308s] [  36/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/dronecan.remoteid.BasicID.c[0m
+[2.308s] [  37/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.AccessCommandShell_req.c[0m
+[2.308s] [  38/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/ardupilot.indication.SafetyState.c[0m
+[2.309s] [  39/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.hobbywing.esc.SetBaud_res.c[0m
+[2.309s] [  40/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/dronecan.remoteid.ArmStatus.c[0m
+[2.310s] [  41/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.navigation.GlobalNavigationSolution.c[0m
+[2.310s] [  42/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.AccessCommandShell_res.c[0m
+[2.311s] [  43/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.DataTypeKind.c[0m
+[2.312s] [  44/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.safety.ArmingStatus.c[0m
+[2.312s] [  45/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/dronecan.protocol.Stats.c[0m
+[2.312s] [  46/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.power.PrimaryPowerSupplyStatus.c[0m
+[2.313s] [  47/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.range_sensor.Measurement.c[0m
+[2.314s] [  48/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/dronecan.protocol.GlobalTime.c[0m
+[2.314s] [  49/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.hobbywing.esc.SetBaud_req.c[0m
+[2.315s] [  50/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.power.CircuitStatus.c[0m
+[2.315s] [  51/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/dronecan.remoteid.Location.c[0m
+[2.316s] [  52/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.power.BatteryInfo.c[0m
+[2.316s] [  53/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/dronecan.protocol.FlexDebug.c[0m
+[2.317s] [  54/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.indication.SingleLightCommand.c[0m
+[2.317s] [  55/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.GetDataTypeInfo_res.c[0m
+[2.317s] [  56/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/ardupilot.equipment.power.BatteryCells.c[0m
+[2.318s] [  57/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.indication.RGB565.c[0m
+[2.318s] [  58/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/dronecan.protocol.CanStats.c[0m
+[2.319s] [  59/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.hobbywing.esc.SetAngle_res.c[0m
+[2.319s] [  60/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/ardupilot.indication.NotifyState.c[0m
+[2.320s] [  61/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/ardupilot.equipment.proximity_sensor.Proximity.c[0m
+[2.320s] [  62/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.indication.LightsCommand.c[0m
+[2.321s] [  63/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.indication.BeepCommand.c[0m
+[2.322s] [  64/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/cuav.equipment.power.CBAT.c[0m
+[2.322s] [  65/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.ice.reciprocating.Status.c[0m
+[2.323s] [  66/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.ice.reciprocating.CylinderStatus.c[0m
+[2.324s] [  67/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.xacti.GnssStatusReq.c[0m
+[2.324s] [  68/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.hobbywing.esc.SetAngle_req.c[0m
+[2.325s] [  69/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.ice.FuelTankStatus.c[0m
+[2.325s] [  70/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.hardpoint.Status.c[0m
+[2.326s] [  71/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.xacti.GnssStatus.c[0m
+[2.326s] [  72/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.hardpoint.Command.c[0m
+[2.327s] [  73/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.gnss.RTCMStream.c[0m
+[2.327s] [  74/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.xacti.GimbalControlData.c[0m
+[2.328s] [  75/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.hobbywing.esc.SelfTest_res.c[0m
+[2.328s] [  76/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/ardupilot.indication.Button.c[0m
+[2.329s] [  77/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.gnss.Fix2.c[0m
+[2.329s] [  78/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.gnss.Fix.c[0m
+[2.330s] [  79/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.xacti.GimbalAttitudeStatus.c[0m
+[2.330s] [  80/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.gnss.ECEFPositionVelocity.c[0m
+[2.331s] [  81/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.gnss.Auxiliary.c[0m
+[2.332s] [  82/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.xacti.CopterAttStatus.c[0m
+[2.332s] [  83/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.hobbywing.esc.SelfTest_req.c[0m
+[2.333s] [  84/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.esc.StatusExtended.c[0m
+[2.333s] [  85/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.esc.Status.c[0m
+[2.334s] [  86/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.esc.RawCommand.c[0m
+[2.334s] [  87/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.volz.servo.ActuatorStatus.c[0m
+[2.335s] [  88/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.tmotor.esc.ParamGet.c[0m
+[2.335s] [  89/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.hobbywing.esc.RawCommand.c[0m
+[2.336s] [  90/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/ardupilot.equipment.power.BatteryTag.c[0m
+[2.337s] [  91/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/ardupilot.equipment.power.BatteryContinuous.c[0m
+[2.337s] [  92/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/ardupilot.gnss.Status.c[0m
+[2.338s] [  93/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.camera_gimbal.Status.c[0m
+[2.339s] [  94/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.device.Temperature.c[0m
+[2.339s] [  95/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.tmotor.esc.ParamCfg.c[0m
+[2.339s] [  96/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.camera_gimbal.Mode.c[0m
+[2.340s] [  97/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.esc.RPMCommand.c[0m
+[2.340s] [  98/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.camera_gimbal.GEOPOICommand.c[0m
+[2.340s] [  99/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.tmotor.esc.PUSHSCI.c[0m
+[2.341s] [ 100/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.hobbywing.esc.GetMajorConfig_res.c[0m
+[2.341s] [ 101/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.camera_gimbal.AngularCommand.c[0m
+[2.342s] [ 102/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.air_data.TrueAirspeed.c[0m
+[2.342s] [ 103/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.tunnel.Targetted.c[0m
+[2.343s] [ 104/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.air_data.StaticTemperature.c[0m
+[2.343s] [ 105/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.tunnel.SerialConfig.c[0m
+[2.344s] [ 106/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.tmotor.esc.FocCtrl.c[0m
+[2.345s] [ 107/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.hobbywing.esc.GetMajorConfig_req.c[0m
+[2.345s] [ 108/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.tunnel.Protocol.c[0m
+[2.346s] [ 109/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.tunnel.Call_res.c[0m
+[2.346s] [ 110/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/ardupilot.gnss.RelPosHeading.c[0m
+[2.346s] [ 111/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.air_data.Sideslip.c[0m
+[2.347s] [ 112/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.tmotor.esc.PUSHCAN.c[0m
+[2.347s] [ 113/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.air_data.StaticPressure.c[0m
+[2.347s] [ 114/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.tunnel.Call_req.c[0m
+[2.348s] [ 115/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.tunnel.Broadcast.c[0m
+[2.349s] [ 116/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.air_data.RawAirData.c[0m
+[2.349s] [ 117/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.hobbywing.esc.StatusMsg3.c[0m
+[2.350s] [ 118/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.param.Value.c[0m
+[2.350s] [ 119/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.param.NumericValue.c[0m
+[2.351s] [ 120/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.air_data.IndicatedAirspeed.c[0m
+[2.352s] [ 121/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.param.GetSet_res.c[0m
+[2.352s] [ 122/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.param.GetSet_req.c[0m
+[2.353s] [ 123/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.air_data.AngleOfAttack.c[0m
+[2.353s] [ 124/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.hobbywing.esc.StatusMsg2.c[0m
+[2.354s] [ 125/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.hobbywing.esc.GetMaintenanceInformation_res.c[0m
+[2.354s] [ 126/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.param.ExecuteOpcode_res.c[0m
+[2.355s] [ 127/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.param.ExecuteOpcode_req.c[0m
+[2.355s] [ 128/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.ahrs.Solution.c[0m
+[2.356s] [ 129/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.param.Empty.c[0m
+[2.356s] [ 130/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.file.Write_res.c[0m
+[2.357s] [ 131/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.ahrs.RawIMU.c[0m
+[2.357s] [ 132/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.hobbywing.esc.StatusMsg1.c[0m
+[2.358s] [ 133/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.file.Write_req.c[0m
+[2.358s] [ 134/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.file.Read_res.c[0m
+[2.359s] [ 135/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.ahrs.MagneticFieldStrength2.c[0m
+[2.359s] [ 136/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.file.Read_req.c[0m
+[2.360s] [ 137/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.file.Path.c[0m
+[2.361s] [ 138/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.ahrs.MagneticFieldStrength.c[0m
+[2.361s] [ 139/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.hobbywing.esc.SetThrottleSource_res.c[0m
+[2.361s] [ 140/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.hobbywing.esc.GetMaintenanceInformation_req.c[0m
+[2.362s] [ 141/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/ardupilot.gnss.MovingBaselineData.c[0m
+[2.362s] [ 142/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/ardupilot.equipment.power.BatteryPeriodic.c[0m
+[2.363s] [ 143/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.file.GetInfo_res.c[0m
+[2.363s] [ 144/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.actuator.Status.c[0m
+[2.364s] [ 145/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.file.GetDirectoryEntryInfo_res.c[0m
+[2.364s] [ 146/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.file.GetDirectoryEntryInfo_req.c[0m
+[2.365s] [ 147/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.actuator.Command.c[0m
+[2.366s] [ 148/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.hobbywing.esc.SetThrottleSource_req.c[0m
+[2.366s] [ 149/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.file.EntryType.c[0m
+[2.367s] [ 150/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.file.Delete_res.c[0m
+[2.367s] [ 151/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.file.Delete_req.c[0m
+[2.368s] [ 152/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.equipment.actuator.ArrayCommand.c[0m
+[2.368s] [ 153/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.Timestamp.c[0m
+[2.368s] [ 154/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.hobbywing.esc.SetReportingFrequency_res.c[0m
+[2.369s] [ 155/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.file.GetInfo_req.c[0m
+[2.370s] [ 156/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.file.Error.c[0m
+[2.370s] [ 157/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.hobbywing.esc.GetEscID.c[0m
+[2.370s] [ 158/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.file.BeginFirmwareUpdate_res.c[0m
+[2.371s] [ 159/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.file.BeginFirmwareUpdate_req.c[0m
+[2.371s] [ 160/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.CoarseOrientation.c[0m
+[2.372s] [ 161/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.enumeration.Indication.c[0m
+[2.372s] [ 162/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.enumeration.Begin_res.c[0m
+[2.373s] [ 163/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/mppt.Stream.c[0m
+[2.374s] [ 164/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.hobbywing.esc.SetReportingFrequency_req.c[0m
+[2.375s] [ 165/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.enumeration.Begin_req.c[0m
+[2.375s] [ 166/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.dynamic_node_id.server.RequestVote_res.c[0m
+[2.376s] [ 167/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/mppt.OutputEnable_res.c[0m
+[2.376s] [ 168/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.dynamic_node_id.server.RequestVote_req.c[0m
+[2.377s] [ 169/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.dynamic_node_id.server.Entry.c[0m
+[2.377s] [ 170/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/mppt.OutputEnable_req.c[0m
+[2.377s] [ 171/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.hobbywing.esc.SetLED_res.c[0m
+[2.378s] [ 172/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.himark.servo.ServoInfo.c[0m
+[2.379s] [ 173/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/ardupilot.gnss.Heading.c[0m
+[2.379s] [ 174/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.dynamic_node_id.server.Discovery.c[0m
+[2.380s] [ 175/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.dynamic_node_id.server.AppendEntries_res.c[0m
+[2.380s] [ 176/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/dronecan.sensors.rpm.RPM.c[0m
+[2.381s] [ 177/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.dynamic_node_id.server.AppendEntries_req.c[0m
+[2.381s] [ 178/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.dynamic_node_id.Allocation.c[0m
+[2.382s] [ 179/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/dronecan.sensors.rc.RCInput.c[0m
+[2.382s] [ 180/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.hobbywing.esc.SetLED_req.c[0m
+[2.383s] [ 181/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.debug.LogMessage.c[0m
+[2.384s] [ 182/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/dronecan.sensors.magnetometer.MagneticFieldStrengthHiRes.c[0m
+[2.384s] [ 183/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.debug.KeyValue.c[0m
+[2.385s] [ 184/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.SoftwareVersion.c[0m
+[2.385s] [ 185/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.himark.servo.ServoCmd.c[0m
+[2.386s] [ 186/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.RestartNode_res.c[0m
+[2.387s] [ 187/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.RestartNode_req.c[0m
+[2.387s] [ 188/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.hobbywing.esc.SetID_res.c[0m
+[2.388s] [ 189/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.Panic.c[0m
+[2.388s] [ 190/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.NodeStatus.c[0m
+[2.389s] [ 191/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/dronecan.remoteid.SelfID.c[0m
+[2.389s] [ 192/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/com.hobbywing.esc.SetID_req.c[0m
+[2.390s] [ 193/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.HardwareVersion.c[0m
+[2.390s] [ 194/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/dronecan.remoteid.SecureCommand_res.c[0m
+[2.391s] [ 195/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.GlobalTimeSync.c[0m
+[2.391s] [ 196/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.GetTransportStats_res.c[0m
+[2.392s] [ 197/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/dronecan.remoteid.System.c[0m
+[2.392s] [ 198/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/uavcan.protocol.debug.LogLevel.c[0m
+[2.393s] [ 199/2346] Compiling [32mbuild/sitl/modules/DroneCAN/libcanard/dsdlc_generated/src/dronecan.sensors.hygrometer.Hygrometer.c[0m
+[2.459s] [ 818/2346] Compiling [32mlibraries/AP_ROMFS/AP_ROMFS.cpp[0m
+[2.489s] [1186/2346] Compiling [32mlibraries/SITL/SIM_AIS.cpp[0m
+[2.504s] [1357/2346] Compiling [32mlibraries/AP_Logger/LoggerMessageWriter.cpp[0m
+[2.512s] [1416/2346] Compiling [32mlibraries/AP_HAL_SITL/SITL_cmdline.cpp[0m
+[2.521s] [1503/2346] Compiling [32mlibraries/AP_Logger/LoggerMessageWriter.cpp[0m
+[2.525s] [1548/2346] Compiling [32mlibraries/AP_HAL_SITL/SITL_cmdline.cpp[0m
+[2.530s] [1604/2346] Compiling [32mlibraries/AP_Logger/LoggerMessageWriter.cpp[0m
+[2.536s] [1664/2346] Compiling [32mlibraries/AP_HAL_SITL/SITL_cmdline.cpp[0m
+[2.541s] [1720/2346] Compiling [32mlibraries/AP_Logger/LoggerMessageWriter.cpp[0m
+[2.546s] [1773/2346] Compiling [32mlibraries/AP_HAL_SITL/SITL_cmdline.cpp[0m
+[2.551s] [1831/2346] Compiling [32mlibraries/AP_Logger/LoggerMessageWriter.cpp[0m
+[2.560s] [1880/2346] Compiling [32mlibraries/AP_HAL_SITL/SITL_cmdline.cpp[0m
+[2.569s] [1935/2346] Compiling [32mlibraries/AP_Logger/LoggerMessageWriter.cpp[0m
+[2.577s] [1985/2346] Compiling [32mlibraries/AP_HAL_SITL/SITL_cmdline.cpp[0m
+[2.581s] [2001/2346] Compiling [32mAntennaTracker/Tracker.cpp[0m
+[2.593s] [2045/2346] Compiling [32mArduCopter/Copter.cpp[0m
+[2.609s] [2111/2346] Compiling [32mArduCopter/Copter.cpp[0m
+[2.642s] [2221/2346] Compiling [32mArduPlane/Plane.cpp[0m
+[2.650s] [2242/2346] Compiling [32mArduSub/Sub.cpp[0m
+[2.658s] [2271/2346] Compiling [32mBlimp/Blimp.cpp[0m
+[2.671s] [2302/2346] Compiling [32mRover/Rover.cpp[0m
+[2.750s] [2327/2346] Linking [33mbuild/sitl/lib/libArduCopter_libs.a[0m
+[2.758s] [2328/2346] Linking [33mbuild/sitl/lib/libAntennaTracker_libs.a[0m
+[2.808s] [2329/2346] Linking [33mbuild/sitl/lib/libRover_libs.a[0m
+[2.816s] [2330/2346] Linking [33mbuild/sitl/lib/libArduPlane_libs.a[0m
+[2.836s] [2331/2346] Linking [33mbuild/sitl/lib/libArduSub_libs.a[0m
+[2.848s] [2332/2346] Linking [33mbuild/sitl/lib/libBlimp_libs.a[0m
+[3.461s] [2333/2346] Linking [33mbuild/sitl/bin/blimp[0m
+[3.486s] [2334/2346] Linking [33mbuild/sitl/bin/antennatracker[0m
+[3.536s] [2335/2346] Linking [33mbuild/sitl/bin/arducopter[0m
+[3.624s] [2336/2346] Linking [33mbuild/sitl/bin/ardurover[0m
+[3.651s] [2337/2346] Linking [33mbuild/sitl/bin/arduplane[0m
+[3.672s] [2338/2346] Linking [33mbuild/sitl/bin/ardusub[0m
+[3.674s] [2339/2346] Linking [33mbuild/sitl/bin/arducopter-heli[0m
+[3.789s] [2340/2346] checking symbols [36mbuild/sitl/bin/blimp[0m
+[3.828s] [2341/2346] checking symbols [36mbuild/sitl/bin/antennatracker[0m
+[3.978s] [2342/2346] checking symbols [36mbuild/sitl/bin/arducopter[0m
+[4.052s] [2343/2346] checking symbols [36mbuild/sitl/bin/ardurover[0m
+[4.086s] [2344/2346] checking symbols [36mbuild/sitl/bin/arduplane[0m
+[4.091s] [2345/2346] checking symbols [36mbuild/sitl/bin/ardusub[0m
+[4.108s] [2346/2346] checking symbols [36mbuild/sitl/bin/arducopter-heli[0m
+[4.169s] [32mWaf: Leaving directory `/home/lh/Documents/joao_pessoa_2026/src/ardupilot/build/sitl'[0m
+[4.169s] [32m[0m
+[4.169s] [32m[0m[01;1mBUILD SUMMARY[0m
+[4.169s] [32m[0m[01;1mBuild directory: [0m/home/lh/Documents/joao_pessoa_2026/src/ardupilot/build/sitl[0m
+[4.180s] [32m[0m[01;1mTarget               Text (B)  Data (B)  BSS (B)  Total Flash Used (B)  Free Flash (B)  External Flash Used (B)[0m
+[4.180s] ---------------------------------------------------------------------------------------------------------------
+[4.180s] bin/antennatracker    3412986    145901   260384               3558887  Not Applicable  Not Applicable         
+[4.180s] bin/arducopter        4563538    215037   279392               4778575  Not Applicable  Not Applicable         
+[4.180s] bin/arducopter-heli   4552986    216029   280320               4769015  Not Applicable  Not Applicable         
+[4.180s] bin/arduplane         4520490    217845   277920               4738335  Not Applicable  Not Applicable         
+[4.180s] bin/ardusub           4132494    188045   279840               4320539  Not Applicable  Not Applicable         
+[4.180s] bin/blimp             3486914    150341   262880               3637255  Not Applicable  Not Applicable         
+[4.180s] bin/ardurover         4224826    193549   277760               4418375  Not Applicable  Not Applicable         
+[4.180s] [32m'build' finished successfully (3.457s)[0m
+[4.256s] Built target ardupilot_build
+[4.264s] Invoked command in '/home/lh/Documents/joao_pessoa_2026/build/ardupilot_sitl' returned '0': CMAKE_PREFIX_PATH=/home/lh/Documents/joao_pessoa_2026/install/micro_ros_agent:/home/lh/Documents/joao_pessoa_2026/install/micro_ros_msgs:/home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs:/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs:/home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl:/home/lh/Documents/joao_pessoa_2026/install/biguasim_interfaces:/home/lh/Documents/joao_pessoa_2026/install/hydrone_biguasim:/home/lh/Documents/joao_pessoa_2026/install/hydrone_bringup:/home/lh/Documents/joao_pessoa_2026/install/hydrone_vision:/home/lh/Documents/joao_pessoa_2026/install/hydrone_nav:/home/lh/Documents/joao_pessoa_2026/install/hydrone_mission:/home/lh/Documents/joao_pessoa_2026/install/hydrone_controller:/home/lh/Documents/joao_pessoa_2026/install/ardupilot_dds_tests:/home/lh/Documents/joao_pessoa_2026/install/biguasim_main:/opt/ros/humble LD_LIBRARY_PATH=/home/lh/Documents/joao_pessoa_2026/install/micro_ros_agent/lib:/home/lh/Documents/joao_pessoa_2026/install/micro_ros_msgs/lib:/home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/lib:/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/lib:/home/lh/Documents/joao_pessoa_2026/install/biguasim_interfaces/lib:/opt/ros/humble/opt/rviz_ogre_vendor/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib /usr/bin/cmake --build /home/lh/Documents/joao_pessoa_2026/build/ardupilot_sitl -- -j32 -l32
+[4.265s] Invoking command in '/home/lh/Documents/joao_pessoa_2026/build/ardupilot_sitl': CMAKE_PREFIX_PATH=/home/lh/Documents/joao_pessoa_2026/install/micro_ros_agent:/home/lh/Documents/joao_pessoa_2026/install/micro_ros_msgs:/home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs:/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs:/home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl:/home/lh/Documents/joao_pessoa_2026/install/biguasim_interfaces:/home/lh/Documents/joao_pessoa_2026/install/hydrone_biguasim:/home/lh/Documents/joao_pessoa_2026/install/hydrone_bringup:/home/lh/Documents/joao_pessoa_2026/install/hydrone_vision:/home/lh/Documents/joao_pessoa_2026/install/hydrone_nav:/home/lh/Documents/joao_pessoa_2026/install/hydrone_mission:/home/lh/Documents/joao_pessoa_2026/install/hydrone_controller:/home/lh/Documents/joao_pessoa_2026/install/ardupilot_dds_tests:/home/lh/Documents/joao_pessoa_2026/install/biguasim_main:/opt/ros/humble LD_LIBRARY_PATH=/home/lh/Documents/joao_pessoa_2026/install/micro_ros_agent/lib:/home/lh/Documents/joao_pessoa_2026/install/micro_ros_msgs/lib:/home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/lib:/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/lib:/home/lh/Documents/joao_pessoa_2026/install/biguasim_interfaces/lib:/opt/ros/humble/opt/rviz_ogre_vendor/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib /usr/bin/cmake --install /home/lh/Documents/joao_pessoa_2026/build/ardupilot_sitl
+[4.269s] -- Install configuration: ""
+[4.269s] -- Execute custom install script
+[4.269s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/bin//antennatracker
+[4.269s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/bin//arducopter
+[4.269s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/bin//arducopter-heli
+[4.269s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/bin//arduplane
+[4.269s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/bin//ardurover
+[4.269s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/bin//ardusub
+[4.269s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/bin//blimp
+[4.269s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/.//lib/libAntennaTracker_libs.a
+[4.269s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/.//lib/libArduCopter_libs.a
+[4.269s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/.//lib/libArduPlane_libs.a
+[4.269s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/.//lib/libArduSub_libs.a
+[4.269s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/.//lib/libBlimp_libs.a
+[4.269s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/.//lib/libRover_libs.a
+[4.269s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/.//lib/stqBSAK8
+[4.269s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl//launch/mavproxy.launch.py
+[4.270s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl//launch/micro_ros_agent.launch.py
+[4.270s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl//launch/sitl.launch.py
+[4.270s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl//launch/sitl_dds_serial.launch.py
+[4.270s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl//launch/sitl_dds_udp.launch.py
+[4.270s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl//launch/sitl_mavproxy.launch.py
+[4.270s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl//launch/virtual_ports.launch.py
+[4.270s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config/default_params/dds_serial.parm
+[4.270s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config/default_params/dds_udp.parm
+[4.270s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config/default_params/dds_use_ns.parm
+[4.270s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/airsim-quadX.parm
+[4.270s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/airsim-rover.parm
+[4.270s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/balancebot.parm
+[4.270s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/blimp-motor.parm
+[4.270s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/blimp.parm
+[4.270s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-X.parm
+[4.270s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-beacon.parm
+[4.270s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-bfx.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-coax.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-cwx.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-deca-cwx.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-deca.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-djix.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-dodecahexa.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-dotriaconta_octaquad_x.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-gimbal.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-gps-for-yaw-nmea.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-gps-for-yaw.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-heli-ddfptail.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-heli-ddvptail.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-heli-dual.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-heli-gas.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-heli.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-hexa-cwx.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-hexa-dji.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-hexa.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-hexadeca_octa.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-hexadeca_octa_cwx.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-octa-cwx.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-octa-dji.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-octa.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-octaquad-cor.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-octaquad-cw-cor.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-octaquad-cwx.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-octaquad.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-optflow.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-ppp-periph.parm
+[4.271s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-ppp.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-rangefinder.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-single.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-tri.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-vicon.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-winch.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-wind-estimates.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-y6.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/firefly.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/gazebo-iris.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/gazebo-zephyr.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/glider.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/motorboat.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/msposd.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/periph-ppp.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/periph.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/plane-dspoilers.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/plane-elevons.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/plane-ice.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/plane-jet.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/plane-jsbsim.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/plane-redundant.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/plane-soaring.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/plane-tailsitter.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/plane-vtail.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quad-can.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quad-periph.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quadplane-can.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quadplane-cl84.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quadplane-copter_tailsitter.parm
+[4.272s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quadplane-ice.parm
+[4.273s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quadplane-periph.parm
+[4.273s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quadplane-ppp-periph.parm
+[4.273s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quadplane-ppp.parm
+[4.273s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quadplane-tilt.parm
+[4.273s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quadplane-tilthvec.parm
+[4.273s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quadplane-tilttri.parm
+[4.273s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quadplane-tilttrivec.parm
+[4.273s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quadplane-tri.parm
+[4.273s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quadplane.parm
+[4.273s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/rover-omni3mecanum.parm
+[4.273s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/rover-skid.parm
+[4.273s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/rover-vectored.parm
+[4.273s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/rover.parm
+[4.273s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/sailboat-motor.parm
+[4.273s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/sailboat.parm
+[4.273s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/stratoblimp.parm
+[4.273s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/sub-6dof.parm
+[4.273s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/sub-gps-for-yaw-nmea.parm
+[4.273s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/sub.parm
+[4.273s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/tracker-gps-for-yaw.parm
+[4.273s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//models/Callisto.json
+[4.273s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//models/Callisto.parm
+[4.273s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//models/freestyle.json
+[4.273s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//models/freestyle.parm
+[4.273s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//models/plane-3d.parm
+[4.273s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//models/plane.parm
+[4.273s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//models/skywalker_2013.json
+[4.274s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//models/xplane_heli.json
+[4.274s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//models/xplane_plane.json
+[4.274s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/environment/pythonpath.sh
+[4.274s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/environment/pythonpath.dsv
+[4.274s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/local/lib/python3.10/dist-packages/ardupilot_sitl-0.0.0-py3.10.egg-info/PKG-INFO
+[4.274s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/local/lib/python3.10/dist-packages/ardupilot_sitl-0.0.0-py3.10.egg-info/SOURCES.txt
+[4.274s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/local/lib/python3.10/dist-packages/ardupilot_sitl-0.0.0-py3.10.egg-info/dependency_links.txt
+[4.274s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/local/lib/python3.10/dist-packages/ardupilot_sitl-0.0.0-py3.10.egg-info/top_level.txt
+[4.274s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/local/lib/python3.10/dist-packages/ardupilot_sitl/__init__.py
+[4.274s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/local/lib/python3.10/dist-packages/ardupilot_sitl/actions.py
+[4.274s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/local/lib/python3.10/dist-packages/ardupilot_sitl/launch.py
+[4.274s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/local/lib/python3.10/dist-packages/ardupilot_sitl/utilities.py
+[4.274s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ament_index/resource_index/package_run_dependencies/ardupilot_sitl
+[4.274s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ament_index/resource_index/parent_prefix_path/ardupilot_sitl
+[4.274s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/environment/ament_prefix_path.sh
+[4.274s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/environment/ament_prefix_path.dsv
+[4.274s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/environment/path.sh
+[4.274s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/environment/path.dsv
+[4.274s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/local_setup.bash
+[4.275s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/local_setup.sh
+[4.275s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/local_setup.zsh
+[4.275s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/local_setup.dsv
+[4.275s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/package.dsv
+[4.279s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ament_index/resource_index/packages/ardupilot_sitl
+[4.279s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/cmake/ardupilot_sitlConfig.cmake
+[4.279s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/cmake/ardupilot_sitlConfig-version.cmake
+[4.279s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/package.xml
+[4.302s] Listing '/home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/local/lib/python3.10/dist-packages/ardupilot_sitl'...
+[4.306s] Invoked command in '/home/lh/Documents/joao_pessoa_2026/build/ardupilot_sitl' returned '0': CMAKE_PREFIX_PATH=/home/lh/Documents/joao_pessoa_2026/install/micro_ros_agent:/home/lh/Documents/joao_pessoa_2026/install/micro_ros_msgs:/home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs:/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs:/home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl:/home/lh/Documents/joao_pessoa_2026/install/biguasim_interfaces:/home/lh/Documents/joao_pessoa_2026/install/hydrone_biguasim:/home/lh/Documents/joao_pessoa_2026/install/hydrone_bringup:/home/lh/Documents/joao_pessoa_2026/install/hydrone_vision:/home/lh/Documents/joao_pessoa_2026/install/hydrone_nav:/home/lh/Documents/joao_pessoa_2026/install/hydrone_mission:/home/lh/Documents/joao_pessoa_2026/install/hydrone_controller:/home/lh/Documents/joao_pessoa_2026/install/ardupilot_dds_tests:/home/lh/Documents/joao_pessoa_2026/install/biguasim_main:/opt/ros/humble LD_LIBRARY_PATH=/home/lh/Documents/joao_pessoa_2026/install/micro_ros_agent/lib:/home/lh/Documents/joao_pessoa_2026/install/micro_ros_msgs/lib:/home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/lib:/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/lib:/home/lh/Documents/joao_pessoa_2026/install/biguasim_interfaces/lib:/opt/ros/humble/opt/rviz_ogre_vendor/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib /usr/bin/cmake --install /home/lh/Documents/joao_pessoa_2026/build/ardupilot_sitl

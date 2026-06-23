@@ -1,0 +1,33 @@
+/**:
+  ros_parameters:
+    biguasim_scenario:
+      package_name: Competition
+      world: CompetionMap
+      main_agent: auv0     
+      ticks_per_sec: 60
+      frames_per_sec: 60
+      octree_min: 0.1
+      octree_max: 5
+      draw_arrow: true
+      show_viewport: true
+      agents:
+        - agent_name: auv0
+          agent_type: HolybroX500
+          publish_commands: false
+          sensors:
+            - sensor_type: DynamicsSensor
+              ros_publish: true
+              configuration:
+                UseCOM: true
+                UseRPY: false
+            - sensor_type: LocationSensor
+              ros_publish: true
+            - sensor_type: RotationSensor
+              ros_publish: true
+            - sensor_type: VelocitySensor
+              ros_publish: true
+          dynamics:
+            batch_size : 1
+          control_abstraction : 'accel'
+          location: [0, 0, 5]
+          rotation: [0, 0, 0]

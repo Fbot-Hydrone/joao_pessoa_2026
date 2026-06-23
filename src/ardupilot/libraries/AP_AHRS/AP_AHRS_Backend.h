@@ -1,0 +1,333 @@
+#pragma once
+
+/*
+   This program is free software: you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation, either version 3 of the License, or
+   (at your option) any later version.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+/*
+ *  AHRS (Attitude Heading Reference System) interface for ArduPilot
+ *
+ */
+
+#include <AP_Math/AP_Math.h>
+#include <inttypes.h>
+#include <AP_Airspeed/AP_Airspeed.h>
+#include <AP_InertialSensor/AP_InertialSensor.h>
+#include <AP_Common/Location.h>
+#include <AP_NavEKF/AP_NavEKF_Source.h>
+#include <AP_NavEKF/AP_Nav_Common.h>
+
+#define AP_AHRS_TRIM_LIMIT 10.0f        // maximum trim angle in degrees
+#define AP_AHRS_RP_P_MIN   0.05f        // minimum value for AHRS_RP_P parameter
+#define AP_AHRS_YAW_P_MIN  0.05f        // minimum value for AHRS_YAW_P parameter
+
+enum class GPSUse : uint8_t {
+    Disable = 0,
+    Enable  = 1,
+    EnableWithHeight = 2,
+};
+
+class AP_AHRS_Backend
+{
+public:
+
+    // Constructor
+    AP_AHRS_Backend() {}
+
+    // empty virtual destructor
+    virtual ~AP_AHRS_Backend() {}
+
+    CLASS_NO_COPY(AP_AHRS_Backend);
+
+    virtual const char *shortname() const = 0;
+
+    // structure to retrieve results from backends:
+    struct Estimates {
+        // allow backends to set the private members:
+        friend class AP_AHRS_DCM;
+        friend class AP_AHRS_SIM;
+        friend class AP_AHRS_External;
+        friend class AP_AHRS_NavEKF2;
+        friend class AP_AHRS_NavEKF3;
+
+        // is the AHRS subsystem healthy?
+        bool healthy;
+
+        // true if the AHRS has completed initialisation
+        bool initialised;
+
+        // inertial sensor information
+        uint8_t primary_gyro;
+
+        // if attitude_valid is true then all of the
+        // eulers/quaternion/matrix must be valid:
+        bool attitude_valid;
+        float roll_rad;
+        float pitch_rad;
+        float yaw_rad;
+        Matrix3f dcm_matrix;
+        Quaternion quaternion;
+
+        // backends must always return the result in the vehicle body
+        // frame.  A backend using the autopilot sensors will need to
+        // rotate according to the TRIM parameters.  An ExternalAHRS
+        // won't!
+        bool get_quaternion(Quaternion &quat) const {
+            quat = quaternion;
+            return attitude_valid;
+        }
+
+        Vector3f gyro_estimate;
+        Vector3f gyro_drift;
+
+        uint8_t primary_accel;
+
+        Vector3f accel_ef;
+        Vector3f accel_bias;
+
+        // a ground velocity in meters/second, North/East/Down
+        Vector3f velocity_NED;
+        bool velocity_NED_valid;
+        // return a ground velocity in meters/second, North/East/Down
+        bool get_velocity_NED(Vector3f &vel) const WARN_IF_UNUSED {
+            if (!velocity_NED_valid) {
+                return false;
+            }
+            vel = velocity_NED;
+            return true;
+        };
+        // ground velocity estimate in meters/second, in North/East order
+        Vector2f velocity_NE;
+
+        // a derivative of the vertical position in m/s which is
+        // kinematically consistent with the vertical position is
+        // required by some control loops.
+        // This is different to the vertical velocity from the EKF
+        // which is not always consistent with the vertical position
+        // due to the various errors that are being corrected for.
+        float vert_pos_rate_D;
+        bool vert_pos_rate_D_valid;
+        // Get a derivative of the vertical position in m/s which is
+        // kinematically consistent with the vertical position is
+        // required by some control loops.
+        // This is different to the vertical velocity from the EKF
+        // which is not always consistent with the vertical position
+        // due to the various errors that are being corrected for.
+        bool get_vert_pos_rate_D(float &velocity) const {
+            if (!vert_pos_rate_D_valid) {
+                return false;
+            }
+            velocity = vert_pos_rate_D;
+            return true;
+        }
+
+        /*
+         * position estimates
+         */
+        Location location;
+        bool location_valid;
+
+        bool get_location(Location &loc) const {
+            loc = location;
+            return location_valid;
+        };
+
+        bool get_hagl(float &height) const WARN_IF_UNUSED {
+            height = hagl;
+            return hagl_valid;
+        }
+
+        /*
+         * air data estimates
+         */
+        // estimated wind in m/s, NED frame
+        Vector3f wind;
+        bool wind_valid;
+
+        /*
+         * Sensor-related information
+         */
+
+        // configured_to_use_gps will be true if the estimator will
+        // use GPS data in creating its estimate when the data is good
+        bool configured_to_use_gps;
+        // configured_to_use_gps_for_pos_XY will be true if GPS is
+        // configured as the horizontal position source for this
+        // estimator.  Used to decide whether GPS will set the
+        // navigation origin.
+        bool configured_to_use_gps_for_pos_XY;
+
+        // if true, "external navigation" (as provided by MAVLink
+        // messages) is providing the yaw estimate.  e.g. a T265
+        // vision-position-estimate camera tracking yaw via image
+        // recognition
+        bool using_extnav_for_yaw;
+
+        // if true then however the yaw in these estimates was derived
+        // a compass was not involved:
+        bool using_noncompass_for_yaw;
+
+        /*
+         * filter status and estimates quality values:
+         */
+        nav_filter_status filter_status;
+        bool filter_status_valid;
+
+        // the innovations normalised using the innovation variance
+        // where a value of 0 indicates perfect consistency between
+        // the measurement and the EKF solution and a value of 1 is
+        // the maximum inconsistency that will be accepted by the
+        // filter:
+        float velVar, posVar, hgtVar, tasVar;
+        Vector3f magVar;
+        bool variances_valid;
+
+        float terrain_alt_variance;
+        bool terrain_alt_variance_valid;
+
+    private:
+        bool hagl_valid;
+        float hagl;
+    };
+
+    // Methods
+    virtual void update() = 0;
+
+    virtual void get_results(Estimates &results) = 0;
+
+    // returns false if we fail arming checks, in which case the buffer will be populated with a failure message
+    // requires_position should be true if horizontal position configuration should be checked
+    virtual bool pre_arm_check(bool requires_position, char *failure_msg, uint8_t failure_msg_len) const = 0;
+
+    // see if EKF lane switching is possible to avoid EKF failsafe
+    virtual void check_lane_switch(void) {}
+
+    // request EKF yaw reset to try and avoid the need for an EKF lane switch or failsafe
+    virtual void request_yaw_reset(void) {}
+
+    // set position, velocity and yaw sources to either 0=primary, 1=secondary, 2=tertiary
+    virtual void set_posvelyaw_source_set(AP_NavEKF_Source::SourceSetSelection source_set_idx) {}
+
+    // reset the current gyro drift estimate
+    //  should be called if gyro offsets are recalculated
+    virtual void reset_gyro_drift(void) = 0;
+
+    // reset the current attitude, used on new IMU calibration
+    virtual void reset() = 0;
+
+    // return an airspeed estimate if available. return true
+    // if we have an estimate
+    virtual bool airspeed_EAS(float &airspeed_ret) const WARN_IF_UNUSED { return false; }
+    virtual bool airspeed_EAS(uint8_t airspeed_index, float &airspeed_ret) const { return false; }
+
+    // return a true airspeed estimate (navigation airspeed) if
+    // available. return true if we have an estimate
+    bool airspeed_TAS(float &airspeed_ret) const WARN_IF_UNUSED {
+        if (!airspeed_EAS(airspeed_ret)) {
+            return false;
+        }
+        airspeed_ret *= get_EAS2TAS();
+        return true;
+    }
+
+    // get apparent to true airspeed ratio
+    static float get_EAS2TAS(void);
+    static float get_TAS2EAS(void) { return 1.0/get_EAS2TAS(); }
+
+    // return true if airspeed comes from an airspeed sensor, as
+    // opposed to an IMU estimate
+    static bool airspeed_sensor_enabled(void) {
+    #if AP_AIRSPEED_ENABLED
+        const AP_Airspeed *_airspeed = AP::airspeed();
+        return _airspeed != nullptr && _airspeed->use() && _airspeed->healthy();
+    #else
+        return false;
+    #endif
+    }
+
+    // return true if airspeed comes from a specific airspeed sensor, as
+    // opposed to an IMU estimate
+    static bool airspeed_sensor_enabled(uint8_t airspeed_index) {
+    #if AP_AIRSPEED_ENABLED
+        const AP_Airspeed *_airspeed = AP::airspeed();
+        return _airspeed != nullptr && _airspeed->use(airspeed_index) && _airspeed->healthy(airspeed_index);
+    #else
+        return false;
+    #endif
+    }
+
+    virtual bool set_origin(const Location &loc) {
+        return false;
+    }
+    virtual bool get_origin(Location &ret) const = 0;
+
+    // return a position relative to origin in meters, North/East/Down
+    // order. This will only be accurate if have_inertial_nav() is
+    // true
+    virtual bool get_relative_position_NED_origin(Vector3p &vec) const WARN_IF_UNUSED {
+        return false;
+    }
+
+    // return a position relative to origin in meters, North/East
+    // order. Return true if estimate is valid
+    virtual bool get_relative_position_NE_origin(Vector2p &vecNE) const WARN_IF_UNUSED {
+        return false;
+    }
+
+    // return a Down position relative to origin in meters
+    // Return true if estimate is valid
+    virtual bool get_relative_position_D_origin(postype_t &posD) const WARN_IF_UNUSED {
+        return false;
+    }
+
+    // return true if we will use compass for yaw
+    virtual bool use_compass(void) = 0;
+
+    // return the amount of yaw angle change due to the last yaw angle reset in radians
+    // returns the time of the last yaw angle reset or 0 if no reset has ever occurred
+    virtual uint32_t getLastYawResetAngle(float &yawAng) {
+        return 0;
+    };
+
+    // return the amount of NE position change in metres due to the last reset
+    // returns the time of the last reset or 0 if no reset has ever occurred
+    virtual uint32_t getLastPosNorthEastReset(Vector2f &pos) WARN_IF_UNUSED {
+        return 0;
+    };
+
+    // return the amount of NE velocity change in metres/sec due to the last reset
+    // returns the time of the last reset or 0 if no reset has ever occurred
+    virtual uint32_t getLastVelNorthEastReset(Vector2f &vel) const WARN_IF_UNUSED {
+        return 0;
+    };
+
+    // return the amount of vertical position change due to the last reset in meters
+    // returns the time of the last reset or 0 if no reset has ever occurred
+    virtual uint32_t getLastPosDownReset(float &posDelta) WARN_IF_UNUSED {
+        return 0;
+    };
+
+    // Resets the baro so that it reads zero at the current height
+    // Resets the EKF height to zero
+    // Adjusts the EKf origin height so that the EKF height + origin height is the same as before
+    virtual void resetHeightDatum(void) { }
+
+    // return the innovations for the specified instance
+    // An out of range instance (eg -1) returns data for the primary instance
+    virtual bool get_innovations(Vector3f &velInnov, Vector3f &posInnov, Vector3f &magInnov, float &tasInnov, float &yawInnov) const {
+        return false;
+    }
+
+    virtual void get_control_limits(float &ekfGndSpdLimit, float &controlScaleXY) const = 0;
+};
