@@ -1,0 +1,24 @@
+[0.715s] Invoking command in '/home/lh/Documents/joao_pessoa_2026/build/hydrone_controller': AMENT_PREFIX_PATH=/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs:${AMENT_PREFIX_PATH} CMAKE_PREFIX_PATH=/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs:${CMAKE_PREFIX_PATH} LD_LIBRARY_PATH=/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/lib:${LD_LIBRARY_PATH} PYTHONPATH=/home/lh/Documents/joao_pessoa_2026/build/hydrone_controller/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/lh/Documents/joao_pessoa_2026/install/hydrone_controller/lib/python3.10/site-packages:/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /home/lh/Documents/joao_pessoa_2026/build/hydrone_controller/build --no-deps symlink_data
+[0.831s] running develop
+[0.906s] running egg_info
+[0.906s] creating hydrone_controller.egg-info
+[0.906s] writing hydrone_controller.egg-info/PKG-INFO
+[0.906s] writing dependency_links to hydrone_controller.egg-info/dependency_links.txt
+[0.906s] writing entry points to hydrone_controller.egg-info/entry_points.txt
+[0.907s] writing requirements to hydrone_controller.egg-info/requires.txt
+[0.907s] writing top-level names to hydrone_controller.egg-info/top_level.txt
+[0.907s] writing manifest file 'hydrone_controller.egg-info/SOURCES.txt'
+[0.907s] reading manifest file 'hydrone_controller.egg-info/SOURCES.txt'
+[0.908s] writing manifest file 'hydrone_controller.egg-info/SOURCES.txt'
+[0.908s] running build_ext
+[0.908s] Creating /home/lh/Documents/joao_pessoa_2026/install/hydrone_controller/lib/python3.10/site-packages/hydrone-controller.egg-link (link to .)
+[0.909s] Installing controller_node script to /home/lh/Documents/joao_pessoa_2026/install/hydrone_controller/bin
+[0.909s] 
+[0.909s] Installed /home/lh/Documents/joao_pessoa_2026/build/hydrone_controller
+[0.909s] running symlink_data
+[0.909s] creating /home/lh/Documents/joao_pessoa_2026/install/hydrone_controller/share/ament_index
+[0.909s] creating /home/lh/Documents/joao_pessoa_2026/install/hydrone_controller/share/ament_index/resource_index
+[0.909s] creating /home/lh/Documents/joao_pessoa_2026/install/hydrone_controller/share/ament_index/resource_index/packages
+[0.909s] symbolically linking /home/lh/Documents/joao_pessoa_2026/build/hydrone_controller/resource/hydrone_controller -> /home/lh/Documents/joao_pessoa_2026/install/hydrone_controller/share/ament_index/resource_index/packages
+[0.909s] symbolically linking /home/lh/Documents/joao_pessoa_2026/build/hydrone_controller/package.xml -> /home/lh/Documents/joao_pessoa_2026/install/hydrone_controller/share/hydrone_controller
+[0.921s] Invoked command in '/home/lh/Documents/joao_pessoa_2026/build/hydrone_controller' returned '0': AMENT_PREFIX_PATH=/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs:${AMENT_PREFIX_PATH} CMAKE_PREFIX_PATH=/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs:${CMAKE_PREFIX_PATH} LD_LIBRARY_PATH=/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/lib:${LD_LIBRARY_PATH} PYTHONPATH=/home/lh/Documents/joao_pessoa_2026/build/hydrone_controller/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/lh/Documents/joao_pessoa_2026/install/hydrone_controller/lib/python3.10/site-packages:/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /home/lh/Documents/joao_pessoa_2026/build/hydrone_controller/build --no-deps symlink_data

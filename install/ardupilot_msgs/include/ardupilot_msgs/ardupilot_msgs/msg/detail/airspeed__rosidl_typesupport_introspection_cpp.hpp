@@ -1,0 +1,1 @@
+/home/lh/Documents/joao_pessoa_2026/build/ardupilot_msgs/rosidl_typesupport_introspection_cpp/ardupilot_msgs/msg/detail/airspeed__rosidl_typesupport_introspection_cpp.hpp

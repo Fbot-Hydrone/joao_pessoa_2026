@@ -1,0 +1,15 @@
+source;share/hydrone_vision/hook/path.ps1
+source;share/hydrone_vision/hook/path.dsv
+source;share/hydrone_vision/hook/path.sh
+source;share/hydrone_vision/hook/pythonpath.ps1
+source;share/hydrone_vision/hook/pythonpath.dsv
+source;share/hydrone_vision/hook/pythonpath.sh
+source;share/hydrone_vision/hook/pythonscriptspath.ps1
+source;share/hydrone_vision/hook/pythonscriptspath.dsv
+source;share/hydrone_vision/hook/pythonscriptspath.sh
+source;share/hydrone_vision/hook/ament_prefix_path.ps1
+source;share/hydrone_vision/hook/ament_prefix_path.dsv
+source;share/hydrone_vision/hook/ament_prefix_path.sh
+source;../../build/hydrone_vision/share/hydrone_vision/hook/pythonpath_develop.ps1
+source;../../build/hydrone_vision/share/hydrone_vision/hook/pythonpath_develop.dsv
+source;../../build/hydrone_vision/share/hydrone_vision/hook/pythonpath_develop.sh

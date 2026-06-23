@@ -1,0 +1,29 @@
+file(REMOVE_RECURSE
+  "CMakeFiles/hydrone_msgs__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/hydrone_msgs/msg/detail/dds_fastrtps/human_gesture__type_support.cpp.o"
+  "CMakeFiles/hydrone_msgs__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/hydrone_msgs/msg/detail/dds_fastrtps/human_gesture__type_support.cpp.o.d"
+  "CMakeFiles/hydrone_msgs__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/hydrone_msgs/msg/detail/dds_fastrtps/landing_base__type_support.cpp.o"
+  "CMakeFiles/hydrone_msgs__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/hydrone_msgs/msg/detail/dds_fastrtps/landing_base__type_support.cpp.o.d"
+  "CMakeFiles/hydrone_msgs__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/hydrone_msgs/msg/detail/dds_fastrtps/mission_state__type_support.cpp.o"
+  "CMakeFiles/hydrone_msgs__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/hydrone_msgs/msg/detail/dds_fastrtps/mission_state__type_support.cpp.o.d"
+  "CMakeFiles/hydrone_msgs__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/hydrone_msgs/msg/detail/dds_fastrtps/qr_code__type_support.cpp.o"
+  "CMakeFiles/hydrone_msgs__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/hydrone_msgs/msg/detail/dds_fastrtps/qr_code__type_support.cpp.o.d"
+  "CMakeFiles/hydrone_msgs__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/hydrone_msgs/srv/detail/dds_fastrtps/set_phase__type_support.cpp.o"
+  "CMakeFiles/hydrone_msgs__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/hydrone_msgs/srv/detail/dds_fastrtps/set_phase__type_support.cpp.o.d"
+  "libhydrone_msgs__rosidl_typesupport_fastrtps_cpp.pdb"
+  "libhydrone_msgs__rosidl_typesupport_fastrtps_cpp.so"
+  "rosidl_typesupport_fastrtps_cpp/hydrone_msgs/msg/detail/dds_fastrtps/human_gesture__type_support.cpp"
+  "rosidl_typesupport_fastrtps_cpp/hydrone_msgs/msg/detail/dds_fastrtps/landing_base__type_support.cpp"
+  "rosidl_typesupport_fastrtps_cpp/hydrone_msgs/msg/detail/dds_fastrtps/mission_state__type_support.cpp"
+  "rosidl_typesupport_fastrtps_cpp/hydrone_msgs/msg/detail/dds_fastrtps/qr_code__type_support.cpp"
+  "rosidl_typesupport_fastrtps_cpp/hydrone_msgs/msg/detail/human_gesture__rosidl_typesupport_fastrtps_cpp.hpp"
+  "rosidl_typesupport_fastrtps_cpp/hydrone_msgs/msg/detail/landing_base__rosidl_typesupport_fastrtps_cpp.hpp"
+  "rosidl_typesupport_fastrtps_cpp/hydrone_msgs/msg/detail/mission_state__rosidl_typesupport_fastrtps_cpp.hpp"
+  "rosidl_typesupport_fastrtps_cpp/hydrone_msgs/msg/detail/qr_code__rosidl_typesupport_fastrtps_cpp.hpp"
+  "rosidl_typesupport_fastrtps_cpp/hydrone_msgs/srv/detail/dds_fastrtps/set_phase__type_support.cpp"
+  "rosidl_typesupport_fastrtps_cpp/hydrone_msgs/srv/detail/set_phase__rosidl_typesupport_fastrtps_cpp.hpp"
+)
+
+# Per-language clean rules from dependency scanning.
+foreach(lang CXX)
+  include(CMakeFiles/hydrone_msgs__rosidl_typesupport_fastrtps_cpp.dir/cmake_clean_${lang}.cmake OPTIONAL)
+endforeach()

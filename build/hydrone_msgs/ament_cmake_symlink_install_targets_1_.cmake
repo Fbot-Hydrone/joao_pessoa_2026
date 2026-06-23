@@ -1,0 +1,1 @@
+ament_cmake_symlink_install_targets("TARGET_FILES" "/home/lh/Documents/joao_pessoa_2026/build/hydrone_msgs/rosidl_generator_py/hydrone_msgs/hydrone_msgs_s__rosidl_typesupport_introspection_c.cpython-310-x86_64-linux-gnu.so" "TARGETS" "hydrone_msgs__rosidl_typesupport_introspection_c__pyext" "DESTINATION" "local/lib/python3.10/dist-packages/hydrone_msgs")

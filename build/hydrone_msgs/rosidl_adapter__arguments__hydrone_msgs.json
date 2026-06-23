@@ -1,0 +1,10 @@
+{
+  "package_name": "hydrone_msgs",
+  "non_idl_tuples": [
+    "/home/lh/Documents/joao_pessoa_2026/src/hydrone_msgs:msg/LandingBase.msg",
+    "/home/lh/Documents/joao_pessoa_2026/src/hydrone_msgs:msg/MissionState.msg",
+    "/home/lh/Documents/joao_pessoa_2026/src/hydrone_msgs:msg/HumanGesture.msg",
+    "/home/lh/Documents/joao_pessoa_2026/src/hydrone_msgs:msg/QRCode.msg",
+    "/home/lh/Documents/joao_pessoa_2026/src/hydrone_msgs:srv/SetPhase.srv"
+  ]
+}

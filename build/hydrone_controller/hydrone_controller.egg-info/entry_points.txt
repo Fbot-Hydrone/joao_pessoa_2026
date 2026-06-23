@@ -1,0 +1,3 @@
+[console_scripts]
+controller_node = hydrone_controller.controller_node:main
+

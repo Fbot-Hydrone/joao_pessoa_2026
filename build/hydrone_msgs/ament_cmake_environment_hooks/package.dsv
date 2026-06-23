@@ -1,0 +1,4 @@
+source;share/hydrone_msgs/local_setup.bash
+source;share/hydrone_msgs/local_setup.dsv
+source;share/hydrone_msgs/local_setup.sh
+source;share/hydrone_msgs/local_setup.zsh

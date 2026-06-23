@@ -1,0 +1,319 @@
+[0.008s] Invoking command in '/home/lh/Documents/joao_pessoa_2026/build/hydrone_msgs': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/home/lh/Documents/joao_pessoa_2026/install/ardupilot_dds_tests:/home/lh/Documents/joao_pessoa_2026/install/biguasim_main:/opt/ros/humble /usr/bin/cmake /home/lh/Documents/joao_pessoa_2026/src/hydrone_msgs -DAMENT_CMAKE_SYMLINK_INSTALL=1 -DCMAKE_INSTALL_PREFIX=/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs
+[0.045s] -- The C compiler identification is GNU 11.4.0
+[0.079s] -- The CXX compiler identification is GNU 11.4.0
+[0.085s] -- Detecting C compiler ABI info
+[0.120s] -- Detecting C compiler ABI info - done
+[0.124s] -- Check for working C compiler: /usr/lib/ccache/cc - skipped
+[0.124s] -- Detecting C compile features
+[0.124s] -- Detecting C compile features - done
+[0.125s] -- Detecting CXX compiler ABI info
+[0.169s] -- Detecting CXX compiler ABI info - done
+[0.175s] -- Check for working CXX compiler: /usr/lib/ccache/c++ - skipped
+[0.175s] -- Detecting CXX compile features
+[0.176s] -- Detecting CXX compile features - done
+[0.177s] -- Found ament_cmake: 1.3.14 (/opt/ros/humble/share/ament_cmake/cmake)
+[0.275s] -- Found Python3: /usr/bin/python3 (found version "3.10.12") found components: Interpreter 
+[0.309s] -- Override CMake install command with custom implementation using symlinks instead of copying resources
+[0.317s] -- Found rosidl_default_generators: 1.2.1 (/opt/ros/humble/share/rosidl_default_generators/cmake)
+[0.319s] -- Using all available rosidl_typesupport_c: rosidl_typesupport_fastrtps_c;rosidl_typesupport_introspection_c
+[0.321s] -- Found rosidl_adapter: 3.1.8 (/opt/ros/humble/share/rosidl_adapter/cmake)
+[0.338s] -- Using all available rosidl_typesupport_cpp: rosidl_typesupport_fastrtps_cpp;rosidl_typesupport_introspection_cpp
+[0.353s] -- Found std_msgs: 4.9.1 (/opt/ros/humble/share/std_msgs/cmake)
+[0.364s] -- Found geometry_msgs: 4.9.1 (/opt/ros/humble/share/geometry_msgs/cmake)
+[0.530s] -- Found ament_cmake_ros: 0.10.0 (/opt/ros/humble/share/ament_cmake_ros/cmake)
+[0.669s] -- Using all available rosidl_typesupport_c: rosidl_typesupport_fastrtps_c;rosidl_typesupport_introspection_c
+[0.841s] -- Using all available rosidl_typesupport_cpp: rosidl_typesupport_fastrtps_cpp;rosidl_typesupport_introspection_cpp
+[0.853s] -- Found PythonInterp: /usr/bin/python3 (found suitable version "3.10.12", minimum required is "3.6") 
+[0.853s] -- Found python_cmake_module: 0.10.0 (/opt/ros/humble/share/python_cmake_module/cmake)
+[0.873s] -- Found PythonLibs: /usr/lib/x86_64-linux-gnu/libpython3.10.so (found suitable version "3.10.12", minimum required is "3.5") 
+[0.873s] -- Using PYTHON_EXECUTABLE: /usr/bin/python3
+[0.873s] -- Using PYTHON_INCLUDE_DIRS: /usr/include/python3.10
+[0.873s] -- Using PYTHON_LIBRARIES: /usr/lib/x86_64-linux-gnu/libpython3.10.so
+[0.883s] -- Found PythonExtra: .so  
+[0.963s] -- Configuring done
+[0.981s] -- Generating done
+[0.986s] -- Build files have been written to: /home/lh/Documents/joao_pessoa_2026/build/hydrone_msgs
+[0.990s] Invoked command in '/home/lh/Documents/joao_pessoa_2026/build/hydrone_msgs' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/home/lh/Documents/joao_pessoa_2026/install/ardupilot_dds_tests:/home/lh/Documents/joao_pessoa_2026/install/biguasim_main:/opt/ros/humble /usr/bin/cmake /home/lh/Documents/joao_pessoa_2026/src/hydrone_msgs -DAMENT_CMAKE_SYMLINK_INSTALL=1 -DCMAKE_INSTALL_PREFIX=/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs
+[0.990s] Invoking command in '/home/lh/Documents/joao_pessoa_2026/build/hydrone_msgs': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/home/lh/Documents/joao_pessoa_2026/install/ardupilot_dds_tests:/home/lh/Documents/joao_pessoa_2026/install/biguasim_main:/opt/ros/humble /usr/bin/cmake --build /home/lh/Documents/joao_pessoa_2026/build/hydrone_msgs -- -j32 -l32
+[1.017s] [  1%] [34m[1mGenerating C code for ROS interfaces[0m
+[1.023s] [  3%] [34m[1mGenerating Rust code for ROS interfaces[0m
+[1.024s] [  4%] [34m[1mGenerating C++ code for ROS interfaces[0m
+[1.027s] [  4%] Built target ament_cmake_python_symlink_hydrone_msgs
+[1.232s] running egg_info
+[1.233s] creating hydrone_msgs.egg-info
+[1.233s] writing hydrone_msgs.egg-info/PKG-INFO
+[1.233s] writing dependency_links to hydrone_msgs.egg-info/dependency_links.txt
+[1.233s] writing top-level names to hydrone_msgs.egg-info/top_level.txt
+[1.234s] writing manifest file 'hydrone_msgs.egg-info/SOURCES.txt'
+[1.236s] reading manifest file 'hydrone_msgs.egg-info/SOURCES.txt'
+[1.236s] writing manifest file 'hydrone_msgs.egg-info/SOURCES.txt'
+[1.259s] [  4%] Built target ament_cmake_python_build_hydrone_msgs_egg
+[1.438s] [  4%] Built target hydrone_msgs__cpp
+[1.444s] [  4%] Built target hydrone_msgs__rs
+[1.444s] [  6%] [34m[1mGenerating C++ type support for eProsima Fast-RTPS[0m
+[1.444s] [  7%] [34m[1mGenerating C++ type support dispatch for ROS interfaces[0m
+[1.444s] [  9%] [34m[1mGenerating C++ introspection for ROS interfaces[0m
+[1.562s] [ 10%] [32mBuilding C object CMakeFiles/hydrone_msgs__rosidl_generator_c.dir/rosidl_generator_c/hydrone_msgs/srv/detail/set_phase__functions.c.o[0m
+[1.562s] [ 14%] [32mBuilding C object CMakeFiles/hydrone_msgs__rosidl_generator_c.dir/rosidl_generator_c/hydrone_msgs/msg/detail/landing_base__functions.c.o[0m
+[1.562s] [ 14%] [32mBuilding C object CMakeFiles/hydrone_msgs__rosidl_generator_c.dir/rosidl_generator_c/hydrone_msgs/msg/detail/qr_code__functions.c.o[0m
+[1.562s] [ 15%] [32mBuilding C object CMakeFiles/hydrone_msgs__rosidl_generator_c.dir/rosidl_generator_c/hydrone_msgs/msg/detail/mission_state__functions.c.o[0m
+[1.562s] [ 17%] [32mBuilding C object CMakeFiles/hydrone_msgs__rosidl_generator_c.dir/rosidl_generator_c/hydrone_msgs/msg/detail/human_gesture__functions.c.o[0m
+[1.617s] [ 18%] [32m[1mLinking C shared library libhydrone_msgs__rosidl_generator_c.so[0m
+[1.641s] [ 18%] Built target hydrone_msgs__rosidl_generator_c
+[1.646s] [ 20%] [34m[1mGenerating C type support for eProsima Fast-RTPS[0m
+[1.648s] [ 23%] [34m[1mGenerating C type support dispatch for ROS interfaces[0m
+[1.648s] [ 23%] [34m[1mGenerating C introspection for ROS interfaces[0m
+[1.719s] [ 25%] [32mBuilding CXX object CMakeFiles/hydrone_msgs__rosidl_typesupport_cpp.dir/rosidl_typesupport_cpp/hydrone_msgs/msg/landing_base__type_support.cpp.o[0m
+[1.719s] [ 26%] [32mBuilding CXX object CMakeFiles/hydrone_msgs__rosidl_typesupport_cpp.dir/rosidl_typesupport_cpp/hydrone_msgs/srv/set_phase__type_support.cpp.o[0m
+[1.720s] [ 28%] [32mBuilding CXX object CMakeFiles/hydrone_msgs__rosidl_typesupport_cpp.dir/rosidl_typesupport_cpp/hydrone_msgs/msg/mission_state__type_support.cpp.o[0m
+[1.720s] [ 29%] [32mBuilding CXX object CMakeFiles/hydrone_msgs__rosidl_typesupport_cpp.dir/rosidl_typesupport_cpp/hydrone_msgs/msg/human_gesture__type_support.cpp.o[0m
+[1.720s] [ 31%] [32mBuilding CXX object CMakeFiles/hydrone_msgs__rosidl_typesupport_cpp.dir/rosidl_typesupport_cpp/hydrone_msgs/msg/qr_code__type_support.cpp.o[0m
+[1.733s] [ 37%] [32mBuilding CXX object CMakeFiles/hydrone_msgs__rosidl_typesupport_introspection_cpp.dir/rosidl_typesupport_introspection_cpp/hydrone_msgs/srv/detail/set_phase__type_support.cpp.o[0m
+[1.733s] [ 37%] [32mBuilding CXX object CMakeFiles/hydrone_msgs__rosidl_typesupport_introspection_cpp.dir/rosidl_typesupport_introspection_cpp/hydrone_msgs/msg/detail/qr_code__type_support.cpp.o[0m
+[1.733s] [ 39%] [32mBuilding CXX object CMakeFiles/hydrone_msgs__rosidl_typesupport_introspection_cpp.dir/rosidl_typesupport_introspection_cpp/hydrone_msgs/msg/detail/mission_state__type_support.cpp.o[0m
+[1.733s] [ 39%] [32mBuilding CXX object CMakeFiles/hydrone_msgs__rosidl_typesupport_introspection_cpp.dir/rosidl_typesupport_introspection_cpp/hydrone_msgs/msg/detail/landing_base__type_support.cpp.o[0m
+[1.733s] [ 39%] [32mBuilding CXX object CMakeFiles/hydrone_msgs__rosidl_typesupport_introspection_cpp.dir/rosidl_typesupport_introspection_cpp/hydrone_msgs/msg/detail/human_gesture__type_support.cpp.o[0m
+[1.961s] [ 40%] [32mBuilding CXX object CMakeFiles/hydrone_msgs__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/hydrone_msgs/msg/detail/dds_fastrtps/mission_state__type_support.cpp.o[0m
+[1.961s] [ 42%] [32mBuilding CXX object CMakeFiles/hydrone_msgs__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/hydrone_msgs/msg/detail/dds_fastrtps/landing_base__type_support.cpp.o[0m
+[1.961s] [ 43%] [32mBuilding CXX object CMakeFiles/hydrone_msgs__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/hydrone_msgs/msg/detail/dds_fastrtps/human_gesture__type_support.cpp.o[0m
+[1.962s] [ 45%] [32mBuilding CXX object CMakeFiles/hydrone_msgs__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/hydrone_msgs/msg/detail/dds_fastrtps/qr_code__type_support.cpp.o[0m
+[1.964s] [ 46%] [32mBuilding CXX object CMakeFiles/hydrone_msgs__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/hydrone_msgs/srv/detail/dds_fastrtps/set_phase__type_support.cpp.o[0m
+[1.990s] [ 48%] [32m[1mLinking CXX shared library libhydrone_msgs__rosidl_typesupport_cpp.so[0m
+[2.017s] [ 50%] [32mBuilding CXX object CMakeFiles/hydrone_msgs__rosidl_typesupport_fastrtps_c.dir/rosidl_typesupport_fastrtps_c/hydrone_msgs/msg/detail/qr_code__type_support_c.cpp.o[0m
+[2.017s] [ 51%] [32mBuilding CXX object CMakeFiles/hydrone_msgs__rosidl_typesupport_fastrtps_c.dir/rosidl_typesupport_fastrtps_c/hydrone_msgs/msg/detail/human_gesture__type_support_c.cpp.o[0m
+[2.017s] [ 53%] [32mBuilding CXX object CMakeFiles/hydrone_msgs__rosidl_typesupport_fastrtps_c.dir/rosidl_typesupport_fastrtps_c/hydrone_msgs/srv/detail/set_phase__type_support_c.cpp.o[0m
+[2.018s] [ 53%] Built target hydrone_msgs__rosidl_typesupport_cpp
+[2.020s] [ 54%] [32mBuilding CXX object CMakeFiles/hydrone_msgs__rosidl_typesupport_fastrtps_c.dir/rosidl_typesupport_fastrtps_c/hydrone_msgs/msg/detail/landing_base__type_support_c.cpp.o[0m
+[2.022s] [ 56%] [32mBuilding CXX object CMakeFiles/hydrone_msgs__rosidl_typesupport_fastrtps_c.dir/rosidl_typesupport_fastrtps_c/hydrone_msgs/msg/detail/mission_state__type_support_c.cpp.o[0m
+[2.034s] [ 57%] [32mBuilding CXX object CMakeFiles/hydrone_msgs__rosidl_typesupport_c.dir/rosidl_typesupport_c/hydrone_msgs/msg/mission_state__type_support.cpp.o[0m
+[2.034s] [ 59%] [32mBuilding CXX object CMakeFiles/hydrone_msgs__rosidl_typesupport_c.dir/rosidl_typesupport_c/hydrone_msgs/msg/landing_base__type_support.cpp.o[0m
+[2.034s] [ 60%] [32mBuilding CXX object CMakeFiles/hydrone_msgs__rosidl_typesupport_c.dir/rosidl_typesupport_c/hydrone_msgs/msg/qr_code__type_support.cpp.o[0m
+[2.035s] [ 62%] [32mBuilding CXX object CMakeFiles/hydrone_msgs__rosidl_typesupport_c.dir/rosidl_typesupport_c/hydrone_msgs/msg/human_gesture__type_support.cpp.o[0m
+[2.039s] [ 64%] [32mBuilding CXX object CMakeFiles/hydrone_msgs__rosidl_typesupport_c.dir/rosidl_typesupport_c/hydrone_msgs/srv/set_phase__type_support.cpp.o[0m
+[2.078s] [ 65%] [32m[1mLinking CXX shared library libhydrone_msgs__rosidl_typesupport_c.so[0m
+[2.115s] [ 65%] Built target hydrone_msgs__rosidl_typesupport_c
+[2.129s] [ 67%] [32m[1mLinking CXX shared library libhydrone_msgs__rosidl_typesupport_introspection_cpp.so[0m
+[2.146s] [ 68%] [32mBuilding C object CMakeFiles/hydrone_msgs__rosidl_typesupport_introspection_c.dir/rosidl_typesupport_introspection_c/hydrone_msgs/srv/detail/set_phase__type_support.c.o[0m
+[2.146s] [ 70%] [32mBuilding C object CMakeFiles/hydrone_msgs__rosidl_typesupport_introspection_c.dir/rosidl_typesupport_introspection_c/hydrone_msgs/msg/detail/landing_base__type_support.c.o[0m
+[2.147s] [ 71%] [32mBuilding C object CMakeFiles/hydrone_msgs__rosidl_typesupport_introspection_c.dir/rosidl_typesupport_introspection_c/hydrone_msgs/msg/detail/mission_state__type_support.c.o[0m
+[2.149s] [ 73%] [32mBuilding C object CMakeFiles/hydrone_msgs__rosidl_typesupport_introspection_c.dir/rosidl_typesupport_introspection_c/hydrone_msgs/msg/detail/human_gesture__type_support.c.o[0m
+[2.150s] [ 75%] [32mBuilding C object CMakeFiles/hydrone_msgs__rosidl_typesupport_introspection_c.dir/rosidl_typesupport_introspection_c/hydrone_msgs/msg/detail/qr_code__type_support.c.o[0m
+[2.208s] [ 75%] Built target hydrone_msgs__rosidl_typesupport_introspection_cpp
+[2.215s] [ 76%] [32m[1mLinking C shared library libhydrone_msgs__rosidl_typesupport_introspection_c.so[0m
+[2.240s] [ 76%] Built target hydrone_msgs__rosidl_typesupport_introspection_c
+[2.335s] [ 78%] [32m[1mLinking CXX shared library libhydrone_msgs__rosidl_typesupport_fastrtps_cpp.so[0m
+[2.347s] [ 79%] [32m[1mLinking CXX shared library libhydrone_msgs__rosidl_typesupport_fastrtps_c.so[0m
+[2.388s] [ 79%] Built target hydrone_msgs__rosidl_typesupport_fastrtps_c
+[2.398s] [ 79%] Built target hydrone_msgs__rosidl_typesupport_fastrtps_cpp
+[2.411s] [ 79%] Built target hydrone_msgs
+[2.423s] [ 81%] [34m[1mGenerating Python code for ROS interfaces[0m
+[3.115s] [ 81%] Built target hydrone_msgs__py
+[3.128s] [ 82%] [32mBuilding C object CMakeFiles/hydrone_msgs__rosidl_generator_py.dir/rosidl_generator_py/hydrone_msgs/msg/_human_gesture_s.c.o[0m
+[3.129s] [ 84%] [32mBuilding C object CMakeFiles/hydrone_msgs__rosidl_generator_py.dir/rosidl_generator_py/hydrone_msgs/msg/_landing_base_s.c.o[0m
+[3.129s] [ 85%] [32mBuilding C object CMakeFiles/hydrone_msgs__rosidl_generator_py.dir/rosidl_generator_py/hydrone_msgs/msg/_mission_state_s.c.o[0m
+[3.129s] [ 87%] [32mBuilding C object CMakeFiles/hydrone_msgs__rosidl_generator_py.dir/rosidl_generator_py/hydrone_msgs/srv/_set_phase_s.c.o[0m
+[3.129s] [ 89%] [32mBuilding C object CMakeFiles/hydrone_msgs__rosidl_generator_py.dir/rosidl_generator_py/hydrone_msgs/msg/_qr_code_s.c.o[0m
+[3.237s] [ 90%] [32m[1mLinking C shared library rosidl_generator_py/hydrone_msgs/libhydrone_msgs__rosidl_generator_py.so[0m
+[3.266s] [ 90%] Built target hydrone_msgs__rosidl_generator_py
+[3.280s] [ 95%] [32mBuilding C object CMakeFiles/hydrone_msgs__rosidl_typesupport_c__pyext.dir/rosidl_generator_py/hydrone_msgs/_hydrone_msgs_s.ep.rosidl_typesupport_c.c.o[0m
+[3.280s] [ 95%] [32mBuilding C object CMakeFiles/hydrone_msgs__rosidl_typesupport_introspection_c__pyext.dir/rosidl_generator_py/hydrone_msgs/_hydrone_msgs_s.ep.rosidl_typesupport_introspection_c.c.o[0m
+[3.280s] [ 95%] [32mBuilding C object CMakeFiles/hydrone_msgs__rosidl_typesupport_fastrtps_c__pyext.dir/rosidl_generator_py/hydrone_msgs/_hydrone_msgs_s.ep.rosidl_typesupport_fastrtps_c.c.o[0m
+[3.369s] [ 96%] [32m[1mLinking C shared library rosidl_generator_py/hydrone_msgs/hydrone_msgs_s__rosidl_typesupport_fastrtps_c.cpython-310-x86_64-linux-gnu.so[0m
+[3.375s] [ 98%] [32m[1mLinking C shared library rosidl_generator_py/hydrone_msgs/hydrone_msgs_s__rosidl_typesupport_introspection_c.cpython-310-x86_64-linux-gnu.so[0m
+[3.376s] [100%] [32m[1mLinking C shared library rosidl_generator_py/hydrone_msgs/hydrone_msgs_s__rosidl_typesupport_c.cpython-310-x86_64-linux-gnu.so[0m
+[3.400s] [100%] Built target hydrone_msgs__rosidl_typesupport_introspection_c__pyext
+[3.400s] [100%] Built target hydrone_msgs__rosidl_typesupport_fastrtps_c__pyext
+[3.405s] [100%] Built target hydrone_msgs__rosidl_typesupport_c__pyext
+[3.419s] Invoked command in '/home/lh/Documents/joao_pessoa_2026/build/hydrone_msgs' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/home/lh/Documents/joao_pessoa_2026/install/ardupilot_dds_tests:/home/lh/Documents/joao_pessoa_2026/install/biguasim_main:/opt/ros/humble /usr/bin/cmake --build /home/lh/Documents/joao_pessoa_2026/build/hydrone_msgs -- -j32 -l32
+[3.420s] Invoking command in '/home/lh/Documents/joao_pessoa_2026/build/hydrone_msgs': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/home/lh/Documents/joao_pessoa_2026/install/ardupilot_dds_tests:/home/lh/Documents/joao_pessoa_2026/install/biguasim_main:/opt/ros/humble /usr/bin/cmake --install /home/lh/Documents/joao_pessoa_2026/build/hydrone_msgs
+[3.424s] -- Install configuration: ""
+[3.424s] -- Execute custom install script
+[3.424s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/ament_index/resource_index/rosidl_interfaces/hydrone_msgs
+[3.430s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/human_gesture__functions.h
+[3.434s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/human_gesture__struct.h
+[3.439s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/human_gesture__type_support.h
+[3.444s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/landing_base__functions.h
+[3.449s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/landing_base__struct.h
+[3.452s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/landing_base__type_support.h
+[3.457s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/mission_state__functions.h
+[3.461s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/mission_state__struct.h
+[3.465s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/mission_state__type_support.h
+[3.470s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/qr_code__functions.h
+[3.475s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/qr_code__struct.h
+[3.480s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/qr_code__type_support.h
+[3.484s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/human_gesture.h
+[3.490s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/landing_base.h
+[3.495s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/mission_state.h
+[3.498s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/qr_code.h
+[3.504s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/rosidl_generator_c__visibility_control.h
+[3.509s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/srv/detail/set_phase__functions.h
+[3.514s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/srv/detail/set_phase__struct.h
+[3.518s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/srv/detail/set_phase__type_support.h
+[3.521s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/srv/set_phase.h
+[3.525s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/environment/library_path.sh
+[3.530s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/environment/library_path.dsv
+[3.534s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/human_gesture__rosidl_typesupport_fastrtps_c.h
+[3.539s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/landing_base__rosidl_typesupport_fastrtps_c.h
+[3.545s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/mission_state__rosidl_typesupport_fastrtps_c.h
+[3.550s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/qr_code__rosidl_typesupport_fastrtps_c.h
+[3.554s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/rosidl_typesupport_fastrtps_c__visibility_control.h
+[3.558s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/srv/detail/set_phase__rosidl_typesupport_fastrtps_c.h
+[3.562s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/human_gesture__rosidl_typesupport_introspection_c.h
+[3.567s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/landing_base__rosidl_typesupport_introspection_c.h
+[3.573s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/mission_state__rosidl_typesupport_introspection_c.h
+[3.579s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/qr_code__rosidl_typesupport_introspection_c.h
+[3.583s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/rosidl_typesupport_introspection_c__visibility_control.h
+[3.587s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/srv/detail/set_phase__rosidl_typesupport_introspection_c.h
+[3.591s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/human_gesture__builder.hpp
+[3.595s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/human_gesture__struct.hpp
+[3.600s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/human_gesture__traits.hpp
+[3.605s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/human_gesture__type_support.hpp
+[3.610s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/landing_base__builder.hpp
+[3.614s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/landing_base__struct.hpp
+[3.620s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/landing_base__traits.hpp
+[3.626s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/landing_base__type_support.hpp
+[3.631s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/mission_state__builder.hpp
+[3.636s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/mission_state__struct.hpp
+[3.641s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/mission_state__traits.hpp
+[3.647s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/mission_state__type_support.hpp
+[3.653s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/qr_code__builder.hpp
+[3.657s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/qr_code__struct.hpp
+[3.663s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/qr_code__traits.hpp
+[3.668s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/qr_code__type_support.hpp
+[3.674s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/human_gesture.hpp
+[3.679s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/landing_base.hpp
+[3.685s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/mission_state.hpp
+[3.691s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/qr_code.hpp
+[3.697s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/rosidl_generator_cpp__visibility_control.hpp
+[3.701s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/srv/detail/set_phase__builder.hpp
+[3.705s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/srv/detail/set_phase__struct.hpp
+[3.710s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/srv/detail/set_phase__traits.hpp
+[3.715s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/srv/detail/set_phase__type_support.hpp
+[3.721s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/srv/set_phase.hpp
+[3.728s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/human_gesture__rosidl_typesupport_fastrtps_cpp.hpp
+[3.733s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/landing_base__rosidl_typesupport_fastrtps_cpp.hpp
+[3.739s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/mission_state__rosidl_typesupport_fastrtps_cpp.hpp
+[3.743s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/qr_code__rosidl_typesupport_fastrtps_cpp.hpp
+[3.749s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/rosidl_typesupport_fastrtps_cpp__visibility_control.h
+[3.755s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/srv/detail/set_phase__rosidl_typesupport_fastrtps_cpp.hpp
+[3.761s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/human_gesture__rosidl_typesupport_introspection_cpp.hpp
+[3.766s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/landing_base__rosidl_typesupport_introspection_cpp.hpp
+[3.772s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/mission_state__rosidl_typesupport_introspection_cpp.hpp
+[3.777s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/msg/detail/qr_code__rosidl_typesupport_introspection_cpp.hpp
+[3.782s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/include/hydrone_msgs/hydrone_msgs/srv/detail/set_phase__rosidl_typesupport_introspection_cpp.hpp
+[3.788s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/environment/pythonpath.sh
+[3.793s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/environment/pythonpath.dsv
+[3.799s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs-1.0.0-py3.10.egg-info/PKG-INFO
+[3.804s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs-1.0.0-py3.10.egg-info/SOURCES.txt
+[3.808s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs-1.0.0-py3.10.egg-info/dependency_links.txt
+[3.812s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs-1.0.0-py3.10.egg-info/top_level.txt
+[3.818s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/__init__.py
+[3.823s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/_hydrone_msgs_s.ep.rosidl_typesupport_c.c
+[3.828s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/_hydrone_msgs_s.ep.rosidl_typesupport_fastrtps_c.c
+[3.833s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/_hydrone_msgs_s.ep.rosidl_typesupport_introspection_c.c
+[3.838s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/hydrone_msgs_s__rosidl_typesupport_c.cpython-310-x86_64-linux-gnu.so
+[3.844s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/hydrone_msgs_s__rosidl_typesupport_fastrtps_c.cpython-310-x86_64-linux-gnu.so
+[3.849s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/hydrone_msgs_s__rosidl_typesupport_introspection_c.cpython-310-x86_64-linux-gnu.so
+[3.854s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/libhydrone_msgs__rosidl_generator_py.so
+[3.858s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/msg/__init__.py
+[3.864s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/msg/_human_gesture.py
+[3.868s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/msg/_human_gesture_s.c
+[3.872s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/msg/_landing_base.py
+[3.876s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/msg/_landing_base_s.c
+[3.881s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/msg/_mission_state.py
+[3.887s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/msg/_mission_state_s.c
+[3.891s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/msg/_qr_code.py
+[3.897s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/msg/_qr_code_s.c
+[3.902s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/srv/__init__.py
+[3.907s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/srv/_set_phase.py
+[3.913s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/srv/_set_phase_s.c
+[3.919s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/hydrone_msgs_s__rosidl_typesupport_fastrtps_c.cpython-310-x86_64-linux-gnu.so
+[3.919s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/hydrone_msgs_s__rosidl_typesupport_introspection_c.cpython-310-x86_64-linux-gnu.so
+[3.919s] -- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/hydrone_msgs_s__rosidl_typesupport_c.cpython-310-x86_64-linux-gnu.so
+[3.919s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/ament_index/resource_index/rust_packages/hydrone_msgs
+[3.925s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/rust/Cargo.toml
+[3.930s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/rust/build.rs
+[3.935s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/rust/src/lib.rs
+[3.941s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/rust/src/msg.rs
+[3.946s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/rust/src/msg/rmw.rs
+[3.951s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/rust/src/srv.rs
+[3.956s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/rust/src/srv/rmw.rs
+[3.960s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/msg/LandingBase.idl
+[3.964s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/msg/MissionState.idl
+[3.968s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/msg/HumanGesture.idl
+[3.973s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/msg/QRCode.idl
+[3.978s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/srv/SetPhase.idl
+[3.983s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/msg/LandingBase.msg
+[3.988s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/msg/MissionState.msg
+[3.992s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/msg/HumanGesture.msg
+[3.997s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/msg/QRCode.msg
+[4.002s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/srv/SetPhase.srv
+[4.007s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/srv/SetPhase_Request.msg
+[4.012s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/srv/SetPhase_Response.msg
+[4.016s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/ament_index/resource_index/package_run_dependencies/hydrone_msgs
+[4.019s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/ament_index/resource_index/parent_prefix_path/hydrone_msgs
+[4.025s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/environment/ament_prefix_path.sh
+[4.030s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/environment/ament_prefix_path.dsv
+[4.034s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/environment/path.sh
+[4.039s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/environment/path.dsv
+[4.044s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/local_setup.bash
+[4.049s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/local_setup.sh
+[4.053s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/local_setup.zsh
+[4.059s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/local_setup.dsv
+[4.064s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/package.dsv
+[4.068s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/ament_index/resource_index/packages/hydrone_msgs
+[4.073s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/cmake/rosidl_cmake-extras.cmake
+[4.078s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/cmake/ament_cmake_export_dependencies-extras.cmake
+[4.083s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/cmake/ament_cmake_export_include_directories-extras.cmake
+[4.088s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/cmake/ament_cmake_export_libraries-extras.cmake
+[4.093s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/cmake/ament_cmake_export_targets-extras.cmake
+[4.098s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/cmake/rosidl_cmake_export_typesupport_targets-extras.cmake
+[4.103s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/cmake/rosidl_cmake_export_typesupport_libraries-extras.cmake
+[4.108s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/cmake/hydrone_msgsConfig.cmake
+[4.113s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/cmake/hydrone_msgsConfig-version.cmake
+[4.117s] -- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/package.xml
+[4.122s] -- Installing: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/lib/libhydrone_msgs__rosidl_generator_c.so
+[4.122s] -- Set runtime path of "/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/lib/libhydrone_msgs__rosidl_generator_c.so" to ""
+[4.122s] -- Installing: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/lib/libhydrone_msgs__rosidl_typesupport_fastrtps_c.so
+[4.122s] -- Set runtime path of "/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/lib/libhydrone_msgs__rosidl_typesupport_fastrtps_c.so" to ""
+[4.122s] -- Installing: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/lib/libhydrone_msgs__rosidl_typesupport_introspection_c.so
+[4.122s] -- Set runtime path of "/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/lib/libhydrone_msgs__rosidl_typesupport_introspection_c.so" to ""
+[4.122s] -- Installing: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/lib/libhydrone_msgs__rosidl_typesupport_c.so
+[4.122s] -- Set runtime path of "/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/lib/libhydrone_msgs__rosidl_typesupport_c.so" to ""
+[4.123s] -- Installing: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/lib/libhydrone_msgs__rosidl_typesupport_fastrtps_cpp.so
+[4.123s] -- Set runtime path of "/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/lib/libhydrone_msgs__rosidl_typesupport_fastrtps_cpp.so" to ""
+[4.123s] -- Installing: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/lib/libhydrone_msgs__rosidl_typesupport_introspection_cpp.so
+[4.123s] -- Set runtime path of "/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/lib/libhydrone_msgs__rosidl_typesupport_introspection_cpp.so" to ""
+[4.123s] -- Installing: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/lib/libhydrone_msgs__rosidl_typesupport_cpp.so
+[4.123s] -- Set runtime path of "/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/lib/libhydrone_msgs__rosidl_typesupport_cpp.so" to ""
+[4.143s] Listing '/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs'...
+[4.143s] Compiling '/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/__init__.py'...
+[4.143s] Listing '/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/msg'...
+[4.143s] Compiling '/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/msg/__init__.py'...
+[4.143s] Compiling '/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/msg/_human_gesture.py'...
+[4.143s] Compiling '/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/msg/_landing_base.py'...
+[4.143s] Compiling '/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/msg/_mission_state.py'...
+[4.143s] Compiling '/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/msg/_qr_code.py'...
+[4.143s] Listing '/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/srv'...
+[4.143s] Compiling '/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/srv/__init__.py'...
+[4.143s] Compiling '/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/local/lib/python3.10/dist-packages/hydrone_msgs/srv/_set_phase.py'...
+[4.145s] -- Installing: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/lib/libhydrone_msgs__rosidl_generator_py.so
+[4.145s] -- Set runtime path of "/home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/lib/libhydrone_msgs__rosidl_generator_py.so" to ""
+[4.145s] -- Installing: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/cmake/export_hydrone_msgs__rosidl_generator_cExport.cmake
+[4.145s] -- Installing: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/cmake/export_hydrone_msgs__rosidl_generator_cExport-noconfig.cmake
+[4.145s] -- Installing: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/cmake/export_hydrone_msgs__rosidl_typesupport_fastrtps_cExport.cmake
+[4.145s] -- Installing: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/cmake/export_hydrone_msgs__rosidl_typesupport_fastrtps_cExport-noconfig.cmake
+[4.145s] -- Installing: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/cmake/hydrone_msgs__rosidl_typesupport_introspection_cExport.cmake
+[4.145s] -- Installing: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/cmake/hydrone_msgs__rosidl_typesupport_introspection_cExport-noconfig.cmake
+[4.145s] -- Installing: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/cmake/hydrone_msgs__rosidl_typesupport_cExport.cmake
+[4.146s] -- Installing: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/cmake/hydrone_msgs__rosidl_typesupport_cExport-noconfig.cmake
+[4.146s] -- Installing: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/cmake/export_hydrone_msgs__rosidl_generator_cppExport.cmake
+[4.146s] -- Installing: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/cmake/export_hydrone_msgs__rosidl_typesupport_fastrtps_cppExport.cmake
+[4.146s] -- Installing: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/cmake/export_hydrone_msgs__rosidl_typesupport_fastrtps_cppExport-noconfig.cmake
+[4.146s] -- Installing: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/cmake/hydrone_msgs__rosidl_typesupport_introspection_cppExport.cmake
+[4.146s] -- Installing: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/cmake/hydrone_msgs__rosidl_typesupport_introspection_cppExport-noconfig.cmake
+[4.146s] -- Installing: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/cmake/hydrone_msgs__rosidl_typesupport_cppExport.cmake
+[4.146s] -- Installing: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/cmake/hydrone_msgs__rosidl_typesupport_cppExport-noconfig.cmake
+[4.146s] -- Installing: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/cmake/export_hydrone_msgs__rosidl_generator_pyExport.cmake
+[4.146s] -- Installing: /home/lh/Documents/joao_pessoa_2026/install/hydrone_msgs/share/hydrone_msgs/cmake/export_hydrone_msgs__rosidl_generator_pyExport-noconfig.cmake
+[4.148s] Invoked command in '/home/lh/Documents/joao_pessoa_2026/build/hydrone_msgs' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/home/lh/Documents/joao_pessoa_2026/install/ardupilot_dds_tests:/home/lh/Documents/joao_pessoa_2026/install/biguasim_main:/opt/ros/humble /usr/bin/cmake --install /home/lh/Documents/joao_pessoa_2026/build/hydrone_msgs

@@ -1,0 +1,13 @@
+/home/lh/Documents/joao_pessoa_2026/build/ardupilot_sitl/CMakeFiles/uninstall.dir
+/home/lh/Documents/joao_pessoa_2026/build/ardupilot_sitl/CMakeFiles/ardupilot_sitl_uninstall.dir
+/home/lh/Documents/joao_pessoa_2026/build/ardupilot_sitl/CMakeFiles/ardupilot_configure.dir
+/home/lh/Documents/joao_pessoa_2026/build/ardupilot_sitl/CMakeFiles/ardupilot_build.dir
+/home/lh/Documents/joao_pessoa_2026/build/ardupilot_sitl/CMakeFiles/ament_cmake_python_symlink_ardupilot_sitl.dir
+/home/lh/Documents/joao_pessoa_2026/build/ardupilot_sitl/CMakeFiles/ament_cmake_python_build_ardupilot_sitl_egg.dir
+/home/lh/Documents/joao_pessoa_2026/build/ardupilot_sitl/CMakeFiles/test.dir
+/home/lh/Documents/joao_pessoa_2026/build/ardupilot_sitl/CMakeFiles/edit_cache.dir
+/home/lh/Documents/joao_pessoa_2026/build/ardupilot_sitl/CMakeFiles/rebuild_cache.dir
+/home/lh/Documents/joao_pessoa_2026/build/ardupilot_sitl/CMakeFiles/list_install_components.dir
+/home/lh/Documents/joao_pessoa_2026/build/ardupilot_sitl/CMakeFiles/install.dir
+/home/lh/Documents/joao_pessoa_2026/build/ardupilot_sitl/CMakeFiles/install/local.dir
+/home/lh/Documents/joao_pessoa_2026/build/ardupilot_sitl/CMakeFiles/install/strip.dir

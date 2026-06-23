@@ -1,0 +1,1 @@
+/home/lh/Documents/joao_pessoa_2026/src/ardupilot/Tools/ros2/ardupilot_sitl/src/ardupilot_sitl/__init__.py

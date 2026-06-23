@@ -1,0 +1,40 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from hydrone_msgs/msg/LandingBase.msg
+// generated code does not contain a copyright notice
+
+#include "geometry_msgs/msg/Pose.idl"
+#include "std_msgs/msg/Header.idl"
+
+module hydrone_msgs {
+  module msg {
+    @verbatim (language="comment", text=
+      "Represents a detected landing base in the arena")
+    struct LandingBase {
+      std_msgs::msg::Header header;
+
+      @verbatim (language="comment", text=
+        "0-5 (6 bases total)")
+      uint8 base_id;
+
+      @verbatim (language="comment", text=
+        "Position and orientation of the base")
+      geometry_msgs::msg::Pose pose;
+
+      @verbatim (language="comment", text=
+        "True if base is elevated (suspended)")
+      boolean is_suspended;
+
+      @verbatim (language="comment", text=
+        "Whether drone has already landed here")
+      boolean is_visited;
+
+      @verbatim (language="comment", text=
+        "Detection confidence 0.0-1.0")
+      float confidence;
+
+      @verbatim (language="comment", text=
+        "Height above ground in meters")
+      float height;
+    };
+  };
+};

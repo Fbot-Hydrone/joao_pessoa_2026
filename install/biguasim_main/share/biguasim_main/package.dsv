@@ -1,0 +1,9 @@
+source;share/biguasim_main/hook/pythonpath.ps1
+source;share/biguasim_main/hook/pythonpath.dsv
+source;share/biguasim_main/hook/pythonpath.sh
+source;share/biguasim_main/hook/ament_prefix_path.ps1
+source;share/biguasim_main/hook/ament_prefix_path.dsv
+source;share/biguasim_main/hook/ament_prefix_path.sh
+source;../../build/biguasim_main/share/biguasim_main/hook/pythonpath_develop.ps1
+source;../../build/biguasim_main/share/biguasim_main/hook/pythonpath_develop.dsv
+source;../../build/biguasim_main/share/biguasim_main/hook/pythonpath_develop.sh

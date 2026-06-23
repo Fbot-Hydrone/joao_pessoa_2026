@@ -1,0 +1,9 @@
+setup.py
+ardupilot_sitl/__init__.py
+ardupilot_sitl/actions.py
+ardupilot_sitl/launch.py
+ardupilot_sitl/utilities.py
+ardupilot_sitl.egg-info/PKG-INFO
+ardupilot_sitl.egg-info/SOURCES.txt
+ardupilot_sitl.egg-info/dependency_links.txt
+ardupilot_sitl.egg-info/top_level.txt

@@ -1,0 +1,4 @@
+source;share/ardupilot_sitl/local_setup.bash
+source;share/ardupilot_sitl/local_setup.dsv
+source;share/ardupilot_sitl/local_setup.sh
+source;share/ardupilot_sitl/local_setup.zsh

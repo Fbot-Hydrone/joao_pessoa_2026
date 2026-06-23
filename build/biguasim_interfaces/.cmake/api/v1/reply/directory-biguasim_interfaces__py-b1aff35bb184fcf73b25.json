@@ -1,0 +1,14 @@
+{
+	"backtraceGraph" : 
+	{
+		"commands" : [],
+		"files" : [],
+		"nodes" : []
+	},
+	"installers" : [],
+	"paths" : 
+	{
+		"build" : "biguasim_interfaces__py",
+		"source" : "/home/lh/Documents/joao_pessoa_2026/build/biguasim_interfaces/biguasim_interfaces__py"
+	}
+}

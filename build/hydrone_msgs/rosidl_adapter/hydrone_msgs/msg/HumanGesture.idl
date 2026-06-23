@@ -1,0 +1,32 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from hydrone_msgs/msg/HumanGesture.msg
+// generated code does not contain a copyright notice
+
+#include "geometry_msgs/msg/Point.idl"
+#include "std_msgs/msg/Header.idl"
+
+module hydrone_msgs {
+  module msg {
+    @verbatim (language="comment", text=
+      "Human gesture/command detected by vision system (Phase 3)")
+    struct HumanGesture {
+      std_msgs::msg::Header header;
+
+      @verbatim (language="comment", text=
+        "e.g. \"arms_up\", \"point_left\", \"point_right\", etc.")
+      string gesture_name;
+
+      @verbatim (language="comment", text=
+        "Detection confidence 0.0-1.0")
+      float confidence;
+
+      @verbatim (language="comment", text=
+        "Position of the human in the world")
+      geometry_msgs::msg::Point human_position;
+
+      @verbatim (language="comment", text=
+        "Flat array of skeleton keypoints (x,y,z per joint)")
+      sequence<float> skeleton_keypoints;
+    };
+  };
+};

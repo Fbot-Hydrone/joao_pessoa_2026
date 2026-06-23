@@ -1,0 +1,22 @@
+running develop
+running egg_info
+creating hydrone_controller.egg-info
+writing hydrone_controller.egg-info/PKG-INFO
+writing dependency_links to hydrone_controller.egg-info/dependency_links.txt
+writing entry points to hydrone_controller.egg-info/entry_points.txt
+writing requirements to hydrone_controller.egg-info/requires.txt
+writing top-level names to hydrone_controller.egg-info/top_level.txt
+writing manifest file 'hydrone_controller.egg-info/SOURCES.txt'
+reading manifest file 'hydrone_controller.egg-info/SOURCES.txt'
+writing manifest file 'hydrone_controller.egg-info/SOURCES.txt'
+running build_ext
+Creating /home/lh/Documents/joao_pessoa_2026/install/hydrone_controller/lib/python3.10/site-packages/hydrone-controller.egg-link (link to .)
+Installing controller_node script to /home/lh/Documents/joao_pessoa_2026/install/hydrone_controller/bin
+
+Installed /home/lh/Documents/joao_pessoa_2026/build/hydrone_controller
+running symlink_data
+creating /home/lh/Documents/joao_pessoa_2026/install/hydrone_controller/share/ament_index
+creating /home/lh/Documents/joao_pessoa_2026/install/hydrone_controller/share/ament_index/resource_index
+creating /home/lh/Documents/joao_pessoa_2026/install/hydrone_controller/share/ament_index/resource_index/packages
+symbolically linking /home/lh/Documents/joao_pessoa_2026/build/hydrone_controller/resource/hydrone_controller -> /home/lh/Documents/joao_pessoa_2026/install/hydrone_controller/share/ament_index/resource_index/packages
+symbolically linking /home/lh/Documents/joao_pessoa_2026/build/hydrone_controller/package.xml -> /home/lh/Documents/joao_pessoa_2026/install/hydrone_controller/share/hydrone_controller

@@ -1,0 +1,1 @@
+/home/lh/Documents/joao_pessoa_2026/build/hydrone_msgs/rosidl_typesupport_introspection_c/hydrone_msgs/msg/detail/human_gesture__rosidl_typesupport_introspection_c.h

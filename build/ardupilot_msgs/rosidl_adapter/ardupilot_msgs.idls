@@ -1,0 +1,7 @@
+/home/lh/Documents/joao_pessoa_2026/build/ardupilot_msgs/rosidl_adapter/ardupilot_msgs:msg/GlobalPosition.idl
+/home/lh/Documents/joao_pessoa_2026/build/ardupilot_msgs/rosidl_adapter/ardupilot_msgs:msg/Rc.idl
+/home/lh/Documents/joao_pessoa_2026/build/ardupilot_msgs/rosidl_adapter/ardupilot_msgs:msg/Status.idl
+/home/lh/Documents/joao_pessoa_2026/build/ardupilot_msgs/rosidl_adapter/ardupilot_msgs:msg/Airspeed.idl
+/home/lh/Documents/joao_pessoa_2026/build/ardupilot_msgs/rosidl_adapter/ardupilot_msgs:srv/ArmMotors.idl
+/home/lh/Documents/joao_pessoa_2026/build/ardupilot_msgs/rosidl_adapter/ardupilot_msgs:srv/ModeSwitch.idl
+/home/lh/Documents/joao_pessoa_2026/build/ardupilot_msgs/rosidl_adapter/ardupilot_msgs:srv/Takeoff.idl

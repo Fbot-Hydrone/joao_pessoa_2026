@@ -1,0 +1,29 @@
+// generated from rosidl_adapter/resource/srv.idl.em
+// with input from hydrone_msgs/srv/SetPhase.srv
+// generated code does not contain a copyright notice
+
+
+module hydrone_msgs {
+  module srv {
+    @verbatim (language="comment", text=
+      "Set the active competition phase and configuration")
+    struct SetPhase_Request {
+      @verbatim (language="comment", text=
+        "1, 2, 3 or 4")
+      uint8 phase;
+
+      @verbatim (language="comment", text=
+        "Using open hardware drone?")
+      boolean open_hardware;
+
+      @verbatim (language="comment", text=
+        "Phase 3 only: use two drones simultaneously?")
+      boolean use_two_drones;
+    };
+    struct SetPhase_Response {
+      boolean success;
+
+      string message;
+    };
+  };
+};

@@ -1,0 +1,12 @@
+// generated from rosidl_generator_cpp/resource/idl.hpp.em
+// generated code does not contain a copyright notice
+
+#ifndef BIGUASIM_INTERFACES__MSG__DVL_SENSOR_RANGE_HPP_
+#define BIGUASIM_INTERFACES__MSG__DVL_SENSOR_RANGE_HPP_
+
+#include "biguasim_interfaces/msg/detail/dvl_sensor_range__struct.hpp"
+#include "biguasim_interfaces/msg/detail/dvl_sensor_range__builder.hpp"
+#include "biguasim_interfaces/msg/detail/dvl_sensor_range__traits.hpp"
+#include "biguasim_interfaces/msg/detail/dvl_sensor_range__type_support.hpp"
+
+#endif  // BIGUASIM_INTERFACES__MSG__DVL_SENSOR_RANGE_HPP_

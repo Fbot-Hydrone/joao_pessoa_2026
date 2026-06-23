@@ -1,0 +1,43 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/home/lh/Documents/joao_pessoa_2026/build/micro_ros_agent/CMakeFiles/xrceagent"
+		},
+		{
+			"file" : "/home/lh/Documents/joao_pessoa_2026/build/micro_ros_agent/CMakeFiles/xrceagent.rule"
+		},
+		{
+			"file" : "/home/lh/Documents/joao_pessoa_2026/build/micro_ros_agent/CMakeFiles/xrceagent-complete.rule"
+		},
+		{
+			"file" : "/home/lh/Documents/joao_pessoa_2026/build/micro_ros_agent/agent/src/xrceagent-stamp/xrceagent-build.rule"
+		},
+		{
+			"file" : "/home/lh/Documents/joao_pessoa_2026/build/micro_ros_agent/agent/src/xrceagent-stamp/xrceagent-configure.rule"
+		},
+		{
+			"file" : "/home/lh/Documents/joao_pessoa_2026/build/micro_ros_agent/agent/src/xrceagent-stamp/xrceagent-download.rule"
+		},
+		{
+			"file" : "/home/lh/Documents/joao_pessoa_2026/build/micro_ros_agent/agent/src/xrceagent-stamp/xrceagent-install.rule"
+		},
+		{
+			"file" : "/home/lh/Documents/joao_pessoa_2026/build/micro_ros_agent/agent/src/xrceagent-stamp/xrceagent-mkdir.rule"
+		},
+		{
+			"file" : "/home/lh/Documents/joao_pessoa_2026/build/micro_ros_agent/agent/src/xrceagent-stamp/xrceagent-patch.rule"
+		},
+		{
+			"file" : "/home/lh/Documents/joao_pessoa_2026/build/micro_ros_agent/agent/src/xrceagent-stamp/xrceagent-update.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"xrceagent"
+		],
+		"name" : "xrceagent"
+	}
+}

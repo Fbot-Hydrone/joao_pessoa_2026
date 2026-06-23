@@ -1,0 +1,15 @@
+setup.py
+ardupilot_msgs/__init__.py
+ardupilot_msgs.egg-info/PKG-INFO
+ardupilot_msgs.egg-info/SOURCES.txt
+ardupilot_msgs.egg-info/dependency_links.txt
+ardupilot_msgs.egg-info/top_level.txt
+ardupilot_msgs/msg/__init__.py
+ardupilot_msgs/msg/_airspeed.py
+ardupilot_msgs/msg/_global_position.py
+ardupilot_msgs/msg/_rc.py
+ardupilot_msgs/msg/_status.py
+ardupilot_msgs/srv/__init__.py
+ardupilot_msgs/srv/_arm_motors.py
+ardupilot_msgs/srv/_mode_switch.py
+ardupilot_msgs/srv/_takeoff.py

@@ -1,0 +1,258 @@
+{
+	"configurations" : 
+	[
+		{
+			"directories" : 
+			[
+				{
+					"build" : ".",
+					"childIndexes" : 
+					[
+						1,
+						2
+					],
+					"hasInstallRule" : true,
+					"jsonFile" : "directory-.-52468e305ff509d6a3b0.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.12"
+					},
+					"projectIndex" : 0,
+					"source" : ".",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3,
+						5,
+						6,
+						7,
+						8,
+						9,
+						10,
+						11,
+						12,
+						13,
+						14,
+						15,
+						17,
+						18
+					]
+				},
+				{
+					"build" : "biguasim_interfaces__py",
+					"jsonFile" : "directory-biguasim_interfaces__py-b1aff35bb184fcf73b25.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.12"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "/home/lh/Documents/joao_pessoa_2026/build/biguasim_interfaces/biguasim_interfaces__py",
+					"targetIndexes" : 
+					[
+						4
+					]
+				},
+				{
+					"build" : "biguasim_interfaces__rs",
+					"jsonFile" : "directory-biguasim_interfaces__rs-294383e2cdfaf37e9849.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.12"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "/home/lh/Documents/joao_pessoa_2026/build/biguasim_interfaces/biguasim_interfaces__rs",
+					"targetIndexes" : 
+					[
+						16
+					]
+				}
+			],
+			"name" : "",
+			"projects" : 
+			[
+				{
+					"directoryIndexes" : 
+					[
+						0,
+						1,
+						2
+					],
+					"name" : "biguasim_interfaces",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3,
+						4,
+						5,
+						6,
+						7,
+						8,
+						9,
+						10,
+						11,
+						12,
+						13,
+						14,
+						15,
+						16,
+						17,
+						18
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 0,
+					"id" : "ament_cmake_python_build_biguasim_interfaces_egg::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ament_cmake_python_build_biguasim_interfaces_egg-babf2479c26dcdeab97e.json",
+					"name" : "ament_cmake_python_build_biguasim_interfaces_egg",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "ament_cmake_python_symlink_biguasim_interfaces::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ament_cmake_python_symlink_biguasim_interfaces-a3558d8aa3f4688de297.json",
+					"name" : "ament_cmake_python_symlink_biguasim_interfaces",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "biguasim_interfaces::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-biguasim_interfaces-98541aeb246ab248401d.json",
+					"name" : "biguasim_interfaces",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "biguasim_interfaces__cpp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-biguasim_interfaces__cpp-8ba501f5d5bd9e3259b9.json",
+					"name" : "biguasim_interfaces__cpp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "biguasim_interfaces__py::@9ecc18198fd1c6d32e88",
+					"jsonFile" : "target-biguasim_interfaces__py-60853db1c27ab02b4c06.json",
+					"name" : "biguasim_interfaces__py",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "biguasim_interfaces__rosidl_generator_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-biguasim_interfaces__rosidl_generator_c-2a10c14abb7d813a7d4f.json",
+					"name" : "biguasim_interfaces__rosidl_generator_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "biguasim_interfaces__rosidl_generator_py::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-biguasim_interfaces__rosidl_generator_py-966c9bb96d6db8610abf.json",
+					"name" : "biguasim_interfaces__rosidl_generator_py",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "biguasim_interfaces__rosidl_typesupport_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-biguasim_interfaces__rosidl_typesupport_c-d841f162bb1f01f612a4.json",
+					"name" : "biguasim_interfaces__rosidl_typesupport_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "biguasim_interfaces__rosidl_typesupport_c__pyext::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-biguasim_interfaces__rosidl_typesupport_c__pyext-0d5330a9f188170e0442.json",
+					"name" : "biguasim_interfaces__rosidl_typesupport_c__pyext",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "biguasim_interfaces__rosidl_typesupport_cpp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-biguasim_interfaces__rosidl_typesupport_cpp-772a1557adced01f6643.json",
+					"name" : "biguasim_interfaces__rosidl_typesupport_cpp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "biguasim_interfaces__rosidl_typesupport_fastrtps_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-biguasim_interfaces__rosidl_typesupport_fastrtps_c-ce0d532a3bdd80ebeb8b.json",
+					"name" : "biguasim_interfaces__rosidl_typesupport_fastrtps_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "biguasim_interfaces__rosidl_typesupport_fastrtps_c__pyext::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-biguasim_interfaces__rosidl_typesupport_fastrtps_c__pyext-3d46c9c0bd094a05cd97.json",
+					"name" : "biguasim_interfaces__rosidl_typesupport_fastrtps_c__pyext",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "biguasim_interfaces__rosidl_typesupport_fastrtps_cpp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-biguasim_interfaces__rosidl_typesupport_fastrtps_cpp-617311ffca0fd627e5a6.json",
+					"name" : "biguasim_interfaces__rosidl_typesupport_fastrtps_cpp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "biguasim_interfaces__rosidl_typesupport_introspection_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-biguasim_interfaces__rosidl_typesupport_introspection_c-c4424be91165cbc7ea9a.json",
+					"name" : "biguasim_interfaces__rosidl_typesupport_introspection_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "biguasim_interfaces__rosidl_typesupport_introspection_c__pyext::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-biguasim_interfaces__rosidl_typesupport_introspection_c__pyext-6aeb7d511314da2b1143.json",
+					"name" : "biguasim_interfaces__rosidl_typesupport_introspection_c__pyext",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "biguasim_interfaces__rosidl_typesupport_introspection_cpp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-biguasim_interfaces__rosidl_typesupport_introspection_cpp-c2bb772066e0c0874efa.json",
+					"name" : "biguasim_interfaces__rosidl_typesupport_introspection_cpp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 2,
+					"id" : "biguasim_interfaces__rs::@4bc3519607c97e6c13cc",
+					"jsonFile" : "target-biguasim_interfaces__rs-4db9bac10e094b12df97.json",
+					"name" : "biguasim_interfaces__rs",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "biguasim_interfaces_uninstall::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-biguasim_interfaces_uninstall-9480cfcab19e17d6bc25.json",
+					"name" : "biguasim_interfaces_uninstall",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "uninstall::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-uninstall-6243fc07caa6346b6840.json",
+					"name" : "uninstall",
+					"projectIndex" : 0
+				}
+			]
+		}
+	],
+	"kind" : "codemodel",
+	"paths" : 
+	{
+		"build" : "/home/lh/Documents/joao_pessoa_2026/build/biguasim_interfaces",
+		"source" : "/home/lh/Documents/joao_pessoa_2026/src/biguasim-ros2/biguasim_interfaces"
+	},
+	"version" : 
+	{
+		"major" : 2,
+		"minor" : 3
+	}
+}
