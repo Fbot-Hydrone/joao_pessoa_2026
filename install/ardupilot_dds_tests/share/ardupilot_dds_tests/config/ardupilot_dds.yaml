@@ -1,1 +1,12 @@
-/home/lh/Documents/joao_pessoa_2026/build/ardupilot_dds_tests/config/ardupilot_dds.yaml
+/micro_ros_agent:
+    transport: serial
+    middleware: dds
+    serial_baud: 115200
+    serial_device: ./dev/ttyROS0
+
+/ardupilot:
+    sim_vehicle_cmd: ./src/ardupilot/Tools/autotest/sim_vehicle.py
+    vehicle: ArduCopter
+    frame: quad
+    serial_baud: 115200
+    serial_device: ./dev/ttyROS1

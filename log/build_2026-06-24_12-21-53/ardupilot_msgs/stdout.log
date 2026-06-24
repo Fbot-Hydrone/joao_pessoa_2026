@@ -1,0 +1,235 @@
+[  1%] Built target ardupilot_msgs__cpp
+[  2%] Built target ardupilot_msgs__rs
+[ 13%] Built target ardupilot_msgs__rosidl_generator_c
+[ 13%] Built target ament_cmake_python_symlink_ardupilot_msgs
+[ 25%] Built target ardupilot_msgs__rosidl_typesupport_cpp
+[ 36%] Built target ardupilot_msgs__rosidl_typesupport_fastrtps_cpp
+[ 56%] Built target ardupilot_msgs__rosidl_typesupport_introspection_cpp
+[ 58%] Built target ardupilot_msgs__rosidl_typesupport_c
+[ 70%] Built target ardupilot_msgs__rosidl_typesupport_introspection_c
+[ 81%] Built target ardupilot_msgs__rosidl_typesupport_fastrtps_c
+[ 81%] Built target ardupilot_msgs
+[ 82%] Built target ardupilot_msgs__py
+[ 92%] Built target ardupilot_msgs__rosidl_generator_py
+[ 95%] Built target ardupilot_msgs__rosidl_typesupport_fastrtps_c__pyext
+[ 97%] Built target ardupilot_msgs__rosidl_typesupport_c__pyext
+[100%] Built target ardupilot_msgs__rosidl_typesupport_introspection_c__pyext
+running egg_info
+writing ardupilot_msgs.egg-info/PKG-INFO
+writing dependency_links to ardupilot_msgs.egg-info/dependency_links.txt
+writing top-level names to ardupilot_msgs.egg-info/top_level.txt
+reading manifest file 'ardupilot_msgs.egg-info/SOURCES.txt'
+writing manifest file 'ardupilot_msgs.egg-info/SOURCES.txt'
+[100%] Built target ament_cmake_python_build_ardupilot_msgs_egg
+-- Install configuration: ""
+-- Execute custom install script
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ament_index/resource_index/rosidl_interfaces/ardupilot_msgs
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/airspeed.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/airspeed__functions.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/airspeed__struct.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/airspeed__type_support.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/global_position__functions.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/global_position__struct.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/global_position__type_support.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/rc__functions.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/rc__struct.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/rc__type_support.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/status__functions.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/status__struct.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/status__type_support.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/global_position.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/rc.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/rosidl_generator_c__visibility_control.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/status.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/arm_motors.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/arm_motors__functions.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/arm_motors__struct.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/arm_motors__type_support.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/mode_switch__functions.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/mode_switch__struct.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/mode_switch__type_support.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/takeoff__functions.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/takeoff__struct.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/takeoff__type_support.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/mode_switch.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/takeoff.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/environment/library_path.sh
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/environment/library_path.dsv
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/airspeed__rosidl_typesupport_fastrtps_c.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/global_position__rosidl_typesupport_fastrtps_c.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/rc__rosidl_typesupport_fastrtps_c.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/status__rosidl_typesupport_fastrtps_c.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/rosidl_typesupport_fastrtps_c__visibility_control.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/arm_motors__rosidl_typesupport_fastrtps_c.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/mode_switch__rosidl_typesupport_fastrtps_c.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/takeoff__rosidl_typesupport_fastrtps_c.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/airspeed.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/airspeed__builder.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/airspeed__struct.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/airspeed__traits.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/airspeed__type_support.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/global_position__builder.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/global_position__struct.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/global_position__traits.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/global_position__type_support.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/rc__builder.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/rc__struct.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/rc__traits.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/rc__type_support.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/status__builder.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/status__struct.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/status__traits.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/status__type_support.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/global_position.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/rc.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/rosidl_generator_cpp__visibility_control.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/status.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/arm_motors.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/arm_motors__builder.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/arm_motors__struct.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/arm_motors__traits.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/arm_motors__type_support.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/mode_switch__builder.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/mode_switch__struct.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/mode_switch__traits.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/mode_switch__type_support.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/takeoff__builder.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/takeoff__struct.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/takeoff__traits.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/takeoff__type_support.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/mode_switch.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/takeoff.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/airspeed__rosidl_typesupport_fastrtps_cpp.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/global_position__rosidl_typesupport_fastrtps_cpp.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/rc__rosidl_typesupport_fastrtps_cpp.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/status__rosidl_typesupport_fastrtps_cpp.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/rosidl_typesupport_fastrtps_cpp__visibility_control.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/arm_motors__rosidl_typesupport_fastrtps_cpp.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/mode_switch__rosidl_typesupport_fastrtps_cpp.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/takeoff__rosidl_typesupport_fastrtps_cpp.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/airspeed__rosidl_typesupport_introspection_c.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/global_position__rosidl_typesupport_introspection_c.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/rc__rosidl_typesupport_introspection_c.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/status__rosidl_typesupport_introspection_c.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/rosidl_typesupport_introspection_c__visibility_control.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/arm_motors__rosidl_typesupport_introspection_c.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/mode_switch__rosidl_typesupport_introspection_c.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/takeoff__rosidl_typesupport_introspection_c.h
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/airspeed__rosidl_typesupport_introspection_cpp.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/global_position__rosidl_typesupport_introspection_cpp.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/rc__rosidl_typesupport_introspection_cpp.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/msg/detail/status__rosidl_typesupport_introspection_cpp.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/arm_motors__rosidl_typesupport_introspection_cpp.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/mode_switch__rosidl_typesupport_introspection_cpp.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/include/ardupilot_msgs/ardupilot_msgs/srv/detail/takeoff__rosidl_typesupport_introspection_cpp.hpp
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/environment/pythonpath.sh
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/environment/pythonpath.dsv
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs-0.0.0-py3.10.egg-info/PKG-INFO
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs-0.0.0-py3.10.egg-info/SOURCES.txt
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs-0.0.0-py3.10.egg-info/dependency_links.txt
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs-0.0.0-py3.10.egg-info/top_level.txt
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/__init__.py
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/_ardupilot_msgs_s.ep.rosidl_typesupport_c.c
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/_ardupilot_msgs_s.ep.rosidl_typesupport_fastrtps_c.c
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/_ardupilot_msgs_s.ep.rosidl_typesupport_introspection_c.c
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/ardupilot_msgs_s__rosidl_typesupport_c.cpython-310-x86_64-linux-gnu.so
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/ardupilot_msgs_s__rosidl_typesupport_fastrtps_c.cpython-310-x86_64-linux-gnu.so
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/ardupilot_msgs_s__rosidl_typesupport_introspection_c.cpython-310-x86_64-linux-gnu.so
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/libardupilot_msgs__rosidl_generator_py.so
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/msg/__init__.py
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/msg/_airspeed.py
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/msg/_airspeed_s.c
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/msg/_global_position.py
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/msg/_global_position_s.c
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/msg/_rc.py
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/msg/_rc_s.c
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/msg/_status.py
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/msg/_status_s.c
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/srv/__init__.py
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/srv/_arm_motors.py
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/srv/_arm_motors_s.c
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/srv/_mode_switch.py
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/srv/_mode_switch_s.c
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/srv/_takeoff.py
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/srv/_takeoff_s.c
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/ardupilot_msgs_s__rosidl_typesupport_fastrtps_c.cpython-310-x86_64-linux-gnu.so
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/ardupilot_msgs_s__rosidl_typesupport_introspection_c.cpython-310-x86_64-linux-gnu.so
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/ardupilot_msgs_s__rosidl_typesupport_c.cpython-310-x86_64-linux-gnu.so
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ament_index/resource_index/rust_packages/ardupilot_msgs
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/rust/Cargo.toml
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/rust/build.rs
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/rust/src/lib.rs
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/rust/src/msg.rs
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/rust/src/msg/rmw.rs
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/rust/src/srv.rs
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/rust/src/srv/rmw.rs
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/msg/GlobalPosition.idl
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/msg/Rc.idl
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/msg/Status.idl
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/msg/Airspeed.idl
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/srv/ArmMotors.idl
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/srv/ModeSwitch.idl
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/srv/Takeoff.idl
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/msg/GlobalPosition.msg
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/msg/Rc.msg
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/msg/Status.msg
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/msg/Airspeed.msg
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/srv/ArmMotors.srv
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/srv/ArmMotors_Request.msg
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/srv/ArmMotors_Response.msg
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/srv/ModeSwitch.srv
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/srv/ModeSwitch_Request.msg
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/srv/ModeSwitch_Response.msg
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/srv/Takeoff.srv
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/srv/Takeoff_Request.msg
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/srv/Takeoff_Response.msg
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ament_index/resource_index/package_run_dependencies/ardupilot_msgs
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ament_index/resource_index/parent_prefix_path/ardupilot_msgs
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/environment/ament_prefix_path.sh
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/environment/ament_prefix_path.dsv
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/environment/path.sh
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/environment/path.dsv
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/local_setup.bash
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/local_setup.sh
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/local_setup.zsh
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/local_setup.dsv
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/package.dsv
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ament_index/resource_index/packages/ardupilot_msgs
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/cmake/rosidl_cmake-extras.cmake
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/cmake/ament_cmake_export_dependencies-extras.cmake
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/cmake/ament_cmake_export_include_directories-extras.cmake
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/cmake/ament_cmake_export_libraries-extras.cmake
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/cmake/ament_cmake_export_targets-extras.cmake
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/cmake/rosidl_cmake_export_typesupport_targets-extras.cmake
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/cmake/rosidl_cmake_export_typesupport_libraries-extras.cmake
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/cmake/ardupilot_msgsConfig.cmake
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/cmake/ardupilot_msgsConfig-version.cmake
+-- Up-to-date symlink: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/package.xml
+-- Up-to-date: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/lib/libardupilot_msgs__rosidl_generator_c.so
+-- Up-to-date: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/lib/libardupilot_msgs__rosidl_typesupport_fastrtps_c.so
+-- Up-to-date: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/lib/libardupilot_msgs__rosidl_typesupport_fastrtps_cpp.so
+-- Up-to-date: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/lib/libardupilot_msgs__rosidl_typesupport_introspection_c.so
+-- Up-to-date: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/lib/libardupilot_msgs__rosidl_typesupport_c.so
+-- Up-to-date: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/lib/libardupilot_msgs__rosidl_typesupport_introspection_cpp.so
+-- Up-to-date: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/lib/libardupilot_msgs__rosidl_typesupport_cpp.so
+Listing '/home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs'...
+Listing '/home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/msg'...
+Listing '/home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/local/lib/python3.10/dist-packages/ardupilot_msgs/srv'...
+-- Up-to-date: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/lib/libardupilot_msgs__rosidl_generator_py.so
+-- Up-to-date: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/cmake/export_ardupilot_msgs__rosidl_generator_cExport.cmake
+-- Up-to-date: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/cmake/export_ardupilot_msgs__rosidl_generator_cExport-noconfig.cmake
+-- Up-to-date: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/cmake/export_ardupilot_msgs__rosidl_typesupport_fastrtps_cExport.cmake
+-- Up-to-date: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/cmake/export_ardupilot_msgs__rosidl_typesupport_fastrtps_cExport-noconfig.cmake
+-- Up-to-date: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/cmake/export_ardupilot_msgs__rosidl_generator_cppExport.cmake
+-- Up-to-date: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/cmake/export_ardupilot_msgs__rosidl_typesupport_fastrtps_cppExport.cmake
+-- Up-to-date: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/cmake/export_ardupilot_msgs__rosidl_typesupport_fastrtps_cppExport-noconfig.cmake
+-- Up-to-date: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/cmake/ardupilot_msgs__rosidl_typesupport_introspection_cExport.cmake
+-- Up-to-date: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/cmake/ardupilot_msgs__rosidl_typesupport_introspection_cExport-noconfig.cmake
+-- Up-to-date: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/cmake/ardupilot_msgs__rosidl_typesupport_cExport.cmake
+-- Up-to-date: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/cmake/ardupilot_msgs__rosidl_typesupport_cExport-noconfig.cmake
+-- Up-to-date: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/cmake/ardupilot_msgs__rosidl_typesupport_introspection_cppExport.cmake
+-- Up-to-date: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/cmake/ardupilot_msgs__rosidl_typesupport_introspection_cppExport-noconfig.cmake
+-- Up-to-date: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/cmake/ardupilot_msgs__rosidl_typesupport_cppExport.cmake
+-- Up-to-date: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/cmake/ardupilot_msgs__rosidl_typesupport_cppExport-noconfig.cmake
+-- Up-to-date: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/cmake/export_ardupilot_msgs__rosidl_generator_pyExport.cmake
+-- Up-to-date: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_msgs/share/ardupilot_msgs/cmake/export_ardupilot_msgs__rosidl_generator_pyExport-noconfig.cmake

@@ -1,0 +1,36 @@
+[0.739s] Invoking command in '/home/lh/Documents/joao_pessoa_2026/build/hydrone_vision': PYTHONPATH=/home/lh/Documents/joao_pessoa_2026/build/hydrone_vision/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/lh/Documents/joao_pessoa_2026/install/hydrone_vision/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --uninstall --editable --build-directory /home/lh/Documents/joao_pessoa_2026/build/hydrone_vision/build
+[0.870s] running develop
+[0.953s] Removing /home/lh/Documents/joao_pessoa_2026/install/hydrone_vision/lib/python3.10/site-packages/hydrone-vision.egg-link (link to .)
+[0.966s] Invoked command in '/home/lh/Documents/joao_pessoa_2026/build/hydrone_vision' returned '0': PYTHONPATH=/home/lh/Documents/joao_pessoa_2026/build/hydrone_vision/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/lh/Documents/joao_pessoa_2026/install/hydrone_vision/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --uninstall --editable --build-directory /home/lh/Documents/joao_pessoa_2026/build/hydrone_vision/build
+[0.967s] Invoking command in '/home/lh/Documents/joao_pessoa_2026/src/hydrone_vision': PYTHONPATH=/home/lh/Documents/joao_pessoa_2026/build/hydrone_vision/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/lh/Documents/joao_pessoa_2026/install/hydrone_vision/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/hydrone_vision build --build-base /home/lh/Documents/joao_pessoa_2026/build/hydrone_vision/build install --record /home/lh/Documents/joao_pessoa_2026/build/hydrone_vision/install.log --single-version-externally-managed install_data --force
+[1.101s] running egg_info
+[1.101s] writing ../../build/hydrone_vision/hydrone_vision.egg-info/PKG-INFO
+[1.101s] writing dependency_links to ../../build/hydrone_vision/hydrone_vision.egg-info/dependency_links.txt
+[1.102s] writing entry points to ../../build/hydrone_vision/hydrone_vision.egg-info/entry_points.txt
+[1.102s] writing requirements to ../../build/hydrone_vision/hydrone_vision.egg-info/requires.txt
+[1.102s] writing top-level names to ../../build/hydrone_vision/hydrone_vision.egg-info/top_level.txt
+[1.102s] reading manifest file '../../build/hydrone_vision/hydrone_vision.egg-info/SOURCES.txt'
+[1.103s] writing manifest file '../../build/hydrone_vision/hydrone_vision.egg-info/SOURCES.txt'
+[1.103s] running build
+[1.103s] running build_py
+[1.103s] creating /home/lh/Documents/joao_pessoa_2026/build/hydrone_vision/build
+[1.103s] creating /home/lh/Documents/joao_pessoa_2026/build/hydrone_vision/build/lib
+[1.103s] creating /home/lh/Documents/joao_pessoa_2026/build/hydrone_vision/build/lib/hydrone_vision
+[1.103s] copying hydrone_vision/__init__.py -> /home/lh/Documents/joao_pessoa_2026/build/hydrone_vision/build/lib/hydrone_vision
+[1.103s] copying hydrone_vision/vision_node.py -> /home/lh/Documents/joao_pessoa_2026/build/hydrone_vision/build/lib/hydrone_vision
+[1.103s] running install
+[1.103s] running install_lib
+[1.103s] creating /home/lh/Documents/joao_pessoa_2026/install/hydrone_vision/lib/python3.10/site-packages/hydrone_vision
+[1.103s] copying /home/lh/Documents/joao_pessoa_2026/build/hydrone_vision/build/lib/hydrone_vision/__init__.py -> /home/lh/Documents/joao_pessoa_2026/install/hydrone_vision/lib/python3.10/site-packages/hydrone_vision
+[1.103s] copying /home/lh/Documents/joao_pessoa_2026/build/hydrone_vision/build/lib/hydrone_vision/vision_node.py -> /home/lh/Documents/joao_pessoa_2026/install/hydrone_vision/lib/python3.10/site-packages/hydrone_vision
+[1.104s] byte-compiling /home/lh/Documents/joao_pessoa_2026/install/hydrone_vision/lib/python3.10/site-packages/hydrone_vision/__init__.py to __init__.cpython-310.pyc
+[1.104s] byte-compiling /home/lh/Documents/joao_pessoa_2026/install/hydrone_vision/lib/python3.10/site-packages/hydrone_vision/vision_node.py to vision_node.cpython-310.pyc
+[1.105s] running install_data
+[1.105s] copying resource/hydrone_vision -> /home/lh/Documents/joao_pessoa_2026/install/hydrone_vision/share/ament_index/resource_index/packages
+[1.106s] copying package.xml -> /home/lh/Documents/joao_pessoa_2026/install/hydrone_vision/share/hydrone_vision
+[1.106s] running install_egg_info
+[1.106s] Copying ../../build/hydrone_vision/hydrone_vision.egg-info to /home/lh/Documents/joao_pessoa_2026/install/hydrone_vision/lib/python3.10/site-packages/hydrone_vision-1.0.0-py3.10.egg-info
+[1.107s] running install_scripts
+[1.117s] Installing vision_node script to /home/lh/Documents/joao_pessoa_2026/install/hydrone_vision/bin
+[1.117s] writing list of installed files to '/home/lh/Documents/joao_pessoa_2026/build/hydrone_vision/install.log'
+[1.129s] Invoked command in '/home/lh/Documents/joao_pessoa_2026/src/hydrone_vision' returned '0': PYTHONPATH=/home/lh/Documents/joao_pessoa_2026/build/hydrone_vision/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/lh/Documents/joao_pessoa_2026/install/hydrone_vision/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/hydrone_vision build --build-base /home/lh/Documents/joao_pessoa_2026/build/hydrone_vision/build install --record /home/lh/Documents/joao_pessoa_2026/build/hydrone_vision/install.log --single-version-externally-managed install_data --force

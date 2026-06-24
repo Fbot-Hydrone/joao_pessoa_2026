@@ -9,7 +9,7 @@ def generate_launch_description():
     # O ROS 2 descobre a pasta do ArduPilot automaticamente (substitui o comando de terminal)
     sitl_pkg = get_package_share_directory('ardupilot_sitl')
     holybro_parm_path = os.path.join(os.path.expanduser('~'), 'Documents', 'joao_pessoa_2026', 'holybro.parm')
-    
+
     return LaunchDescription([
         Node(
             package='micro_ros_agent',
@@ -18,12 +18,12 @@ def generate_launch_description():
             arguments=['udp4', '--port', '2019']
         ),
         
-        Node(
-            package='biguasim_main',
-            executable='ardubridge_node',
-            name='ardubridge'
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(get_package_share_directory('biguasim_main'), 'launch', 'ardubridge.launch.py')
+            )
         ),
-        
+
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 os.path.join(sitl_pkg, 'launch', 'sitl_dds_udp.launch.py')
@@ -42,5 +42,7 @@ def generate_launch_description():
                 'master': 'tcp:127.0.0.1:5760',
                 'sitl': '127.0.0.1:5501'
             }.items()
-        )
+        ),
+
+
     ])

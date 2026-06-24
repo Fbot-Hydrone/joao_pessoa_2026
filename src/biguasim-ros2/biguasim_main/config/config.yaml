@@ -4,7 +4,7 @@
       package_name: Competition
       world: CompetionMap
       main_agent: auv0     
-      ticks_per_sec: 60
+      ticks_per_sec: 720
       frames_per_sec: 60
       octree_min: 0.1
       octree_max: 5
@@ -29,5 +29,5 @@
           dynamics:
             batch_size : 1
           control_abstraction : 'accel'
-          location: [0, 0, 5]
+          location: [0, 0, 0.3]
           rotation: [0, 0, 0]

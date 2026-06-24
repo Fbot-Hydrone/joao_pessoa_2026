@@ -1,0 +1,36 @@
+[0.748s] Invoking command in '/home/lh/Documents/joao_pessoa_2026/build/hydrone_mission': PYTHONPATH=/home/lh/Documents/joao_pessoa_2026/build/hydrone_mission/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/lh/Documents/joao_pessoa_2026/install/hydrone_mission/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --uninstall --editable --build-directory /home/lh/Documents/joao_pessoa_2026/build/hydrone_mission/build
+[0.904s] running develop
+[0.989s] Removing /home/lh/Documents/joao_pessoa_2026/install/hydrone_mission/lib/python3.10/site-packages/hydrone-mission.egg-link (link to .)
+[1.002s] Invoked command in '/home/lh/Documents/joao_pessoa_2026/build/hydrone_mission' returned '0': PYTHONPATH=/home/lh/Documents/joao_pessoa_2026/build/hydrone_mission/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/lh/Documents/joao_pessoa_2026/install/hydrone_mission/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --uninstall --editable --build-directory /home/lh/Documents/joao_pessoa_2026/build/hydrone_mission/build
+[1.003s] Invoking command in '/home/lh/Documents/joao_pessoa_2026/src/hydrone_mission': PYTHONPATH=/home/lh/Documents/joao_pessoa_2026/build/hydrone_mission/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/lh/Documents/joao_pessoa_2026/install/hydrone_mission/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/hydrone_mission build --build-base /home/lh/Documents/joao_pessoa_2026/build/hydrone_mission/build install --record /home/lh/Documents/joao_pessoa_2026/build/hydrone_mission/install.log --single-version-externally-managed install_data --force
+[1.204s] running egg_info
+[1.204s] writing ../../build/hydrone_mission/hydrone_mission.egg-info/PKG-INFO
+[1.205s] writing dependency_links to ../../build/hydrone_mission/hydrone_mission.egg-info/dependency_links.txt
+[1.205s] writing entry points to ../../build/hydrone_mission/hydrone_mission.egg-info/entry_points.txt
+[1.205s] writing requirements to ../../build/hydrone_mission/hydrone_mission.egg-info/requires.txt
+[1.205s] writing top-level names to ../../build/hydrone_mission/hydrone_mission.egg-info/top_level.txt
+[1.205s] reading manifest file '../../build/hydrone_mission/hydrone_mission.egg-info/SOURCES.txt'
+[1.206s] writing manifest file '../../build/hydrone_mission/hydrone_mission.egg-info/SOURCES.txt'
+[1.206s] running build
+[1.206s] running build_py
+[1.206s] creating /home/lh/Documents/joao_pessoa_2026/build/hydrone_mission/build
+[1.206s] creating /home/lh/Documents/joao_pessoa_2026/build/hydrone_mission/build/lib
+[1.206s] creating /home/lh/Documents/joao_pessoa_2026/build/hydrone_mission/build/lib/hydrone_mission
+[1.206s] copying hydrone_mission/mission_node.py -> /home/lh/Documents/joao_pessoa_2026/build/hydrone_mission/build/lib/hydrone_mission
+[1.207s] copying hydrone_mission/__init__.py -> /home/lh/Documents/joao_pessoa_2026/build/hydrone_mission/build/lib/hydrone_mission
+[1.207s] running install
+[1.207s] running install_lib
+[1.207s] creating /home/lh/Documents/joao_pessoa_2026/install/hydrone_mission/lib/python3.10/site-packages/hydrone_mission
+[1.207s] copying /home/lh/Documents/joao_pessoa_2026/build/hydrone_mission/build/lib/hydrone_mission/mission_node.py -> /home/lh/Documents/joao_pessoa_2026/install/hydrone_mission/lib/python3.10/site-packages/hydrone_mission
+[1.207s] copying /home/lh/Documents/joao_pessoa_2026/build/hydrone_mission/build/lib/hydrone_mission/__init__.py -> /home/lh/Documents/joao_pessoa_2026/install/hydrone_mission/lib/python3.10/site-packages/hydrone_mission
+[1.207s] byte-compiling /home/lh/Documents/joao_pessoa_2026/install/hydrone_mission/lib/python3.10/site-packages/hydrone_mission/mission_node.py to mission_node.cpython-310.pyc
+[1.208s] byte-compiling /home/lh/Documents/joao_pessoa_2026/install/hydrone_mission/lib/python3.10/site-packages/hydrone_mission/__init__.py to __init__.cpython-310.pyc
+[1.208s] running install_data
+[1.208s] copying resource/hydrone_mission -> /home/lh/Documents/joao_pessoa_2026/install/hydrone_mission/share/ament_index/resource_index/packages
+[1.208s] copying package.xml -> /home/lh/Documents/joao_pessoa_2026/install/hydrone_mission/share/hydrone_mission
+[1.208s] running install_egg_info
+[1.209s] Copying ../../build/hydrone_mission/hydrone_mission.egg-info to /home/lh/Documents/joao_pessoa_2026/install/hydrone_mission/lib/python3.10/site-packages/hydrone_mission-1.0.0-py3.10.egg-info
+[1.209s] running install_scripts
+[1.225s] Installing mission_node script to /home/lh/Documents/joao_pessoa_2026/install/hydrone_mission/bin
+[1.226s] writing list of installed files to '/home/lh/Documents/joao_pessoa_2026/build/hydrone_mission/install.log'
+[1.241s] Invoked command in '/home/lh/Documents/joao_pessoa_2026/src/hydrone_mission' returned '0': PYTHONPATH=/home/lh/Documents/joao_pessoa_2026/build/hydrone_mission/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/lh/Documents/joao_pessoa_2026/install/hydrone_mission/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/hydrone_mission build --build-base /home/lh/Documents/joao_pessoa_2026/build/hydrone_mission/build install --record /home/lh/Documents/joao_pessoa_2026/build/hydrone_mission/install.log --single-version-externally-managed install_data --force

@@ -1,0 +1,399 @@
+-- The C compiler identification is GNU 11.4.0
+-- The CXX compiler identification is GNU 11.4.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/lib/ccache/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/lib/ccache/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Found ament_cmake: 1.3.14 (/opt/ros/humble/share/ament_cmake/cmake)
+-- Found Python3: /usr/bin/python3 (found version "3.10.12") found components: Interpreter 
+-- Override CMake install command with custom implementation using symlinks instead of copying resources
+-- WAF_COMMAND: /home/lh/Documents/joao_pessoa_2026/src/ardupilot/waf
+-- Found ament_lint_auto: 0.12.15 (/opt/ros/humble/share/ament_lint_auto/cmake)
+-- Added test 'black' to check Python code style
+-- Added test 'copyright' to check source files copyright and LICENSE
+-- Added test 'lint_cmake' to check CMake code style
+-- Added test 'pep257' to check Python code against some of the docstring style conventions in PEP 257
+-- Added test 'xmllint' to check XML markup files
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /home/lh/Documents/joao_pessoa_2026/build/ardupilot_sitl
+Built target ament_cmake_python_symlink_ardupilot_sitl
+[32m[0mSetting top to                           :[0m [0m[32m[32m/home/lh/Documents/joao_pessoa_2026/src/ardupilot[0m [0m
+[32m[0mSetting out to                           :[0m [0m[32m[32m/home/lh/Documents/joao_pessoa_2026/src/ardupilot/build[0m [0m
+[32m[0mAutoconfiguration                        :[0m [0m[32m[32menabled[0m [0m
+[32m[0mChecking for program 'python'            :[0m [0m[32m[32m/usr/bin/python3[0m [0m
+running egg_info
+creating ardupilot_sitl.egg-info
+writing ardupilot_sitl.egg-info/PKG-INFO
+writing dependency_links to ardupilot_sitl.egg-info/dependency_links.txt
+writing top-level names to ardupilot_sitl.egg-info/top_level.txt
+writing manifest file 'ardupilot_sitl.egg-info/SOURCES.txt'
+reading manifest file 'ardupilot_sitl.egg-info/SOURCES.txt'
+writing manifest file 'ardupilot_sitl.egg-info/SOURCES.txt'
+Built target ament_cmake_python_build_ardupilot_sitl_egg
+[32m[0mChecking for python version >= 3.9.0     :[0m [0m[32m[32m3.10.12[0m [0m
+[32m[0mSetting board to                         :[0m [0m[32m[32msitl[0m [0m
+Processing /home/lh/Documents/joao_pessoa_2026/src/ardupilot/libraries/AP_HAL_SITL/hwdef/sitl/hwdef.dat
+Writing hwdef setup in /home/lh/Documents/joao_pessoa_2026/src/ardupilot/build/sitl/hwdef.h
+[32m[0mUsing toolchain                          :[0m [0m[32m[32mnative[0m [0m
+[32m[0mChecking for 'g++' (C++ compiler)        :[0m [0m[32m[32m/usr/lib/ccache/g++[0m [0m
+[32m[0mChecking for 'gcc' (C compiler)          :[0m [0m[32m[32m/usr/lib/ccache/gcc[0m [0m
+[32m[0mChecking for c flags '-MMD'              :[0m [0m[32m[32myes[0m [0m
+[32m[0mChecking for cxx flags '-MMD'            :[0m [0m[32m[32myes[0m [0m
+[32m[0mCXX Compiler                             :[0m [0m[32m[32mg++ 11.4.0[0m [0m
+[32m[0mChecking for need to link with librt     :[0m [0m[32m[32mnot necessary[0m [0m
+[32m[0mChecking for feenableexcept              :[0m [0m[32m[32myes[0m [0m
+[32m[0mEnabling -Werror                         :[0m [0m[32m[32myes[0m [0m
+[32m[0mEnabled OpenDroneID                      :[0m [0m[32m[33mno[0m [0m
+[32m[0mEnabled firmware ID checking             :[0m [0m[32m[33mno[0m [0m
+[32m[0mGPS Debug Logging                        :[0m [0m[32m[33mno[0m [0m
+[32m[0mEnabled custom controller                :[0m [0m[32m[32myes[0m [0m
+[32m[0mEnabled DDS                              :[0m [0m[32m[32myes[0m [0m
+[32m[0mChecking for HAVE_CMATH_ISFINITE         :[0m [0m[32m[32myes[0m [0m
+[32m[0mChecking for HAVE_CMATH_ISINF            :[0m [0m[32m[32myes[0m [0m
+[32m[0mChecking for HAVE_CMATH_ISNAN            :[0m [0m[32m[32myes[0m [0m
+[32m[0mChecking for NEED_CMATH_ISFINITE_STD_NAMESPACE :[0m [0m[32m[32myes[0m [0m
+[32m[0mChecking for NEED_CMATH_ISINF_STD_NAMESPACE    :[0m [0m[32m[32myes[0m [0m
+[32m[0mChecking for NEED_CMATH_ISNAN_STD_NAMESPACE    :[0m [0m[32m[32myes[0m [0m
+[32m[0mChecking for header endian.h                   :[0m [0m[32m[32myes[0m [0m
+[32m[0mChecking for header byteswap.h                 :[0m [0m[32m[32myes[0m [0m
+[32m[0mChecking for HAVE_MEMRCHR                      :[0m [0m[32m[32myes[0m [0m
+[32m[0mConfigured VSCode Intellisense:                :[0m [0m[32m[33mno[0m [0m
+[32m[0mDC_DSDL compiler in                            :[0m [0m[32m[32m/home/lh/Documents/joao_pessoa_2026/src/ardupilot/modules/DroneCAN/dronecan_dsdlc[0m [0m
+[32m[0mSource is git repository                       :[0m [0m[32m[32mno[0m [0m
+[32m[0mUpdate submodules                              :[0m [0m[32m[32mno[0m [0m
+[32m[0mChecking for program 'git'                     :[0m [0m[32m[32m/usr/bin/git[0m [0m
+[32m[0mLittlefs                                       :[0m [0m[32m[33mdisabled[0m [0m
+[32m[0mChecking for program 'size'                    :[0m [0m[32m[32m/usr/bin/size[0m [0m
+[32m[0mBenchmarks                                     :[0m [0m[32m[33mdisabled[0m [0m
+[32m[0mUnit tests                                     :[0m [0m[32m[32menabled[0m [0m
+[32m[0mScripting                                      :[0m [0m[32m[32mmaybe[0m [0m
+[32m[0mChecking for program 'microxrceddsgen'         :[0m [0m[32m[32m/home/lh/Micro-XRCE-DDS-Gen/scripts/microxrceddsgen[0m [0m
+[32m[0mScripting runtime checks                       :[0m [0m[32m[32menabled[0m [0m
+[32m[0mDebug build                                    :[0m [0m[32m[33mdisabled[0m [0m
+[32m[0mCoverage build                                 :[0m [0m[32m[33mdisabled[0m [0m
+[32m[0mConsistent build                               :[0m [0m[32m[33mdisabled[0m [0m
+[32m[0mForce 32-bit build                             :[0m [0m[32m[33mdisabled[0m [0m
+[32m[0mChecking for program 'rsync'                   :[0m [0m[32m[32m/usr/bin/rsync[0m [0m
+[32mRemoving target_list file /home/lh/Documents/joao_pessoa_2026/src/ardupilot/build/sitl/target_list[0m
+[32m'configure' finished successfully (0.395s)[0m
+Built target ardupilot_configure
+[32mWaf: Entering directory `/home/lh/Documents/joao_pessoa_2026/src/ardupilot/build/sitl'[0m
+Embedding file default_params/airsim-quadX.parm:Tools/autotest/default_params/airsim-quadX.parm
+Embedding file default_params/airsim-rover.parm:Tools/autotest/default_params/airsim-rover.parm
+Embedding file default_params/balancebot.parm:Tools/autotest/default_params/balancebot.parm
+Embedding file default_params/blimp-motor.parm:Tools/autotest/default_params/blimp-motor.parm
+Embedding file default_params/blimp.parm:Tools/autotest/default_params/blimp.parm
+Embedding file default_params/copter-X.parm:Tools/autotest/default_params/copter-X.parm
+Embedding file default_params/copter-beacon.parm:Tools/autotest/default_params/copter-beacon.parm
+Embedding file default_params/copter-bfx.parm:Tools/autotest/default_params/copter-bfx.parm
+Embedding file default_params/copter-coax.parm:Tools/autotest/default_params/copter-coax.parm
+Embedding file default_params/copter-cwx.parm:Tools/autotest/default_params/copter-cwx.parm
+Embedding file default_params/copter-deca-cwx.parm:Tools/autotest/default_params/copter-deca-cwx.parm
+Embedding file default_params/copter-deca.parm:Tools/autotest/default_params/copter-deca.parm
+Embedding file default_params/copter-djix.parm:Tools/autotest/default_params/copter-djix.parm
+Embedding file default_params/copter-dodecahexa.parm:Tools/autotest/default_params/copter-dodecahexa.parm
+Embedding file default_params/copter-dotriaconta_octaquad_x.parm:Tools/autotest/default_params/copter-dotriaconta_octaquad_x.parm
+Embedding file default_params/copter-gimbal.parm:Tools/autotest/default_params/copter-gimbal.parm
+Embedding file default_params/copter-gps-for-yaw-nmea.parm:Tools/autotest/default_params/copter-gps-for-yaw-nmea.parm
+Embedding file default_params/copter-gps-for-yaw.parm:Tools/autotest/default_params/copter-gps-for-yaw.parm
+Embedding file default_params/copter-heli-ddfptail.parm:Tools/autotest/default_params/copter-heli-ddfptail.parm
+Embedding file default_params/copter-heli-ddvptail.parm:Tools/autotest/default_params/copter-heli-ddvptail.parm
+Embedding file default_params/copter-heli-dual.parm:Tools/autotest/default_params/copter-heli-dual.parm
+Embedding file default_params/copter-heli-gas.parm:Tools/autotest/default_params/copter-heli-gas.parm
+Embedding file default_params/copter-heli.parm:Tools/autotest/default_params/copter-heli.parm
+Embedding file default_params/copter-hexa-cwx.parm:Tools/autotest/default_params/copter-hexa-cwx.parm
+Embedding file default_params/copter-hexa-dji.parm:Tools/autotest/default_params/copter-hexa-dji.parm
+Embedding file default_params/copter-hexa.parm:Tools/autotest/default_params/copter-hexa.parm
+Embedding file default_params/copter-hexadeca_octa.parm:Tools/autotest/default_params/copter-hexadeca_octa.parm
+Embedding file default_params/copter-hexadeca_octa_cwx.parm:Tools/autotest/default_params/copter-hexadeca_octa_cwx.parm
+Embedding file default_params/copter-octa-cwx.parm:Tools/autotest/default_params/copter-octa-cwx.parm
+Embedding file default_params/copter-octa-dji.parm:Tools/autotest/default_params/copter-octa-dji.parm
+Embedding file default_params/copter-octa.parm:Tools/autotest/default_params/copter-octa.parm
+Embedding file default_params/copter-octaquad-cor.parm:Tools/autotest/default_params/copter-octaquad-cor.parm
+Embedding file default_params/copter-octaquad-cw-cor.parm:Tools/autotest/default_params/copter-octaquad-cw-cor.parm
+Embedding file default_params/copter-octaquad-cwx.parm:Tools/autotest/default_params/copter-octaquad-cwx.parm
+Embedding file default_params/copter-octaquad.parm:Tools/autotest/default_params/copter-octaquad.parm
+Embedding file default_params/copter-optflow.parm:Tools/autotest/default_params/copter-optflow.parm
+Embedding file default_params/copter-ppp-periph.parm:Tools/autotest/default_params/copter-ppp-periph.parm
+Embedding file default_params/copter-ppp.parm:Tools/autotest/default_params/copter-ppp.parm
+Embedding file default_params/copter-rangefinder.parm:Tools/autotest/default_params/copter-rangefinder.parm
+Embedding file default_params/copter-single.parm:Tools/autotest/default_params/copter-single.parm
+Embedding file default_params/copter-tri.parm:Tools/autotest/default_params/copter-tri.parm
+Embedding file default_params/copter-vicon.parm:Tools/autotest/default_params/copter-vicon.parm
+Embedding file default_params/copter-winch.parm:Tools/autotest/default_params/copter-winch.parm
+Embedding file default_params/copter-wind-estimates.parm:Tools/autotest/default_params/copter-wind-estimates.parm
+Embedding file default_params/copter-y6.parm:Tools/autotest/default_params/copter-y6.parm
+Embedding file default_params/copter.parm:Tools/autotest/default_params/copter.parm
+Embedding file default_params/firefly.parm:Tools/autotest/default_params/firefly.parm
+Embedding file default_params/gazebo-iris.parm:Tools/autotest/default_params/gazebo-iris.parm
+Embedding file default_params/gazebo-zephyr.parm:Tools/autotest/default_params/gazebo-zephyr.parm
+Embedding file default_params/glider.parm:Tools/autotest/default_params/glider.parm
+Embedding file default_params/motorboat.parm:Tools/autotest/default_params/motorboat.parm
+Embedding file default_params/msposd.parm:Tools/autotest/default_params/msposd.parm
+Embedding file default_params/periph-ppp.parm:Tools/autotest/default_params/periph-ppp.parm
+Embedding file default_params/periph.parm:Tools/autotest/default_params/periph.parm
+Embedding file default_params/plane-dspoilers.parm:Tools/autotest/default_params/plane-dspoilers.parm
+Embedding file default_params/plane-elevons.parm:Tools/autotest/default_params/plane-elevons.parm
+Embedding file default_params/plane-ice.parm:Tools/autotest/default_params/plane-ice.parm
+Embedding file default_params/plane-jet.parm:Tools/autotest/default_params/plane-jet.parm
+Embedding file default_params/plane-jsbsim.parm:Tools/autotest/default_params/plane-jsbsim.parm
+Embedding file default_params/plane-redundant.parm:Tools/autotest/default_params/plane-redundant.parm
+Embedding file default_params/plane-soaring.parm:Tools/autotest/default_params/plane-soaring.parm
+Embedding file default_params/plane-tailsitter.parm:Tools/autotest/default_params/plane-tailsitter.parm
+Embedding file default_params/plane-vtail.parm:Tools/autotest/default_params/plane-vtail.parm
+Embedding file default_params/quad-can.parm:Tools/autotest/default_params/quad-can.parm
+Embedding file default_params/quad-periph.parm:Tools/autotest/default_params/quad-periph.parm
+Embedding file default_params/quadplane-can.parm:Tools/autotest/default_params/quadplane-can.parm
+Embedding file default_params/quadplane-cl84.parm:Tools/autotest/default_params/quadplane-cl84.parm
+Embedding file default_params/quadplane-copter_tailsitter.parm:Tools/autotest/default_params/quadplane-copter_tailsitter.parm
+Embedding file default_params/quadplane-ice.parm:Tools/autotest/default_params/quadplane-ice.parm
+Embedding file default_params/quadplane-periph.parm:Tools/autotest/default_params/quadplane-periph.parm
+Embedding file default_params/quadplane-ppp-periph.parm:Tools/autotest/default_params/quadplane-ppp-periph.parm
+Embedding file default_params/quadplane-ppp.parm:Tools/autotest/default_params/quadplane-ppp.parm
+Embedding file default_params/quadplane-tilt.parm:Tools/autotest/default_params/quadplane-tilt.parm
+Embedding file default_params/quadplane-tilthvec.parm:Tools/autotest/default_params/quadplane-tilthvec.parm
+Embedding file default_params/quadplane-tilttri.parm:Tools/autotest/default_params/quadplane-tilttri.parm
+Embedding file default_params/quadplane-tilttrivec.parm:Tools/autotest/default_params/quadplane-tilttrivec.parm
+Embedding file default_params/quadplane-tri.parm:Tools/autotest/default_params/quadplane-tri.parm
+Embedding file default_params/quadplane.parm:Tools/autotest/default_params/quadplane.parm
+Embedding file default_params/rover-omni3mecanum.parm:Tools/autotest/default_params/rover-omni3mecanum.parm
+Embedding file default_params/rover-skid.parm:Tools/autotest/default_params/rover-skid.parm
+Embedding file default_params/rover-vectored.parm:Tools/autotest/default_params/rover-vectored.parm
+Embedding file default_params/rover.parm:Tools/autotest/default_params/rover.parm
+Embedding file default_params/sailboat-motor.parm:Tools/autotest/default_params/sailboat-motor.parm
+Embedding file default_params/sailboat.parm:Tools/autotest/default_params/sailboat.parm
+Embedding file default_params/stratoblimp.parm:Tools/autotest/default_params/stratoblimp.parm
+Embedding file default_params/sub-6dof.parm:Tools/autotest/default_params/sub-6dof.parm
+Embedding file default_params/sub-gps-for-yaw-nmea.parm:Tools/autotest/default_params/sub-gps-for-yaw-nmea.parm
+Embedding file default_params/sub.parm:Tools/autotest/default_params/sub.parm
+Embedding file default_params/tracker-gps-for-yaw.parm:Tools/autotest/default_params/tracker-gps-for-yaw.parm
+Embedding file locations.txt:Tools/autotest/locations.txt
+Embedding file models/Callisto.json:Tools/autotest/models/Callisto.json
+Embedding file models/Callisto.parm:Tools/autotest/models/Callisto.parm
+Embedding file models/freestyle.json:Tools/autotest/models/freestyle.json
+Embedding file models/freestyle.parm:Tools/autotest/models/freestyle.parm
+Embedding file models/plane-3d.parm:Tools/autotest/models/plane-3d.parm
+Embedding file models/plane.parm:Tools/autotest/models/plane.parm
+Embedding file models/skywalker_2013.json:Tools/autotest/models/skywalker_2013.json
+Embedding file models/xplane_heli.json:Tools/autotest/models/xplane_heli.json
+Embedding file models/xplane_plane.json:Tools/autotest/models/xplane_plane.json
+Embedding file vehicleinfo.json:Tools/autotest/pysim/vehicleinfo.json
+Building /home/lh/Documents/joao_pessoa_2026/src/ardupilot/build/sitl/modules/Micro-XRCE-DDS-Client/include/uxr/client/config.h
+Building /home/lh/Documents/joao_pessoa_2026/src/ardupilot/build/sitl/modules/Micro-CDR/include/ucdr/config.h
+[32mNo target_list file found, creating[0m
+[32mGenerating compile_commands.json[0m
+[32mGenerating compile_commands.json[0m
+[32mGenerating compile_commands.json[0m
+[32mGenerating compile_commands.json[0m
+[32mGenerating compile_commands.json[0m
+[32mGenerating compile_commands.json[0m
+[32mGenerating compile_commands.json[0m
+[32mBuild commands will be stored in build/sitl/compile_commands.json[0m
+[32mGenerating compile_commands.json[0m
+[32mBuild commands will be stored in build/sitl/compile_commands.json[0m
+[32mBuild commands will be stored in build/sitl/compile_commands.json[0m
+[32mGenerating compile_commands.json[0m
+[32mBuild commands will be stored in build/sitl/compile_commands.json[0m
+[32mBuild commands will be stored in build/sitl/compile_commands.json[0m
+[32mGenerating compile_commands.json[0m
+[32mBuild commands will be stored in build/sitl/compile_commands.json[0m
+[32mBuild commands will be stored in build/sitl/compile_commands.json[0m
+[32mGenerating compile_commands.json[0m
+[32mBuild commands will be stored in build/sitl/compile_commands.json[0m
+[32mBuild commands will be stored in build/sitl/compile_commands.json[0m
+[32mBuild commands will be stored in build/sitl/compile_commands.json[0m
+[32mGenerating compile_commands.json[0m
+[32mBuild commands will be stored in build/sitl/compile_commands.json[0m
+[32mBuild commands will be stored in build/sitl/compile_commands.json[0m
+[32mGenerating compile_commands.json[0m
+[32mBuild commands will be stored in build/sitl/compile_commands.json[0m
+[2019/2346] Linking [33mbuild/sitl/bin/antennatracker[0m
+[2094/2346] Linking [33mbuild/sitl/bin/arducopter[0m
+[2169/2346] Linking [33mbuild/sitl/bin/arducopter-heli[0m
+[2234/2346] Linking [33mbuild/sitl/bin/arduplane[0m
+[2272/2346] Linking [33mbuild/sitl/bin/ardusub[0m
+[2300/2346] Linking [33mbuild/sitl/bin/blimp[0m
+[2339/2346] Linking [33mbuild/sitl/bin/ardurover[0m
+[2340/2346] checking symbols [36mbuild/sitl/bin/antennatracker[0m
+[2341/2346] checking symbols [36mbuild/sitl/bin/arducopter[0m
+[2342/2346] checking symbols [36mbuild/sitl/bin/arducopter-heli[0m
+[2343/2346] checking symbols [36mbuild/sitl/bin/ardusub[0m
+[2344/2346] checking symbols [36mbuild/sitl/bin/arduplane[0m
+[2345/2346] checking symbols [36mbuild/sitl/bin/blimp[0m
+[2346/2346] checking symbols [36mbuild/sitl/bin/ardurover[0m
+[32mWaf: Leaving directory `/home/lh/Documents/joao_pessoa_2026/src/ardupilot/build/sitl'[0m
+[32m[0m
+[32m[0m[01;1mBUILD SUMMARY[0m
+[32m[0m[01;1mBuild directory: [0m/home/lh/Documents/joao_pessoa_2026/src/ardupilot/build/sitl[0m
+[32m[0m[01;1mTarget               Text (B)  Data (B)  BSS (B)  Total Flash Used (B)  Free Flash (B)  External Flash Used (B)[0m
+---------------------------------------------------------------------------------------------------------------
+bin/antennatracker    3412986    145901   260384               3558887  Not Applicable  Not Applicable         
+bin/arducopter        4563538    215037   279392               4778575  Not Applicable  Not Applicable         
+bin/arducopter-heli   4552986    216029   280320               4769015  Not Applicable  Not Applicable         
+bin/arduplane         4520490    217845   277920               4738335  Not Applicable  Not Applicable         
+bin/ardusub           4132494    188045   279840               4320539  Not Applicable  Not Applicable         
+bin/blimp             3486914    150341   262880               3637255  Not Applicable  Not Applicable         
+bin/ardurover         4224826    193549   277760               4418375  Not Applicable  Not Applicable         
+[32m'build' finished successfully (2.514s)[0m
+Built target ardupilot_build
+-- Install configuration: ""
+-- Execute custom install script
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/bin//antennatracker
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/bin//arducopter
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/bin//arducopter-heli
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/bin//arduplane
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/bin//ardurover
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/bin//ardusub
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/bin//blimp
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/.//lib/libAntennaTracker_libs.a
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/.//lib/libArduCopter_libs.a
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/.//lib/libArduPlane_libs.a
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/.//lib/libArduSub_libs.a
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/.//lib/libBlimp_libs.a
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/.//lib/libRover_libs.a
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/.//lib/stqBSAK8
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl//launch/mavproxy.launch.py
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl//launch/micro_ros_agent.launch.py
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl//launch/sitl.launch.py
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl//launch/sitl_dds_serial.launch.py
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl//launch/sitl_dds_udp.launch.py
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl//launch/sitl_mavproxy.launch.py
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl//launch/virtual_ports.launch.py
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config/default_params/dds_serial.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config/default_params/dds_udp.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config/default_params/dds_use_ns.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/airsim-quadX.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/airsim-rover.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/balancebot.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/blimp-motor.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/blimp.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-X.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-beacon.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-bfx.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-coax.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-cwx.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-deca-cwx.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-deca.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-djix.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-dodecahexa.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-dotriaconta_octaquad_x.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-gimbal.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-gps-for-yaw-nmea.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-gps-for-yaw.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-heli-ddfptail.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-heli-ddvptail.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-heli-dual.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-heli-gas.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-heli.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-hexa-cwx.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-hexa-dji.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-hexa.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-hexadeca_octa.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-hexadeca_octa_cwx.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-octa-cwx.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-octa-dji.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-octa.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-octaquad-cor.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-octaquad-cw-cor.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-octaquad-cwx.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-octaquad.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-optflow.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-ppp-periph.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-ppp.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-rangefinder.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-single.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-tri.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-vicon.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-winch.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-wind-estimates.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter-y6.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/copter.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/firefly.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/gazebo-iris.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/gazebo-zephyr.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/glider.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/motorboat.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/msposd.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/periph-ppp.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/periph.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/plane-dspoilers.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/plane-elevons.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/plane-ice.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/plane-jet.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/plane-jsbsim.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/plane-redundant.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/plane-soaring.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/plane-tailsitter.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/plane-vtail.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quad-can.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quad-periph.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quadplane-can.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quadplane-cl84.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quadplane-copter_tailsitter.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quadplane-ice.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quadplane-periph.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quadplane-ppp-periph.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quadplane-ppp.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quadplane-tilt.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quadplane-tilthvec.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quadplane-tilttri.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quadplane-tilttrivec.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quadplane-tri.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/quadplane.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/rover-omni3mecanum.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/rover-skid.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/rover-vectored.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/rover.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/sailboat-motor.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/sailboat.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/stratoblimp.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/sub-6dof.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/sub-gps-for-yaw-nmea.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/sub.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//default_params/tracker-gps-for-yaw.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//models/Callisto.json
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//models/Callisto.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//models/freestyle.json
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//models/freestyle.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//models/plane-3d.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//models/plane.parm
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//models/skywalker_2013.json
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//models/xplane_heli.json
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/config//models/xplane_plane.json
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/environment/pythonpath.sh
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/environment/pythonpath.dsv
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/local/lib/python3.10/dist-packages/ardupilot_sitl-0.0.0-py3.10.egg-info/PKG-INFO
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/local/lib/python3.10/dist-packages/ardupilot_sitl-0.0.0-py3.10.egg-info/SOURCES.txt
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/local/lib/python3.10/dist-packages/ardupilot_sitl-0.0.0-py3.10.egg-info/dependency_links.txt
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/local/lib/python3.10/dist-packages/ardupilot_sitl-0.0.0-py3.10.egg-info/top_level.txt
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/local/lib/python3.10/dist-packages/ardupilot_sitl/__init__.py
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/local/lib/python3.10/dist-packages/ardupilot_sitl/actions.py
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/local/lib/python3.10/dist-packages/ardupilot_sitl/launch.py
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/local/lib/python3.10/dist-packages/ardupilot_sitl/utilities.py
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ament_index/resource_index/package_run_dependencies/ardupilot_sitl
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ament_index/resource_index/parent_prefix_path/ardupilot_sitl
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/environment/ament_prefix_path.sh
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/environment/ament_prefix_path.dsv
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/environment/path.sh
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/environment/path.dsv
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/local_setup.bash
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/local_setup.sh
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/local_setup.zsh
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/local_setup.dsv
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/package.dsv
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ament_index/resource_index/packages/ardupilot_sitl
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/cmake/ardupilot_sitlConfig.cmake
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/cmake/ardupilot_sitlConfig-version.cmake
+-- Symlinking: /home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/share/ardupilot_sitl/package.xml
+Listing '/home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/local/lib/python3.10/dist-packages/ardupilot_sitl'...
+Compiling '/home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/local/lib/python3.10/dist-packages/ardupilot_sitl/__init__.py'...
+Compiling '/home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/local/lib/python3.10/dist-packages/ardupilot_sitl/actions.py'...
+Compiling '/home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/local/lib/python3.10/dist-packages/ardupilot_sitl/launch.py'...
+Compiling '/home/lh/Documents/joao_pessoa_2026/install/ardupilot_sitl/local/lib/python3.10/dist-packages/ardupilot_sitl/utilities.py'...
