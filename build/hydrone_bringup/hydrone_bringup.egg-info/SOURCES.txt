@@ -8,6 +8,13 @@ setup.py
 ../../build/hydrone_bringup/hydrone_bringup.egg-info/top_level.txt
 ../../build/hydrone_bringup/hydrone_bringup.egg-info/zip-safe
 hydrone_bringup/__init__.py
+hydrone_bringup.egg-info/PKG-INFO
+hydrone_bringup.egg-info/SOURCES.txt
+hydrone_bringup.egg-info/dependency_links.txt
+hydrone_bringup.egg-info/entry_points.txt
+hydrone_bringup.egg-info/requires.txt
+hydrone_bringup.egg-info/top_level.txt
+hydrone_bringup.egg-info/zip-safe
 launch/hydrone.launch.py
 launch/hydrone_sim.launch.py
 resource/hydrone_bringup

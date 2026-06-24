@@ -1,0 +1,19 @@
+[0.764s] Invoking command in '/home/lh/Documents/joao_pessoa_2026/build/hydrone_controller': PYTHONPATH=/home/lh/Documents/joao_pessoa_2026/build/hydrone_controller/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/lh/Documents/joao_pessoa_2026/install/hydrone_controller/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /home/lh/Documents/joao_pessoa_2026/build/hydrone_controller/build --no-deps symlink_data --force
+[0.896s] running develop
+[1.008s] running egg_info
+[1.008s] writing hydrone_controller.egg-info/PKG-INFO
+[1.008s] writing dependency_links to hydrone_controller.egg-info/dependency_links.txt
+[1.008s] writing entry points to hydrone_controller.egg-info/entry_points.txt
+[1.008s] writing requirements to hydrone_controller.egg-info/requires.txt
+[1.008s] writing top-level names to hydrone_controller.egg-info/top_level.txt
+[1.009s] reading manifest file 'hydrone_controller.egg-info/SOURCES.txt'
+[1.009s] writing manifest file 'hydrone_controller.egg-info/SOURCES.txt'
+[1.010s] running build_ext
+[1.010s] Creating /home/lh/Documents/joao_pessoa_2026/install/hydrone_controller/lib/python3.10/site-packages/hydrone-controller.egg-link (link to .)
+[1.010s] Installing controller_node script to /home/lh/Documents/joao_pessoa_2026/install/hydrone_controller/bin
+[1.010s] 
+[1.010s] Installed /home/lh/Documents/joao_pessoa_2026/build/hydrone_controller
+[1.011s] running symlink_data
+[1.011s] symbolically linking /home/lh/Documents/joao_pessoa_2026/build/hydrone_controller/resource/hydrone_controller -> /home/lh/Documents/joao_pessoa_2026/install/hydrone_controller/share/ament_index/resource_index/packages
+[1.011s] symbolically linking /home/lh/Documents/joao_pessoa_2026/build/hydrone_controller/package.xml -> /home/lh/Documents/joao_pessoa_2026/install/hydrone_controller/share/hydrone_controller
+[1.024s] Invoked command in '/home/lh/Documents/joao_pessoa_2026/build/hydrone_controller' returned '0': PYTHONPATH=/home/lh/Documents/joao_pessoa_2026/build/hydrone_controller/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/lh/Documents/joao_pessoa_2026/install/hydrone_controller/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /home/lh/Documents/joao_pessoa_2026/build/hydrone_controller/build --no-deps symlink_data --force

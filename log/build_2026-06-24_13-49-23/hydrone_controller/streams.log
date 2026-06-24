@@ -1,0 +1,21 @@
+[0.738s] Invoking command in '/home/lh/Documents/joao_pessoa_2026/src/hydrone_controller': PYTHONPATH=/home/lh/Documents/joao_pessoa_2026/build/hydrone_controller/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/lh/Documents/joao_pessoa_2026/install/hydrone_controller/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/hydrone_controller build --build-base /home/lh/Documents/joao_pessoa_2026/build/hydrone_controller/build install --record /home/lh/Documents/joao_pessoa_2026/build/hydrone_controller/install.log --single-version-externally-managed install_data
+[0.871s] running egg_info
+[0.872s] writing ../../build/hydrone_controller/hydrone_controller.egg-info/PKG-INFO
+[0.872s] writing dependency_links to ../../build/hydrone_controller/hydrone_controller.egg-info/dependency_links.txt
+[0.872s] writing entry points to ../../build/hydrone_controller/hydrone_controller.egg-info/entry_points.txt
+[0.872s] writing requirements to ../../build/hydrone_controller/hydrone_controller.egg-info/requires.txt
+[0.872s] writing top-level names to ../../build/hydrone_controller/hydrone_controller.egg-info/top_level.txt
+[0.873s] reading manifest file '../../build/hydrone_controller/hydrone_controller.egg-info/SOURCES.txt'
+[0.873s] writing manifest file '../../build/hydrone_controller/hydrone_controller.egg-info/SOURCES.txt'
+[0.873s] running build
+[0.873s] running build_py
+[0.873s] running install
+[0.873s] running install_lib
+[0.874s] running install_data
+[0.874s] running install_egg_info
+[0.875s] removing '/home/lh/Documents/joao_pessoa_2026/install/hydrone_controller/lib/python3.10/site-packages/hydrone_controller-1.0.0-py3.10.egg-info' (and everything under it)
+[0.875s] Copying ../../build/hydrone_controller/hydrone_controller.egg-info to /home/lh/Documents/joao_pessoa_2026/install/hydrone_controller/lib/python3.10/site-packages/hydrone_controller-1.0.0-py3.10.egg-info
+[0.875s] running install_scripts
+[0.886s] Installing controller_node script to /home/lh/Documents/joao_pessoa_2026/install/hydrone_controller/bin
+[0.887s] writing list of installed files to '/home/lh/Documents/joao_pessoa_2026/build/hydrone_controller/install.log'
+[0.899s] Invoked command in '/home/lh/Documents/joao_pessoa_2026/src/hydrone_controller' returned '0': PYTHONPATH=/home/lh/Documents/joao_pessoa_2026/build/hydrone_controller/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/lh/Documents/joao_pessoa_2026/install/hydrone_controller/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/hydrone_controller build --build-base /home/lh/Documents/joao_pessoa_2026/build/hydrone_controller/build install --record /home/lh/Documents/joao_pessoa_2026/build/hydrone_controller/install.log --single-version-externally-managed install_data

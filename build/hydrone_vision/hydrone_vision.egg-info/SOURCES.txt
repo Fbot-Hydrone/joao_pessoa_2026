@@ -9,4 +9,11 @@ setup.py
 ../../build/hydrone_vision/hydrone_vision.egg-info/zip-safe
 hydrone_vision/__init__.py
 hydrone_vision/vision_node.py
+hydrone_vision.egg-info/PKG-INFO
+hydrone_vision.egg-info/SOURCES.txt
+hydrone_vision.egg-info/dependency_links.txt
+hydrone_vision.egg-info/entry_points.txt
+hydrone_vision.egg-info/requires.txt
+hydrone_vision.egg-info/top_level.txt
+hydrone_vision.egg-info/zip-safe
 resource/hydrone_vision

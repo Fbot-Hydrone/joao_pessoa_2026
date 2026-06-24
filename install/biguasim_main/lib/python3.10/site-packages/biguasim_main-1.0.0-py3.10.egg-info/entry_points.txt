@@ -1,4 +1,0 @@
-[console_scripts]
-ardubridge_node = biguasim_main.ardubridge_node:main
-biguasim_node = biguasim_main.biguasim_node:main
-

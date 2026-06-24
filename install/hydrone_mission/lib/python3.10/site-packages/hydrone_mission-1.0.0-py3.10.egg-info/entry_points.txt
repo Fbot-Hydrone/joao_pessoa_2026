@@ -1,3 +1,0 @@
-[console_scripts]
-mission_node = hydrone_mission.mission_node:main
-

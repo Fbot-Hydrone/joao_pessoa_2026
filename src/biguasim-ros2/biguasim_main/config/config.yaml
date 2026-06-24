@@ -26,6 +26,11 @@
               ros_publish: true
             - sensor_type: VelocitySensor
               ros_publish: true
+            - sensor_type: RGBCamera 
+              ros_publish: true
+              configuration:
+                Width: 640
+                Height: 480
           dynamics:
             batch_size : 1
           control_abstraction : 'accel'

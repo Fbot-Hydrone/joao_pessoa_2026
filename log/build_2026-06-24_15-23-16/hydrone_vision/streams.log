@@ -1,0 +1,19 @@
+[0.716s] Invoking command in '/home/lh/Documents/joao_pessoa_2026/build/hydrone_vision': PYTHONPATH=/home/lh/Documents/joao_pessoa_2026/build/hydrone_vision/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/lh/Documents/joao_pessoa_2026/install/hydrone_vision/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /home/lh/Documents/joao_pessoa_2026/build/hydrone_vision/build --no-deps symlink_data --force
+[0.846s] running develop
+[0.939s] running egg_info
+[0.939s] writing hydrone_vision.egg-info/PKG-INFO
+[0.939s] writing dependency_links to hydrone_vision.egg-info/dependency_links.txt
+[0.940s] writing entry points to hydrone_vision.egg-info/entry_points.txt
+[0.940s] writing requirements to hydrone_vision.egg-info/requires.txt
+[0.940s] writing top-level names to hydrone_vision.egg-info/top_level.txt
+[0.940s] reading manifest file 'hydrone_vision.egg-info/SOURCES.txt'
+[0.941s] writing manifest file 'hydrone_vision.egg-info/SOURCES.txt'
+[0.942s] running build_ext
+[0.942s] Creating /home/lh/Documents/joao_pessoa_2026/install/hydrone_vision/lib/python3.10/site-packages/hydrone-vision.egg-link (link to .)
+[0.942s] Installing vision_node script to /home/lh/Documents/joao_pessoa_2026/install/hydrone_vision/bin
+[0.942s] 
+[0.942s] Installed /home/lh/Documents/joao_pessoa_2026/build/hydrone_vision
+[0.942s] running symlink_data
+[0.942s] symbolically linking /home/lh/Documents/joao_pessoa_2026/build/hydrone_vision/resource/hydrone_vision -> /home/lh/Documents/joao_pessoa_2026/install/hydrone_vision/share/ament_index/resource_index/packages
+[0.942s] symbolically linking /home/lh/Documents/joao_pessoa_2026/build/hydrone_vision/package.xml -> /home/lh/Documents/joao_pessoa_2026/install/hydrone_vision/share/hydrone_vision
+[0.957s] Invoked command in '/home/lh/Documents/joao_pessoa_2026/build/hydrone_vision' returned '0': PYTHONPATH=/home/lh/Documents/joao_pessoa_2026/build/hydrone_vision/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/lh/Documents/joao_pessoa_2026/install/hydrone_vision/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /home/lh/Documents/joao_pessoa_2026/build/hydrone_vision/build --no-deps symlink_data --force

@@ -9,4 +9,11 @@ setup.py
 ../../build/hydrone_controller/hydrone_controller.egg-info/zip-safe
 hydrone_controller/__init__.py
 hydrone_controller/controller_node.py
+hydrone_controller.egg-info/PKG-INFO
+hydrone_controller.egg-info/SOURCES.txt
+hydrone_controller.egg-info/dependency_links.txt
+hydrone_controller.egg-info/entry_points.txt
+hydrone_controller.egg-info/requires.txt
+hydrone_controller.egg-info/top_level.txt
+hydrone_controller.egg-info/zip-safe
 resource/hydrone_controller

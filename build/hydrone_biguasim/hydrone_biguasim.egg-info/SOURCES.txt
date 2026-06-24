@@ -10,5 +10,12 @@ setup.py
 config/biguasim_drone.yaml
 hydrone_biguasim/__init__.py
 hydrone_biguasim/biguasim_bridge.py
+hydrone_biguasim.egg-info/PKG-INFO
+hydrone_biguasim.egg-info/SOURCES.txt
+hydrone_biguasim.egg-info/dependency_links.txt
+hydrone_biguasim.egg-info/entry_points.txt
+hydrone_biguasim.egg-info/requires.txt
+hydrone_biguasim.egg-info/top_level.txt
+hydrone_biguasim.egg-info/zip-safe
 launch/sim.launch.py
 resource/hydrone_biguasim

@@ -1,3 +1,0 @@
-[console_scripts]
-vision_node = hydrone_vision.vision_node:main
-

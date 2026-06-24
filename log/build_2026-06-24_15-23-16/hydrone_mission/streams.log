@@ -1,0 +1,19 @@
+[0.733s] Invoking command in '/home/lh/Documents/joao_pessoa_2026/build/hydrone_mission': PYTHONPATH=/home/lh/Documents/joao_pessoa_2026/build/hydrone_mission/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/lh/Documents/joao_pessoa_2026/install/hydrone_mission/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /home/lh/Documents/joao_pessoa_2026/build/hydrone_mission/build --no-deps symlink_data --force
+[0.866s] running develop
+[0.960s] running egg_info
+[0.960s] writing hydrone_mission.egg-info/PKG-INFO
+[0.960s] writing dependency_links to hydrone_mission.egg-info/dependency_links.txt
+[0.960s] writing entry points to hydrone_mission.egg-info/entry_points.txt
+[0.960s] writing requirements to hydrone_mission.egg-info/requires.txt
+[0.960s] writing top-level names to hydrone_mission.egg-info/top_level.txt
+[0.961s] reading manifest file 'hydrone_mission.egg-info/SOURCES.txt'
+[0.962s] writing manifest file 'hydrone_mission.egg-info/SOURCES.txt'
+[0.962s] running build_ext
+[0.962s] Creating /home/lh/Documents/joao_pessoa_2026/install/hydrone_mission/lib/python3.10/site-packages/hydrone-mission.egg-link (link to .)
+[0.962s] Installing mission_node script to /home/lh/Documents/joao_pessoa_2026/install/hydrone_mission/bin
+[0.963s] 
+[0.963s] Installed /home/lh/Documents/joao_pessoa_2026/build/hydrone_mission
+[0.963s] running symlink_data
+[0.963s] symbolically linking /home/lh/Documents/joao_pessoa_2026/build/hydrone_mission/resource/hydrone_mission -> /home/lh/Documents/joao_pessoa_2026/install/hydrone_mission/share/ament_index/resource_index/packages
+[0.963s] symbolically linking /home/lh/Documents/joao_pessoa_2026/build/hydrone_mission/package.xml -> /home/lh/Documents/joao_pessoa_2026/install/hydrone_mission/share/hydrone_mission
+[0.980s] Invoked command in '/home/lh/Documents/joao_pessoa_2026/build/hydrone_mission' returned '0': PYTHONPATH=/home/lh/Documents/joao_pessoa_2026/build/hydrone_mission/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/lh/Documents/joao_pessoa_2026/install/hydrone_mission/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /home/lh/Documents/joao_pessoa_2026/build/hydrone_mission/build --no-deps symlink_data --force

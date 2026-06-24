@@ -114,5 +114,6 @@ colcon_package_source_powershell_script "$env:COLCON_CURRENT_PREFIX/share/hydron
 colcon_package_source_powershell_script "$env:COLCON_CURRENT_PREFIX/share/hydrone_biguasim/hook/pythonpath.ps1"
 colcon_package_source_powershell_script "$env:COLCON_CURRENT_PREFIX/share/hydrone_biguasim/hook/pythonscriptspath.ps1"
 colcon_package_source_powershell_script "$env:COLCON_CURRENT_PREFIX/share/hydrone_biguasim/hook/ament_prefix_path.ps1"
+colcon_package_source_powershell_script "$env:COLCON_CURRENT_PREFIX/../../build/hydrone_biguasim/share/hydrone_biguasim/hook/pythonpath_develop.ps1"
 
 Remove-Item Env:\COLCON_CURRENT_PREFIX
