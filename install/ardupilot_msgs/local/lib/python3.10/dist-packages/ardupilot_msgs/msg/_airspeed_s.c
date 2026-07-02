@@ -1,1 +1,0 @@
-/home/lh/Documents/joao_pessoa_2026/build/ardupilot_msgs/rosidl_generator_py/ardupilot_msgs/msg/_airspeed_s.c

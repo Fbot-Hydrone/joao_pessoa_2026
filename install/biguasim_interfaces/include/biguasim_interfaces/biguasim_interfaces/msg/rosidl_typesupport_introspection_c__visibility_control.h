@@ -1,1 +1,0 @@
-/home/lh/Documents/joao_pessoa_2026/build/biguasim_interfaces/rosidl_typesupport_introspection_c/biguasim_interfaces/msg/rosidl_typesupport_introspection_c__visibility_control.h

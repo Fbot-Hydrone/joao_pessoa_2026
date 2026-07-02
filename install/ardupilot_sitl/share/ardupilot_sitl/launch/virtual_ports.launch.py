@@ -1,1 +1,0 @@
-/home/lh/Documents/joao_pessoa_2026/src/ardupilot/Tools/ros2/ardupilot_sitl/launch/virtual_ports.launch.py

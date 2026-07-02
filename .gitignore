@@ -1,0 +1,35 @@
+# ─── Colcon / ROS 2 build outputs ────────────────────────────────
+build/
+install/
+log/
+
+# ─── Imported source dependencies (pinned in deps.repos) ─────────
+src/ardupilot/
+src/micro_ros_agent/
+src/micro_ros_msgs/
+tools/Micro-XRCE-DDS-Gen/
+
+# ─── SITL / MAVProxy runtime artifacts ───────────────────────────
+logs/
+terrain/
+eeprom.bin
+*.tlog
+*.tlog.raw
+*.BIN
+LASTLOG.TXT
+dumpcore.sh_*.out
+dumpstack.sh_*.out
+frames_*.gv
+mav.parm
+
+# ─── Python ──────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ─── Editors / misc ──────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp

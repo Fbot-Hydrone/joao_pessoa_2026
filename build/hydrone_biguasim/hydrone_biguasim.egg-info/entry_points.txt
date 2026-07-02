@@ -1,3 +1,0 @@
-[console_scripts]
-biguasim_bridge = hydrone_biguasim.biguasim_bridge:main
-

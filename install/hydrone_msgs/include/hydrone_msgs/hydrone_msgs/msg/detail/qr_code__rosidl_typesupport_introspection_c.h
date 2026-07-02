@@ -1,1 +1,0 @@
-/home/lh/Documents/joao_pessoa_2026/build/hydrone_msgs/rosidl_typesupport_introspection_c/hydrone_msgs/msg/detail/qr_code__rosidl_typesupport_introspection_c.h

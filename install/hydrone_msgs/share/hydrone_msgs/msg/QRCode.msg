@@ -1,1 +1,0 @@
-/home/lh/Documents/joao_pessoa_2026/src/hydrone_msgs/msg/QRCode.msg

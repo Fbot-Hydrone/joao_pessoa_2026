@@ -1,1 +1,0 @@
-/home/lh/Documents/joao_pessoa_2026/build/hydrone_bringup/launch/hydrone.launch.py

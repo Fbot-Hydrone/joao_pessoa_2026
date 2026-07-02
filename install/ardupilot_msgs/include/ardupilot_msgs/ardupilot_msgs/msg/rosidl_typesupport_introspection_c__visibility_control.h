@@ -1,1 +1,0 @@
-/home/lh/Documents/joao_pessoa_2026/build/ardupilot_msgs/rosidl_typesupport_introspection_c/ardupilot_msgs/msg/rosidl_typesupport_introspection_c__visibility_control.h

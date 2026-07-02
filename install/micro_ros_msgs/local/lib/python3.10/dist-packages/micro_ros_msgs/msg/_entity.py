@@ -1,1 +1,0 @@
-/home/lh/Documents/joao_pessoa_2026/build/micro_ros_msgs/rosidl_generator_py/micro_ros_msgs/msg/_entity.py

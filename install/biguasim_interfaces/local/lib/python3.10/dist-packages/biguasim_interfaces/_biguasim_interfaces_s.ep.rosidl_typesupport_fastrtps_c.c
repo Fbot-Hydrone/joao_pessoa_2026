@@ -1,1 +1,0 @@
-/home/lh/Documents/joao_pessoa_2026/build/biguasim_interfaces/rosidl_generator_py/biguasim_interfaces/_biguasim_interfaces_s.ep.rosidl_typesupport_fastrtps_c.c

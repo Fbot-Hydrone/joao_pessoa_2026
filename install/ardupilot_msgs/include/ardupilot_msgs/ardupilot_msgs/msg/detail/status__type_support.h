@@ -1,1 +1,0 @@
-/home/lh/Documents/joao_pessoa_2026/build/ardupilot_msgs/rosidl_generator_c/ardupilot_msgs/msg/detail/status__type_support.h

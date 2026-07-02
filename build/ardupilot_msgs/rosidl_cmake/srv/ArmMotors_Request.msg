@@ -1,5 +1,0 @@
-
-# This service requests the vehicle to arm or disarm its motors.
-
-# Set true to arm motors, false to disarm motors.
-bool arm
