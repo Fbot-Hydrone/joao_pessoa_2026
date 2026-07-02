@@ -84,38 +84,49 @@ sudo systemctl restart docker
 
 ## Option 2 — run on the host
 
-### 1. One-time setup
+Ubuntu 22.04 only. One command installs everything (ROS 2 Humble included, if
+missing), clones the simulator repo if it isn't found, imports the pinned
+dependencies and builds the workspace — safe to re-run if anything fails
+midway:
 
 ```bash
-# ROS 2 Humble + tools
-sudo apt install python3-vcstool python3-pip default-jdk \
-                 ros-humble-cv-bridge ros-humble-image-transport libzbar0
-pip3 install empy==3.3.4 pexpect pymavlink dronecan future lxml MAVProxy \
-             mediapipe pyzbar opencv-python numpy
-
-# Simulator client — BiguaSim. The workspace only needs the `biguasim` package
-# importable in this Python env; where you clone it is up to you. Install it
-# once into your system pip (editable, so you can pull sim updates in place):
-git clone https://github.com/HenriqueReichow/bs-drone-competition.git
-pip3 install -e ./bs-drone-competition
-
-# Pinned source dependencies
-vcs import --recursive . < deps.repos
-
-# DDS IDL generator (needed by ArduPilot's build)
-( cd tools/Micro-XRCE-DDS-Gen && ./gradlew assemble -x submodulesUpdate )
-export MICROXRCEDDSGEN_DIR=$PWD/tools/Micro-XRCE-DDS-Gen
-export PATH=$MICROXRCEDDSGEN_DIR/scripts:$PATH
+./scripts/host_setup.sh          # one-time; asks for sudo; ~30 min first run
 ```
 
-### 2. Build
+Then, **in every terminal you work in**:
+
+```bash
+source scripts/env.sh            # ROS + workspace + build env, conda-safe
+```
+
+That single line replaces the manual `source /opt/ros/...`, `source
+install/setup.bash` and the `MICROXRCEDDSGEN_DIR` exports — and it strips
+conda from the shell (see Gotchas). Rebuild after changing msgs/srvs or
+`setup.py`:
 
 ```bash
 colcon build --symlink-install
-source install/setup.bash        # in every new terminal, after every rebuild
 ```
 
-### 3. Run
+<details>
+<summary>What the script does (manual equivalent)</summary>
+
+1. apt: build tools, `python3-vcstool`, `python3-colcon-common-extensions`,
+   `default-jdk`, `ros-humble-cv-bridge`, `ros-humble-image-transport`, `libzbar0`.
+2. pip (**system** pip, `--user` — never conda): upgrade `pip setuptools wheel`,
+   then `empy==3.3.4 pexpect pymavlink dronecan future lxml MAVProxy mediapipe
+   pyzbar opencv-python numpy`, CPU `torch` (explicitly, or pip pulls the CUDA
+   multi-GB build), `roma matplotlib`.
+3. Clones <https://github.com/HenriqueReichow/bs-drone-competition> next to
+   this repo (unless `BS_SIM_DIR` points elsewhere) and `pip install --user -e`'s it.
+4. `vcs import --recursive . < deps.repos`
+5. `( cd tools/Micro-XRCE-DDS-Gen && ./gradlew assemble -x submodulesUpdate )`
+6. `colcon build` — third-party packages first with `--executor sequential`
+   (a parallel ardupilot+agent build can starve the IDL generator), then the rest.
+
+</details>
+
+### Run
 
 ```bash
 # Simulation: bridge + SITL + DDS agent + MAVProxy
@@ -128,7 +139,7 @@ ros2 launch hydrone_bringup hydrone.launch.py phase:=1
 `hydrone.launch.py` arguments: `phase:=1..4`, `open_hardware:=true|false`
 (2× score), `use_two_drones:=true|false` (phase 3), `camera_topic`, `depth_topic`.
 
-### 4. Start a mission
+### Start a mission
 
 ```bash
 ros2 service call /hydrone/mission/start hydrone_msgs/srv/SetPhase \
