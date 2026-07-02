@@ -1,10 +1,25 @@
-version: '3.8'
-
 services:
-  biguasim_bridge:
+  hydrone:
     build: .
-    network_mode: "host"
+    # Host networking: DDS discovery, SITL JSON-model UDP and MAVLink all use
+    # localhost ports. Host IPC: BiguaSim talks to UE5 over shared memory.
+    network_mode: host
+    ipc: host
+    environment:
+      - DISPLAY=${DISPLAY}
+      # Asset backend used by `biguasim.install(...)`; set on the host if used.
+      - BS_WORLDS_URL=${BS_WORLDS_URL:-}
     volumes:
+      # UE5 viewport on the host X server (run `xhost +local:docker` first,
+      # or use scripts/docker_up.sh)
       - /tmp/.X11-unix:/tmp/.X11-unix
-      - ./:/workspace/drone_ws
-    command: ["/bin/bash", "-c", "source /opt/ros/humble/setup.bash && cd /workspace/drone_ws && colcon build --symlink-install && source install/setup.bash && ros2 launch ardupilot_sitl sitl_dds_udp.launch.py transport:=udp4 refs:=$(ros2 pkg prefix ardupilot_sitl)/share/ardupilot_sitl/config/dds_xrce_profile.xml synthetic_clock:=True wipe:=True model:=JSON speedup:=1 slave:=0 instance:=0 defaults:=$(ros2 pkg prefix ardupilot_sitl)/share/ardupilot_sitl/config/default_params/copter.parm,$(ros2 pkg prefix ardupilot_sitl)/share/ardupilot_sitl/config/default_params/dds_udp.parm sim_address:=127.0.0.1 master:=tcp:127.0.0.1:5760 sitl:=127.0.0.1:5501"]
+      # Simulator repo (provides the `biguasim` Python package, installed at
+      # container start)
+      - ../bs-competition/bs-drone-competition:/opt/bs-drone-competition:ro
+      # Reuse the worlds/packages already downloaded on the host
+      - ${HOME}/.local/share/biguasim:/root/.local/share/biguasim
+    devices:
+      # GPU access for the UE5 binary (Intel/AMD via mesa). For NVIDIA install
+      # nvidia-container-toolkit and add:  gpus: all
+      - /dev/dri:/dev/dri
+    command: ros2 launch hydrone_bringup hydrone_sim.launch.py
