@@ -1,1 +1,0 @@
-/home/lh/Documents/joao_pessoa_2026/build/biguasim_interfaces/rosidl_generator_py/biguasim_interfaces/msg/_imaging_sonar.py

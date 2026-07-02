@@ -1,1 +1,0 @@
-/home/lh/Documents/joao_pessoa_2026/build/biguasim_interfaces/ament_cmake_environment_hooks/local_setup.bash

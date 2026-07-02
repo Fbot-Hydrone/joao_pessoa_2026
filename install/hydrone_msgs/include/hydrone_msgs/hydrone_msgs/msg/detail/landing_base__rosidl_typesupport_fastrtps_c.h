@@ -1,1 +1,0 @@
-/home/lh/Documents/joao_pessoa_2026/build/hydrone_msgs/rosidl_typesupport_fastrtps_c/hydrone_msgs/msg/detail/landing_base__rosidl_typesupport_fastrtps_c.h

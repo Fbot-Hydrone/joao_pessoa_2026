@@ -1,1 +1,0 @@
-/home/lh/Documents/joao_pessoa_2026/build/hydrone_msgs/rosidl_generator_c/hydrone_msgs/msg/qr_code.h

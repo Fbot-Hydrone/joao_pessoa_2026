@@ -1,1 +1,0 @@
-/home/lh/Documents/joao_pessoa_2026/src/biguasim-ros2/biguasim_main/launch/ardubridge.launch.py

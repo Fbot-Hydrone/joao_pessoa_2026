@@ -1,3 +1,0 @@
-[console_scripts]
-nav_node = hydrone_nav.nav_node:main
-
