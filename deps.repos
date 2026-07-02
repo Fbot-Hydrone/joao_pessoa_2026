@@ -1,0 +1,28 @@
+# Source dependencies pinned to exact commits.
+# Import from the repository root with:
+#
+#   vcs import --recursive . < deps.repos
+#
+# (sudo apt install python3-vcstool  — or pip install vcstool)
+#
+# These used to be committed as flattened copies; they are byte-identical
+# to the upstream commits pinned below (verified 2026-07-02). Project-local
+# parameter tuning that previously lived inside the ardupilot tree was moved
+# to src/hydrone_bringup/config/params/.
+repositories:
+  src/ardupilot:
+    type: git
+    url: https://github.com/ArduPilot/ardupilot.git
+    version: 95d083f5cf5c89801fcdb399105f0039880f2e25
+  src/micro_ros_agent:
+    type: git
+    url: https://github.com/micro-ROS/micro-ROS-Agent.git
+    version: 4f363a79ae96aed39dcc5269f53f73f6a70d3a2c
+  src/micro_ros_msgs:
+    type: git
+    url: https://github.com/micro-ROS/micro_ros_msgs.git
+    version: 2ea89dcb89a524b09fbde7d11f8bd9cddb0598d8
+  tools/Micro-XRCE-DDS-Gen:
+    type: git
+    url: https://github.com/eProsima/Micro-XRCE-DDS-Gen.git
+    version: b8840058b81c87e1169a5a0ed4744d7b3dc99e0b
