@@ -1,29 +1,56 @@
 FROM osrf/ros:humble-desktop
 
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Toolchain for ArduPilot SITL, the micro-ROS agent and the DDS IDL generator
 RUN apt-get update && apt-get install -y \
-    python3-pip \
-    python3-empy \
-    python3-dev \
     git \
+    python3-pip \
+    python3-dev \
+    python3-vcstool \
     build-essential \
     cmake \
-    libyaml-cpp-dev \
+    pkg-config \
     default-jdk \
-    maven \
+    libzbar0 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install empy==3.3.4 pexpect pymavlink
+# ArduPilot build deps + MAVProxy (sitl_dds_udp.launch.py also starts MAVProxy)
+RUN pip3 install --no-cache-dir \
+    empy==3.3.4 pexpect pymavlink dronecan future lxml MAVProxy
 
-RUN git config --global --add safe.directory /workspace/drone_ws/src/ardupilot
+# Hydrone stack runtime deps
+RUN pip3 install --no-cache-dir mediapipe pyzbar opencv-python numpy
 
-# Copia e monta o gerador DDS corretamente
-COPY Micro-XRCE-DDS-Gen /opt/microxrceddsgen
-WORKDIR /opt/microxrceddsgen
-RUN ./gradlew assemble
+WORKDIR /ws
 
-# Configura a variável que o ArduPilot usa para achar o gerador
-ENV MICROXRCEDDSGEN_DIR=/opt/microxrceddsgen
-# Adiciona ao PATH para garantir
-ENV PATH="/opt/microxrceddsgen/scripts:${PATH}"
+# 1. Pinned source dependencies (this layer re-runs only when deps.repos changes)
+COPY deps.repos ./
+RUN vcs import --recursive . < deps.repos
 
-WORKDIR /workspace
+# 2. IDL generator required by ArduPilot's DDS build
+ENV MICROXRCEDDSGEN_DIR=/ws/tools/Micro-XRCE-DDS-Gen
+RUN cd "$MICROXRCEDDSGEN_DIR" && ./gradlew assemble -x submodulesUpdate
+ENV PATH="$MICROXRCEDDSGEN_DIR/scripts:$PATH"
+
+# 3. Third-party ROS packages (ArduPilot SITL is the slow one — cached
+#    independently of project code changes)
+RUN . /opt/ros/humble/setup.sh && \
+    colcon build --symlink-install \
+      --packages-up-to ardupilot_sitl ardupilot_msgs micro_ros_agent
+
+# 4. Project packages
+COPY src/ src/
+RUN . /opt/ros/humble/setup.sh && \
+    colcon build --symlink-install \
+      --packages-select hydrone_msgs biguasim_interfaces biguasim_main \
+        hydrone_bringup hydrone_vision hydrone_controller hydrone_nav \
+        hydrone_mission
+
+# The biguasim Python package (simulator client) is installed at container
+# start from the mounted bs-drone-competition repo — see docker/entrypoint.sh
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["ros2", "launch", "hydrone_bringup", "hydrone_sim.launch.py"]
