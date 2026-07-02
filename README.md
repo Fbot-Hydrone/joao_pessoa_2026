@@ -48,11 +48,14 @@ Third-party sources (`src/ardupilot`, `src/micro_ros_agent`, `src/micro_ros_msgs
 
 ## Option 1 — run with Docker (recommended)
 
-Requirements: Docker + compose, an X server, and the simulator repo cloned as a
-**sibling** directory (`../bs-competition/bs-drone-competition`).
+Requirements: Docker + compose, an X server, and the simulator repo cloned
+somewhere on the machine (auto-detected in `../bs-competition/` or `../`;
+anywhere else, point `BS_SIM_DIR` at it).
 
 ```bash
 ./scripts/docker_up.sh
+# sim repo in a custom location:
+BS_SIM_DIR=~/Documents/bs-drone-competition ./scripts/docker_up.sh
 ```
 
 That's it — the script allows X access, builds the image (first build compiles
@@ -156,6 +159,12 @@ ros2 node list                                   # what's alive
 
 ## Gotchas
 
+- **Deactivate conda before building on the host.** With a conda env active
+  (including the auto-activated `base`), CMake resolves libraries from
+  `~/miniconda3` instead of the system — the micro-ROS agent then fails with
+  `fmt`/`spdlog` template errors. Run `conda deactivate` until `which python3`
+  says `/usr/bin/python3`, then build in that shell (delete `build/ install/`
+  first if a poisoned build already happened).
 - **Don't pass `refs:=dds_xrce_profile.xml`** to the SITL launch: this
   ArduPilot version creates DDS entities client-side and the profile file no
   longer exists. Passing a missing path kills the micro-ROS agent, which shows
