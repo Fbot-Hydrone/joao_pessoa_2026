@@ -25,4 +25,18 @@ if ! python3 -c 'import biguasim' 2>/dev/null; then
     fi
 fi
 
+# Unreal Engine refuses to start as root ("Refusing to run with the root
+# privileges"), so drop to the unprivileged user, first granting it the
+# groups that own the mounted /dev/dri render nodes (gids vary per host).
+if [ "$(id -u)" = 0 ]; then
+    for gid in $(stat -c %g /dev/dri/* 2>/dev/null | sort -u); do
+        [ "$gid" = 0 ] && continue
+        getent group "$gid" >/dev/null || groupadd -g "$gid" "dri$gid"
+        usermod -aG "$gid" hydrone
+    done
+    export HOME=/home/hydrone
+    cd /home/hydrone
+    exec setpriv --reuid=hydrone --regid=hydrone --init-groups "$@"
+fi
+
 exec "$@"

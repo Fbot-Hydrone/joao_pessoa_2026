@@ -16,8 +16,9 @@ services:
       # Simulator repo (provides the `biguasim` Python package, installed at
       # container start)
       - ../bs-competition/bs-drone-competition:/opt/bs-drone-competition:ro
-      # Reuse the worlds/packages already downloaded on the host
-      - ${HOME}/.local/share/biguasim:/root/.local/share/biguasim
+      # Reuse the worlds/packages already downloaded on the host (the
+      # entrypoint drops to the unprivileged 'hydrone' user, uid 1000)
+      - ${HOME}/.local/share/biguasim:/home/hydrone/.local/share/biguasim
     devices:
       # GPU access for the UE5 binary (Intel/AMD via mesa). For NVIDIA install
       # nvidia-container-toolkit and add:  gpus: all

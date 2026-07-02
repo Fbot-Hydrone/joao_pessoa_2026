@@ -65,8 +65,19 @@ simulation bringup. The container:
 - uses host networking, so `ros2 topic list` from the host (same `ROS_DOMAIN_ID`)
   sees everything.
 
-For NVIDIA GPUs install `nvidia-container-toolkit` and add `gpus: all` to the
-service in `docker-compose.yml`.
+**GPU:** by default the container renders on the integrated GPU (`/dev/dri`
+via mesa). To use an NVIDIA dGPU, install the container toolkit once on the
+host — `scripts/docker_up.sh` then detects it and enables
+`docker-compose.nvidia.yml` automatically:
+
+```bash
+sudo apt install nvidia-container-toolkit
+sudo nvidia-ctk runtime configure --runtime=docker
+sudo systemctl restart docker
+```
+
+(If the package is missing, add NVIDIA's repo:
+<https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html>.)
 
 ## Option 2 — run on the host
 
