@@ -34,9 +34,11 @@ RUN cd "$MICROXRCEDDSGEN_DIR" && ./gradlew assemble -x submodulesUpdate
 ENV PATH="$MICROXRCEDDSGEN_DIR/scripts:$PATH"
 
 # 3. Third-party ROS packages (ArduPilot SITL is the slow one — cached
-#    independently of project code changes)
+#    independently of project code changes). Sequential executor: building
+#    micro_ros_agent and ardupilot_sitl in parallel starves the AP_DDS IDL
+#    generator's JVM, which dies with exit 255.
 RUN . /opt/ros/humble/setup.sh && \
-    colcon build --symlink-install \
+    colcon build --symlink-install --executor sequential \
       --packages-up-to ardupilot_sitl ardupilot_msgs micro_ros_agent
 
 # 4. Project packages
@@ -46,6 +48,12 @@ RUN . /opt/ros/humble/setup.sh && \
       --packages-select hydrone_msgs biguasim_interfaces biguasim_main \
         hydrone_bringup hydrone_vision hydrone_controller hydrone_nav \
         hydrone_mission
+
+# Runtime deps of biguasim that its setup.py doesn't declare (its code
+# imports torch/roma/matplotlib). CPU-only torch: the CUDA wheels add
+# multiple GB and UE5 does the physics; swap the index-url if you need GPU torch.
+RUN pip3 install --no-cache-dir torch==2.7.1 --index-url https://download.pytorch.org/whl/cpu && \
+    pip3 install --no-cache-dir roma==1.5.3 matplotlib
 
 # The biguasim Python package (simulator client) is installed at container
 # start from the mounted bs-drone-competition repo — see docker/entrypoint.sh
