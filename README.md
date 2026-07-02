@@ -90,8 +90,11 @@ sudo apt install python3-vcstool python3-pip default-jdk \
 pip3 install empy==3.3.4 pexpect pymavlink dronecan future lxml MAVProxy \
              mediapipe pyzbar opencv-python numpy
 
-# Simulator client (from the sibling simulator repo)
-pip3 install ../bs-competition/bs-drone-competition
+# Simulator client — BiguaSim. The workspace only needs the `biguasim` package
+# importable in this Python env; where you clone it is up to you. Install it
+# once into your system pip (editable, so you can pull sim updates in place):
+git clone https://github.com/HenriqueReichow/bs-drone-competition.git
+pip3 install -e ./bs-drone-competition
 
 # Pinned source dependencies
 vcs import --recursive . < deps.repos
