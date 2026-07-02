@@ -22,7 +22,10 @@ repositories:
     type: git
     url: https://github.com/micro-ROS/micro_ros_msgs.git
     version: 2ea89dcb89a524b09fbde7d11f8bd9cddb0598d8
+  # NOTE: ArduPilot's fork, not eProsima upstream — the pinned commit only
+  # exists there (it carries ArduPilot patches, e.g. the OMG-IDL-Parser
+  # submodule and C++ const generation).
   tools/Micro-XRCE-DDS-Gen:
     type: git
-    url: https://github.com/eProsima/Micro-XRCE-DDS-Gen.git
+    url: https://github.com/ArduPilot/Micro-XRCE-DDS-Gen.git
     version: b8840058b81c87e1169a5a0ed4744d7b3dc99e0b
