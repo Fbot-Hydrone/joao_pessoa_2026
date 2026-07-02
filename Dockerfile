@@ -55,6 +55,13 @@ RUN . /opt/ros/humble/setup.sh && \
 RUN pip3 install --no-cache-dir torch==2.7.1 --index-url https://download.pytorch.org/whl/cpu && \
     pip3 install --no-cache-dir roma==1.5.3 matplotlib
 
+# UE5 runtime: Vulkan loader + mesa drivers, and an unprivileged user —
+# Unreal refuses to start as root, so the entrypoint drops to this user.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libvulkan1 mesa-vulkan-drivers vulkan-tools \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -m -s /bin/bash -u 1000 hydrone
+
 # The biguasim Python package (simulator client) is installed at container
 # start from the mounted bs-drone-competition repo — see docker/entrypoint.sh
 COPY docker/entrypoint.sh /entrypoint.sh

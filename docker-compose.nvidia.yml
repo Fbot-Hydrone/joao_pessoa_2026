@@ -1,0 +1,15 @@
+# NVIDIA dGPU override — requires nvidia-container-toolkit on the host:
+#
+#   sudo apt install nvidia-container-toolkit
+#   sudo nvidia-ctk runtime configure --runtime=docker
+#   sudo systemctl restart docker
+#
+# scripts/docker_up.sh detects the runtime and adds this file automatically;
+# manual use:  docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up
+services:
+  hydrone:
+    gpus: all
+    environment:
+      # 'graphics' capability injects the NVIDIA Vulkan ICD; UE5 then picks
+      # the discrete GPU over the integrated one on hybrid laptops.
+      - NVIDIA_DRIVER_CAPABILITIES=all
