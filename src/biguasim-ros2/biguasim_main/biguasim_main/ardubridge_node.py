@@ -32,6 +32,7 @@ class ArduBridgeNode(Node):
         if match is None:
             raise RuntimeError(f"Veiculo desconhecido: {agent_type}")
         self.profile = VEHICLE_REGISTRY[match]
+        # self.profile["name"] = agent_cfg["agent_name"]
 
         # 2. Builda o scenario com os sensores CERTOS para o ArduPilot
         #    MAS adiciona os sensores extras do YAML (para publicação ROS2)
@@ -39,6 +40,7 @@ class ArduBridgeNode(Node):
             self.profile,
             package_name=PACKAGE_NAME,
             world=WORLD,
+            agent_name=agent_cfg['agent_name'],
             ticks_per_sec=scenario_cfg.get('ticks_per_sec', 200),
             location=agent_cfg.get('location', [0, 0, 5]),
             rotation=agent_cfg.get('rotation', [0, 0, 0]),
@@ -137,6 +139,9 @@ class ArduBridgeNode(Node):
 
     def _sensor_publisher_create(self):
         for sensor in self.interface.sensors:
+            # agent_name comes from config.yaml (agents[0].agent_name), carries
+            # the biguasim batch suffix -> e.g. "auv0_id0". Topics land under the
+            # launch namespace: /biguasim/<agent_name>/<sensor.name>.
             topic = f"{sensor.agent_name}/{sensor.name}"
             sensor.publisher = self.create_publisher(sensor.message_type, topic, 10)
             self.get_logger().info(f"Publisher: {topic}")

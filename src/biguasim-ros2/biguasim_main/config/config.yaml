@@ -11,7 +11,7 @@
       draw_arrow: true
       show_viewport: true
       agents:
-        - agent_name: auv0
+        - agent_name: uav0
           agent_type: HolybroX500
           publish_commands: false
           sensors:
@@ -27,6 +27,11 @@
             - sensor_type: VelocitySensor
               ros_publish: true
             - sensor_type: RGBCamera 
+              ros_publish: true
+              configuration:
+                Width: 640
+                Height: 480
+            - sensor_type: DepthCamera
               ros_publish: true
               configuration:
                 Width: 640

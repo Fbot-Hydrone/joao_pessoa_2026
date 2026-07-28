@@ -445,14 +445,19 @@ class CameraInfoEncoder(SensorPublisher):
         super().__init__(sensor_dict)
 
         self.message_type = CameraInfo
-    
+
+        # Horizontal FOV must match what the simulator camera actually renders
+        self.fov_deg = 90.0
+        if self.config is not None and 'FOV' in self.config:
+            self.fov_deg = float(self.config['FOV'])
+
     def encode(self, sensor_data):
         msg = self.message_type()
         msg.header.frame_id = self.socket
 
         width = sensor_data.shape[1]
         height = sensor_data.shape[0]
-        fov_deg = 90
+        fov_deg = self.fov_deg
 
         # Convert FOV to radians
         fov_rad = np.deg2rad(fov_deg)
@@ -509,8 +514,8 @@ class DepthMapEncoder(SensorPublisher):
         msg.width = sensor_data.shape[1]   # Columns
 
         # Step calculation
-        msg.step = msg.width * 4 
-        msg.encoding = "bgr8"
+        msg.step = msg.width * 4
+        msg.encoding = "32FC1"
         msg.is_bigendian = 0
 
         # Convert to bytes
