@@ -1,5 +1,11 @@
 # Project Notes — joao_pessoa_2026 (Hydrone ROS2 drone dev environment)
 
+> ⚠️ **OUTDATED — pre-refactor. Read `README.md` instead.**
+> These notes predate the `refactor/workspace-cleanup` refactor and describe the
+> archived direct ROS2↔BiguaSim path (`hydrone_biguasim`, `sim.launch.py`) and
+> tell you to work on `develop_bridge_ros2` — none of that is valid anymore.
+> Kept only for historical context. The single source of truth is `README.md`.
+
 > Onboarding notes written while exploring the repo mid-project. Goal: explain
 > what this is, the two ways to run it, and the gotchas I found. Treat the
 > "Open questions / risks" section as things to confirm with the team.
