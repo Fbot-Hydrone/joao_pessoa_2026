@@ -159,10 +159,16 @@ class ZedMimicNode(Node):
         self.last_info = msg
 
     def _cb_depth(self, msg: Image):
+        import numpy as np
+        depth = np.frombuffer(msg.data, dtype=np.float32).copy()
         if self.depth_scale != 1.0:
-            import numpy as np
-            depth = np.frombuffer(msg.data, dtype=np.float32) * self.depth_scale
-            msg.data = depth.tobytes()
+            depth *= self.depth_scale
+        # Sky / no-geometry pixels saturate the GPU's float16 depth buffer at
+        # 655.04 m (65504 cm). The real ZED reports NaN there (REP 118); leaving
+        # the sentinel poisons any mean-depth / obstacle / ground-height math and
+        # crushes the RViz colour scale. Mimic the real sensor.
+        depth[depth >= 655.0] = np.nan
+        msg.data = depth.tobytes()
         self.last_depth = msg
 
     def _cb_rgb(self, msg: Image):

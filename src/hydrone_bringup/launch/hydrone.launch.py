@@ -34,10 +34,10 @@ def generate_launch_description():
         DeclareLaunchArgument("debug_vision",   default_value="true",
                               description="Publish annotated debug image"),
         DeclareLaunchArgument("camera_topic",
-                              default_value="/zed2/zed_node/rgb/image_rect_color",
+                              default_value="/zed/zed_node/rgb/image_rect_color",
                               description="Main camera image topic"),
         DeclareLaunchArgument("depth_topic",
-                              default_value="/zed2/zed_node/depth/depth_registered",
+                              default_value="/zed/zed_node/depth/depth_registered",
                               description="Depth image topic"),
     ]
 
