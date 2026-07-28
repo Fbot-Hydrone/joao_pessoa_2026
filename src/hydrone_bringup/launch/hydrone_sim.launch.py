@@ -26,10 +26,47 @@ Notes:
 
 import os
 
+import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch_ros.actions import Node
+
+
+# Must match the namespace set in biguasim_main/launch/ardubridge.launch.py.
+BIGUASIM_NS = 'biguasim'
+
+
+def _find_biguasim_scenario(node):
+    """Recursively locate the 'biguasim_scenario' block in a parsed config."""
+    if isinstance(node, dict):
+        if 'biguasim_scenario' in node:
+            return node['biguasim_scenario']
+        for value in node.values():
+            found = _find_biguasim_scenario(value)
+            if found is not None:
+                return found
+    elif isinstance(node, list):
+        for item in node:
+            found = _find_biguasim_scenario(item)
+            if found is not None:
+                return found
+    return None
+
+
+def _biguasim_topic_prefix(config_path):
+    """Build the ROS topic prefix that ardubridge_node publishes sensors under.
+
+    The agent name comes from config.yaml (single source of truth). BiguaSim's
+    environment appends a batch suffix to it -> '<name>-id0', which the ROS
+    bridge renders as '<name>_id0'. Single-agent only for now; multi-agent would
+    need per-index prefixes.
+    """
+    with open(config_path) as f:
+        scenario = _find_biguasim_scenario(yaml.safe_load(f))
+    agent_name = scenario['agents'][0]['agent_name']
+    return f'/{BIGUASIM_NS}/{agent_name}_id0'
 
 
 def generate_launch_description():
@@ -68,7 +105,29 @@ def generate_launch_description():
         }.items(),
     )
 
+    # Fake ZED: republishes BiguaSim sensors under the real ZED wrapper's
+    # topic names and frames. On the real drone, launch zed_wrapper instead.
+    # Input topics are derived from the biguasim agent name in config.yaml so
+    # renaming the agent in one place propagates to the bridge and here.
+    biguasim_config = os.path.join(
+        get_package_share_directory('biguasim_main'), 'config', 'config.yaml')
+    prefix = _biguasim_topic_prefix(biguasim_config)
+
+    zed_mimic = Node(
+        package='hydrone_bringup',
+        executable='zed_mimic_node',
+        output='screen',
+        parameters=[{
+            'in_rgb':      f'{prefix}/RGBCamera',
+            'in_rgb_info': f'{prefix}/RGBCamera/camera_info',
+            'in_depth':    f'{prefix}/DepthCamera',
+            'in_odom':     f'{prefix}/DynamicsSensor/Odom',
+            'in_imu':      f'{prefix}/DynamicsSensor/IMU',
+        }],
+    )
+
     return LaunchDescription([
         ardubridge,
         sitl_dds,
+        zed_mimic,
     ])

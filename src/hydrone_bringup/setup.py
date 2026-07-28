@@ -25,5 +25,7 @@ setup(
     maintainer_email='team@hydrone.com',
     description='Launch files and configuration for the Hydrone competition stack',
     license='MIT',
-    entry_points={'console_scripts': []},
+    entry_points={'console_scripts': [
+        'zed_mimic_node = hydrone_bringup.zed_mimic_node:main',
+    ]},
 )
