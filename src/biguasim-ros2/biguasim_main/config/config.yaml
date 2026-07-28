@@ -4,7 +4,7 @@
       package_name: Competition
       world: CompetionMap
       main_agent: auv0     
-      ticks_per_sec: 720
+      ticks_per_sec: 90
       frames_per_sec: 60
       octree_min: 0.1
       octree_max: 5
@@ -26,16 +26,22 @@
               ros_publish: true
             - sensor_type: VelocitySensor
               ros_publish: true
-            - sensor_type: RGBCamera 
+            # Cameras throttled via Hz (must divide ticks_per_sec). Rendering them
+            # caps the UE5 loop ~60 Hz regardless, so ticks_per_sec is kept at 90
+            # (~0.67x real-time) here. For crisp 1.0x flight, drop the cameras and
+            # raise ticks_per_sec to ~200 (+ SCHED_LOOP_RATE 100).
+            - sensor_type: RGBCamera
               ros_publish: true
+              Hz: 10
               configuration:
-                Width: 640
-                Height: 480
+                Width: 320
+                Height: 240
             - sensor_type: DepthCamera
               ros_publish: true
+              Hz: 10
               configuration:
-                Width: 640
-                Height: 480
+                Width: 320
+                Height: 240
           dynamics:
             batch_size : 1
           control_abstraction : 'accel'

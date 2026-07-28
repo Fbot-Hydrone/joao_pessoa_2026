@@ -42,6 +42,11 @@ else
 fi
 [ -f "$_HYDRONE_WS/install/setup.bash" ] && source "$_HYDRONE_WS/install/setup.bash"
 
+# Private DDS domain — must match ROS_DOMAIN_ID in docker-compose.yml so host
+# `ros2` commands see the containerized stack and other apps on domain 0 don't
+# poison the micro-ROS agent.
+export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-42}"
+
 # ── 3. XRCE-DDS IDL generator (needed whenever ArduPilot rebuilds) ─────────
 export MICROXRCEDDSGEN_DIR="$_HYDRONE_WS/tools/Micro-XRCE-DDS-Gen"
 case ":$PATH:" in
