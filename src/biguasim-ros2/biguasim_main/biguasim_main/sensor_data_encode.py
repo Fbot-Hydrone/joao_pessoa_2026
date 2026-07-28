@@ -245,8 +245,11 @@ class DynamicsEncoder(SensorPublisher):
 
     def encode(self, sensor_data):
         msg = self.message_type()
-        msg.header.frame_id = self.socket
-        msg.child_frame_id = 'odom'
+        # REP 105: Odometry header is the fixed frame (odom), child is the moving
+        # body (base_link). These were swapped; zed_mimic already overrode them,
+        # but the raw topic must be correct for any direct consumer.
+        msg.header.frame_id = 'odom'
+        msg.child_frame_id = 'base_link'
         if len(sensor_data) == 18:
             sensor_data.append(-100) # Should error out if mistakenly trying to use it as a quaternion
         elif len(sensor_data) != 19:
