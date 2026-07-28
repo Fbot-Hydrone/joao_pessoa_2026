@@ -26,10 +26,11 @@
               ros_publish: true
             - sensor_type: VelocitySensor
               ros_publish: true
-            # Cameras throttled via Hz (must divide ticks_per_sec). Rendering them
-            # caps the UE5 loop ~60 Hz regardless, so ticks_per_sec is kept at 90
-            # (~0.67x real-time) here. For crisp 1.0x flight, drop the cameras and
-            # raise ticks_per_sec to ~200 (+ SCHED_LOOP_RATE 100).
+            # Cameras throttled via Hz (must divide ticks_per_sec). With the
+            # array.array encode fix the loop sustains ~90 Hz with both cameras,
+            # so ticks_per_sec=90 runs ~real-time. Dropping the cameras lets the
+            # loop reach ~260 Hz (raise ticks_per_sec + SCHED_LOOP_RATE for crisper
+            # attitude control).
             - sensor_type: RGBCamera
               ros_publish: true
               Hz: 10

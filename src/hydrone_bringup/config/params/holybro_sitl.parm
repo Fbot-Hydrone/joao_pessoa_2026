@@ -3,7 +3,8 @@ DDS_DOMAIN_ID   42
 # Keep in step with the BiguaSim JSON FDM rate (config.yaml ticks_per_sec): the
 # scheduler must not expect updates faster than the bridge loop delivers, and
 # arming needs gyro (= ticks_per_sec) >= 1.8 * SCHED_LOOP_RATE. With cameras on
-# the loop caps ~60 Hz (ticks_per_sec=90); 50 is ArduCopter's minimum loop rate.
+# the loop sustains ~90 Hz (ticks_per_sec=90); 50 is ArduCopter's minimum loop
+# rate. Cameras off, the loop reaches ~260 Hz -> raise both for finer control.
 SCHED_LOOP_RATE 50
 FS_THR_ENABLE   1
 ARSPD_PIN 1

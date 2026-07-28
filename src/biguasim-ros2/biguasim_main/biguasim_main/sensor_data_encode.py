@@ -5,6 +5,7 @@ from geometry_msgs.msg import Vector3Stamped, PoseWithCovarianceStamped, TwistWi
 from biguasim_interfaces.msg import DVLSensorRange, ImagingSonar
 from scipy.spatial.transform import Rotation
 import numpy as np
+import array
 
 
 # TODO make a not about how the Dynamics Sensor IMU is not in local frame
@@ -429,8 +430,9 @@ class ImageEncoder(SensorPublisher):
         msg.encoding = "bgr8"
         msg.is_bigendian = 0
 
-        # Convert to bytes
-        msg.data = sensor_data.tobytes()
+        # array.array('B') hits rclpy's uint8[] fast path; passing bytes forces a
+        # slow interpreted byte-by-byte copy in the generated Image.data setter.
+        msg.data = array.array('B', sensor_data.tobytes())
 
         # Debugging: Check expected vs actual size
         expected_size = msg.height * msg.step
@@ -518,8 +520,9 @@ class DepthMapEncoder(SensorPublisher):
         msg.encoding = "32FC1"
         msg.is_bigendian = 0
 
-        # Convert to bytes
-        msg.data = sensor_data.tobytes()
+        # array.array('B') hits rclpy's uint8[] fast path; passing bytes forces a
+        # slow interpreted byte-by-byte copy in the generated Image.data setter.
+        msg.data = array.array('B', sensor_data.tobytes())
 
         # Debugging: Check expected vs actual size
         expected_size = msg.height * msg.step
