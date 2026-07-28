@@ -8,9 +8,9 @@ Responsibilities:
   - Phase 4:     Read QR codes (A-E) inside the confined maze environment
 
 Subscribed topics:
-  /zed2/zed_node/rgb/image_rect_color   (sensor_msgs/Image)
-  /zed2/zed_node/depth/depth_registered (sensor_msgs/Image)
-  /zed2/zed_node/point_cloud/cloud_registered (sensor_msgs/PointCloud2)
+  /zed/zed_node/rgb/image_rect_color   (sensor_msgs/Image)
+  /zed/zed_node/depth/depth_registered (sensor_msgs/Image)
+  /zed/zed_node/point_cloud/cloud_registered (sensor_msgs/PointCloud2)
   /hydrone/mission_state                (hydrone_msgs/MissionState)
 
 Published topics:
@@ -88,9 +88,9 @@ class HydroneVisionNode(Node):
 
         # ── Parameters ──────────────────────────────────────────────────────
         self.declare_parameter("camera_topic",
-                               "/zed2/zed_node/rgb/image_rect_color")
+                               "/zed/zed_node/rgb/image_rect_color")
         self.declare_parameter("depth_topic",
-                               "/zed2/zed_node/depth/depth_registered")
+                               "/zed/zed_node/depth/depth_registered")
         self.declare_parameter("debug_image", True)
         self.declare_parameter("aruco_dict",  cv2.aruco.DICT_4X4_50)
 
