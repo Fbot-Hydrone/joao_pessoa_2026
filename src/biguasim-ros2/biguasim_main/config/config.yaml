@@ -27,22 +27,31 @@
             - sensor_type: VelocitySensor
               ros_publish: true
             # Cameras throttled via Hz (must divide ticks_per_sec). With the
-            # array.array encode fix the loop sustains ~90 Hz with both cameras,
-            # so ticks_per_sec=90 runs ~real-time. Dropping the cameras lets the
+            # array.array encode fix the loop sustains ~82 Hz with both 640x480
+            # cameras, so ticks_per_sec=90 runs ~0.92x real-time (lower the camera
+            # Hz or resolution for more headroom). Dropping the cameras lets the
             # loop reach ~260 Hz (raise ticks_per_sec + SCHED_LOOP_RATE for crisper
             # attitude control).
+            # Resolution key is CaptureWidth/CaptureHeight — plain Width/Height is
+            # silently ignored by the BiguaSim sensor (defaults to 256x256). FOV
+            # feeds the CameraInfo intrinsics; RGBCamera/DepthCamera render at UE's
+            # default 90 deg (they don't support FovAngle), so 90 keeps fx/fy
+            # correct. Matching the real ZED 2's 110 deg needs a FovAngle-capable
+            # sensor (RGBDCamera/CameraSensor) — a separate change.
             - sensor_type: RGBCamera
               ros_publish: true
               Hz: 10
               configuration:
-                Width: 320
-                Height: 240
+                CaptureWidth: 640
+                CaptureHeight: 480
+                FOV: 90
             - sensor_type: DepthCamera
               ros_publish: true
               Hz: 10
               configuration:
-                Width: 320
-                Height: 240
+                CaptureWidth: 640
+                CaptureHeight: 480
+                FOV: 90
           dynamics:
             batch_size : 1
           control_abstraction : 'accel'
