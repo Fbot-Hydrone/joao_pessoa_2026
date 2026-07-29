@@ -27,7 +27,6 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
 
 
 def generate_launch_description():
@@ -44,41 +43,13 @@ def generate_launch_description():
         DeclareLaunchArgument("use_two_drones", default_value="false"),
     ]
 
+    # Base sim now brings up MAVROS + the vision_odom_bridge itself (the vehicle
+    # needs the ZED-VO external nav to hold position with GPS disabled), so we
+    # just add the autonomy stack on top.
     sim = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(launch_dir, "hydrone_sim.launch.py")
         )
-    )
-
-    # MAVROS <-> ArduPilot over MAVProxy's second output (udp 14551). The empty
-    # remote after '@' lets MAVROS auto-learn MAVProxy's source and reply.
-    # The apm_pluginlists.yaml denylist is what makes the vision_pose plugin
-    # load (mavros_node's built-in default set omits it) — required for
-    # VISION_POSITION_ESTIMATE / GPS-denied external nav.
-    mavros_share = get_package_share_directory("mavros")
-    mavros = Node(
-        package="mavros",
-        executable="mavros_node",
-        output="screen",
-        parameters=[
-            os.path.join(mavros_share, "launch", "apm_pluginlists.yaml"),
-            os.path.join(mavros_share, "launch", "apm_config.yaml"),
-            {
-                "fcu_url": "udp://:14551@",
-                "gcs_url": "",
-                "tgt_system": 1,
-                "tgt_component": 1,
-                "fcu_protocol": "v2.0",
-            },
-        ],
-    )
-
-    # Feed ZED visual odometry to ArduPilot as external nav (GPS-denied flight).
-    # Pairs with the EK3_SRC*/GPS1_TYPE=0 params in holybro_sitl.parm.
-    vision_odom = Node(
-        package="hydrone_bringup",
-        executable="vision_odom_bridge",
-        output="screen",
     )
 
     autonomy = IncludeLaunchDescription(
@@ -92,4 +63,4 @@ def generate_launch_description():
         }.items(),
     )
 
-    return LaunchDescription(args + [sim, mavros, vision_odom, autonomy])
+    return LaunchDescription(args + [sim, autonomy])
