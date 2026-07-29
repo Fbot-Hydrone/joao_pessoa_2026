@@ -92,11 +92,12 @@ def generate_launch_description():
         launch_arguments={
             'transport': 'udp4',
             'port': '2019',
-            # Wall-clock (not synthetic) so SITL time matches MAVROS/ROS — with
-            # synthetic clock, timesync fails ("Wrong FCU time") and vision
-            # timestamps are wrong, giving high EKF position variance so GUIDED
-            # takeoff is refused. Sim runs ~real-time, so wall-clock is stable.
-            'synthetic_clock': 'False',
+            # Synthetic clock: ArduPilot advances time in lockstep with the FDM,
+            # so control stays stable even when the sim runs below real-time.
+            # (Wall-clock made ArduPilot over-control on stale sensor data ->
+            # uncontrollable hover. The MAVROS timesync warnings it causes are
+            # cosmetic; vision fusion still works via the reliable-QoS pose.)
+            'synthetic_clock': 'True',
             'wipe': 'True',
             'model': 'JSON',
             'speedup': '1',
