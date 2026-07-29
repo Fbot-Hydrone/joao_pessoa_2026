@@ -50,17 +50,19 @@ class VisionOdomBridge(Node):
         self.pub = self.create_publisher(PoseStamped, out_pose, pub_qos)
         self.create_subscription(Odometry, in_odom, self._cb, sub_qos)
 
-        # Set the global origin a few times (MAVROS/FCU must be up first).
+        # Set the global origin at 1 Hz for the first 30 s (MAVROS/FCU must be up
+        # first, and home must be established before any takeoff). Sending it
+        # repeatedly is idempotent and robust against startup timing.
         self.origin_pub = self.create_publisher(
             GeoPointStamped, "/mavros/global_position/set_gp_origin", pub_qos)
         self._origin_sends = 0
-        self.create_timer(3.0, self._send_origin)
+        self.create_timer(1.0, self._send_origin)
 
         self.get_logger().info(
             f"vision_odom_bridge: {in_odom} (Odometry) -> {out_pose} (PoseStamped)")
 
     def _send_origin(self):
-        if self._origin_sends >= 5:
+        if self._origin_sends >= 30:
             return
         msg = GeoPointStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
