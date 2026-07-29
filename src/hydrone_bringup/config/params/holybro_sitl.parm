@@ -1,5 +1,17 @@
 FRAME_TYPE	1
 DDS_DOMAIN_ID   42
+# --- GPS-denied flight on ZED visual odometry (external nav) ---
+# CBR rules ban GPS in the arena, so EKF3 takes horizontal position/velocity and
+# yaw from external nav: VISION_POSITION_ESTIMATE fed via MAVROS from the ZED
+# odometry (/zed/zed_node/odom). Altitude stays on baro (VO Z is unreliable).
+# VISO_TYPE=1 enables the MAVLink visual-odometry backend. See develop-pipelines.
+GPS1_TYPE       0
+VISO_TYPE       1
+EK3_SRC1_POSXY  6
+EK3_SRC1_VELXY  6
+EK3_SRC1_POSZ   1
+EK3_SRC1_VELZ   0
+EK3_SRC1_YAW    6
 # Keep in step with the BiguaSim JSON FDM rate (config.yaml ticks_per_sec): the
 # scheduler must not expect updates faster than the bridge loop delivers, and
 # arming needs gyro (= ticks_per_sec) >= 1.8 * SCHED_LOOP_RATE. With cameras on

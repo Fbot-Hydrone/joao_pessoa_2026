@@ -67,7 +67,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # a runtime import of controller_node. install_geographiclib_datasets pulls the
 # geoid the global-position plugin needs (non-fatal if it can't download).
 RUN apt-get update && apt-get install -y \
-      ros-humble-mavros ros-humble-mavros-msgs geographiclib-tools \
+      ros-humble-mavros ros-humble-mavros-msgs ros-humble-mavros-extras \
+      geographiclib-tools \
     && (geographiclib-get-geoids egm96-5 || true) \
     && rm -rf /var/lib/apt/lists/*
 
