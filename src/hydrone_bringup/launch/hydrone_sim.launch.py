@@ -126,8 +126,40 @@ def generate_launch_description():
         }],
     )
 
+    # MAVROS + visual-odometry feed. The SITL params (holybro_sitl.parm) put
+    # EKF3 on external nav with GPS disabled (CBR rules), so the vehicle can only
+    # hold position if it is fed vision — hence this lives in the base sim, not
+    # just the mission launch. mavros connects to MAVProxy's udp:14551 output;
+    # apm_pluginlists.yaml is what makes the vision_pose plugin load.
+    mavros_share = get_package_share_directory("mavros")
+    mavros = Node(
+        package="mavros",
+        executable="mavros_node",
+        output="screen",
+        parameters=[
+            os.path.join(mavros_share, "launch", "apm_pluginlists.yaml"),
+            os.path.join(mavros_share, "launch", "apm_config.yaml"),
+            {
+                "fcu_url": "udp://:14551@",
+                "gcs_url": "",
+                "tgt_system": 1,
+                "tgt_component": 1,
+                "fcu_protocol": "v2.0",
+            },
+        ],
+    )
+
+    # /zed/zed_node/odom -> /mavros/vision_pose/pose (VISION_POSITION_ESTIMATE).
+    vision_odom = Node(
+        package="hydrone_bringup",
+        executable="vision_odom_bridge",
+        output="screen",
+    )
+
     return LaunchDescription([
         ardubridge,
         sitl_dds,
         zed_mimic,
+        mavros,
+        vision_odom,
     ])
