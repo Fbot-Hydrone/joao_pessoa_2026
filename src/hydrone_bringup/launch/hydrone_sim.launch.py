@@ -92,7 +92,11 @@ def generate_launch_description():
         launch_arguments={
             'transport': 'udp4',
             'port': '2019',
-            'synthetic_clock': 'True',
+            # Wall-clock (not synthetic) so SITL time matches MAVROS/ROS — with
+            # synthetic clock, timesync fails ("Wrong FCU time") and vision
+            # timestamps are wrong, giving high EKF position variance so GUIDED
+            # takeoff is refused. Sim runs ~real-time, so wall-clock is stable.
+            'synthetic_clock': 'False',
             'wipe': 'True',
             'model': 'JSON',
             'speedup': '1',
