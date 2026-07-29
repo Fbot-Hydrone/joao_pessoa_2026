@@ -1,5 +1,9 @@
 FRAME_TYPE	1
 DDS_DOMAIN_ID   42
+# Companion/autonomous control: disable the RC flight-mode channel so a
+# GCS/companion GUIDED command sticks. SITL's default RC5 (~1800us) otherwise
+# maps to FLTMODE6=STABILIZE and keeps reverting the mode, blocking NAV_TAKEOFF.
+FLTMODE_CH      0
 # --- GPS-denied flight on ZED visual odometry (external nav) ---
 # CBR rules ban GPS in the arena, so EKF3 takes horizontal position/velocity and
 # yaw from external nav: VISION_POSITION_ESTIMATE fed via MAVROS from the ZED
@@ -11,7 +15,11 @@ EK3_SRC1_POSXY  6
 EK3_SRC1_VELXY  6
 EK3_SRC1_POSZ   1
 EK3_SRC1_VELZ   0
-EK3_SRC1_YAW    6
+# Yaw from the compass, not vision: the ZED odom quaternion is ENU and feeding
+# it as vision yaw risks a frame mismatch (huge yaw innovation -> unhealthy EKF
+# -> position not OK -> GUIDED takeoff refused). Compass is reliable; vision
+# supplies position only. Revisit once real VO yaw is validated in NED.
+EK3_SRC1_YAW    1
 # Keep in step with the BiguaSim JSON FDM rate (config.yaml ticks_per_sec): the
 # scheduler must not expect updates faster than the bridge loop delivers, and
 # arming needs gyro (= ticks_per_sec) >= 1.8 * SCHED_LOOP_RATE. With cameras on
