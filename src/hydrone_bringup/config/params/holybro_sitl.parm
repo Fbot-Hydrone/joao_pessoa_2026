@@ -22,10 +22,10 @@ EK3_SRC1_VELZ   0
 EK3_SRC1_YAW    1
 # Keep in step with the BiguaSim JSON FDM rate (config.yaml ticks_per_sec): the
 # scheduler must not expect updates faster than the bridge loop delivers, and
-# arming needs gyro (= ticks_per_sec) >= 1.8 * SCHED_LOOP_RATE. With cameras on
-# the loop sustains ~90 Hz (ticks_per_sec=90); 50 is ArduCopter's minimum loop
-# rate. Cameras off, the loop reaches ~260 Hz -> raise both for finer control.
-SCHED_LOOP_RATE 50
+# arming needs gyro (= ticks_per_sec) >= 1.8 * SCHED_LOOP_RATE. Cameras off, the
+# loop sustains ~260 Hz so ticks_per_sec=200 and a 100 Hz attitude loop are
+# stable (a 50 Hz loop lags and oscillates). Lower both if cameras are re-enabled.
+SCHED_LOOP_RATE 100
 FS_THR_ENABLE   1
 ARSPD_PIN 1
 ARSPD_BUS 2
