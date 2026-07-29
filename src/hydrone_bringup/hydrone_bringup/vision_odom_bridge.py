@@ -30,13 +30,17 @@ class VisionOdomBridge(Node):
         in_odom = self.get_parameter("in_odom").value
         out_pose = self.get_parameter("out_pose").value
 
-        # Best-effort matches the ZED/odometry publishers; MAVROS vision_pose is
-        # tolerant. Keep depth small — only the latest pose matters.
-        qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
-                         history=HistoryPolicy.KEEP_LAST, depth=10)
+        # MAVROS's vision_pose plugin subscribes RELIABLE — a BEST_EFFORT
+        # publisher is dropped ("incompatible QoS, no messages sent"). Publish
+        # RELIABLE to it. Subscribe to the ZED odom BEST_EFFORT so we still match
+        # the sensor-style publisher (a best-effort sub accepts a reliable pub).
+        pub_qos = QoSProfile(reliability=ReliabilityPolicy.RELIABLE,
+                             history=HistoryPolicy.KEEP_LAST, depth=10)
+        sub_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
+                             history=HistoryPolicy.KEEP_LAST, depth=10)
 
-        self.pub = self.create_publisher(PoseStamped, out_pose, qos)
-        self.create_subscription(Odometry, in_odom, self._cb, qos)
+        self.pub = self.create_publisher(PoseStamped, out_pose, pub_qos)
+        self.create_subscription(Odometry, in_odom, self._cb, sub_qos)
         self.get_logger().info(
             f"vision_odom_bridge: {in_odom} (Odometry) -> {out_pose} (PoseStamped)")
 
