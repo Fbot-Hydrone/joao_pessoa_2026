@@ -75,9 +75,24 @@ class VisionOdomBridge(Node):
             self.get_logger().info("sent GPS global origin (GPS-denied home reference)")
 
     def _cb(self, msg: Odometry):
+        # BiguaSim's odom is in NWU (world); MAVROS vision_pose expects ENU and
+        # converts ENU->NED for the FCU. Without this the position is rotated 90
+        # deg, so position-hold corrections go sideways -> the drone circles and
+        # spins. Rotate +90 deg about Z: position (E,N,U) = (-W, N, U) = (-y,x,z);
+        # orientation q_enu = Rz(90) (x) q_nwu (world reframe; body is already FLU).
+        # This makes MAVROS' NED output match the working JSON/GPS path's (n,-w,-u).
+        o = msg.pose.pose
         p = PoseStamped()
-        p.header = msg.header          # same stamp + odom frame
-        p.pose = msg.pose.pose
+        p.header = msg.header
+        p.pose.position.x = -o.position.y
+        p.pose.position.y = o.position.x
+        p.pose.position.z = o.position.z
+        w, x, y, z = o.orientation.w, o.orientation.x, o.orientation.y, o.orientation.z
+        s = 0.7071067811865476  # cos/sin(45 deg)
+        p.pose.orientation.w = s * (w - z)
+        p.pose.orientation.x = s * (x - y)
+        p.pose.orientation.y = s * (x + y)
+        p.pose.orientation.z = s * (w + z)
         self.pub.publish(p)
 
 
