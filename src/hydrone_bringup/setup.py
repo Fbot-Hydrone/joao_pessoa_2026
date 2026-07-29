@@ -28,5 +28,6 @@ setup(
     entry_points={'console_scripts': [
         'zed_mimic_node = hydrone_bringup.zed_mimic_node:main',
         'vision_odom_bridge = hydrone_bringup.vision_odom_bridge:main',
+        'visual_odometry_node = hydrone_bringup.visual_odometry_node:main',
     ]},
 )

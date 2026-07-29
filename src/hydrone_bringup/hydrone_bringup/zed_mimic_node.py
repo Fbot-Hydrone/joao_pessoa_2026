@@ -76,6 +76,9 @@ class ZedMimicNode(Node):
         self.declare_parameter("in_depth", "/biguasim/auv0_id0/DepthCamera")
         self.declare_parameter("in_odom", "/biguasim/auv0_id0/DynamicsSensor/Odom")
         self.declare_parameter("in_imu", "/biguasim/auv0_id0/DynamicsSensor/IMU")
+        # Where to publish odom. When the real VO node owns /zed/zed_node/odom,
+        # ground truth is pointed at /zed/zed_node/odom_GT for comparison/debug.
+        self.declare_parameter("out_odom", "/zed/zed_node/odom")
         # Multiply sim depth values to get meters (set to 0.01 if the sim
         # turns out to report centimeters — verify in RViz once).
         self.declare_parameter("depth_scale", 1.0)
@@ -99,7 +102,7 @@ class ZedMimicNode(Node):
         self.pub_depth_info = self.create_publisher(
             CameraInfo, "/zed/zed_node/depth/camera_info", 10)
         self.pub_odom = self.create_publisher(
-            Odometry, "/zed/zed_node/odom", 10)
+            Odometry, self.get_parameter("out_odom").value, 10)
         self.pub_imu = self.create_publisher(
             Imu, "/zed/zed_node/imu/data", 10)
 
