@@ -27,5 +27,6 @@ setup(
     license='MIT',
     entry_points={'console_scripts': [
         'zed_mimic_node = hydrone_bringup.zed_mimic_node:main',
+        'vision_odom_bridge = hydrone_bringup.vision_odom_bridge:main',
     ]},
 )

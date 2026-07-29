@@ -52,17 +52,33 @@ def generate_launch_description():
 
     # MAVROS <-> ArduPilot over MAVProxy's second output (udp 14551). The empty
     # remote after '@' lets MAVROS auto-learn MAVProxy's source and reply.
+    # The apm_pluginlists.yaml denylist is what makes the vision_pose plugin
+    # load (mavros_node's built-in default set omits it) — required for
+    # VISION_POSITION_ESTIMATE / GPS-denied external nav.
+    mavros_share = get_package_share_directory("mavros")
     mavros = Node(
         package="mavros",
         executable="mavros_node",
         output="screen",
-        parameters=[{
-            "fcu_url": "udp://:14551@",
-            "gcs_url": "",
-            "tgt_system": 1,
-            "tgt_component": 1,
-            "fcu_protocol": "v2.0",
-        }],
+        parameters=[
+            os.path.join(mavros_share, "launch", "apm_pluginlists.yaml"),
+            os.path.join(mavros_share, "launch", "apm_config.yaml"),
+            {
+                "fcu_url": "udp://:14551@",
+                "gcs_url": "",
+                "tgt_system": 1,
+                "tgt_component": 1,
+                "fcu_protocol": "v2.0",
+            },
+        ],
+    )
+
+    # Feed ZED visual odometry to ArduPilot as external nav (GPS-denied flight).
+    # Pairs with the EK3_SRC*/GPS1_TYPE=0 params in holybro_sitl.parm.
+    vision_odom = Node(
+        package="hydrone_bringup",
+        executable="vision_odom_bridge",
+        output="screen",
     )
 
     autonomy = IncludeLaunchDescription(
@@ -76,4 +92,4 @@ def generate_launch_description():
         }.items(),
     )
 
-    return LaunchDescription(args + [sim, mavros, autonomy])
+    return LaunchDescription(args + [sim, mavros, vision_odom, autonomy])
