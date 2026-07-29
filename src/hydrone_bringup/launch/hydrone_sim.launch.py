@@ -128,7 +128,19 @@ def generate_launch_description():
             'in_depth':    f'{prefix}/DepthCamera',
             'in_odom':     f'{prefix}/DynamicsSensor/Odom',
             'in_imu':      f'{prefix}/DynamicsSensor/IMU',
+            # Real VO (visual_odometry_node) owns /zed/zed_node/odom; ground truth
+            # goes to /zed/zed_node/odom_GT so the two can be compared in RViz/rqt.
+            'out_odom':    '/zed/zed_node/odom_GT',
         }],
+    )
+
+    # Real visual odometry on the ZED RGB-D stream (ORB features -> depth
+    # back-projection -> PnP/RANSAC), the honest analogue of the ZED 2i's
+    # stereo-VO core. Owns /zed/zed_node/odom; vision_odom_bridge is unchanged.
+    visual_odometry = Node(
+        package='hydrone_bringup',
+        executable='visual_odometry_node',
+        output='screen',
     )
 
     # MAVROS + visual-odometry feed. The SITL params (holybro_sitl.parm) put
@@ -165,6 +177,7 @@ def generate_launch_description():
         ardubridge,
         sitl_dds,
         zed_mimic,
+        visual_odometry,
         mavros,
         vision_odom,
     ])
