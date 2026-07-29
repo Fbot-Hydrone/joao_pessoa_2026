@@ -4,7 +4,7 @@
       package_name: Competition
       world: CompetionMap
       main_agent: auv0     
-      ticks_per_sec: 90
+      ticks_per_sec: 200
       frames_per_sec: 60
       octree_min: 0.1
       octree_max: 5
@@ -38,20 +38,20 @@
             # default 90 deg (they don't support FovAngle), so 90 keeps fx/fy
             # correct. Matching the real ZED 2's 110 deg needs a FovAngle-capable
             # sensor (RGBDCamera/CameraSensor) — a separate change.
-            - sensor_type: RGBCamera
-              ros_publish: true
-              Hz: 10
-              configuration:
-                CaptureWidth: 640
-                CaptureHeight: 480
-                FOV: 90
-            - sensor_type: DepthCamera
-              ros_publish: true
-              Hz: 10
-              configuration:
-                CaptureWidth: 640
-                CaptureHeight: 480
-                FOV: 90
+            # Cameras disabled for flight tuning: rendering them caps the loop at
+            # ~82 Hz, forcing ticks_per_sec/SCHED_LOOP_RATE low -> a coarse 50 Hz
+            # attitude loop that oscillates. VIO odom comes from DynamicsSensor,
+            # not the cameras, so flight is unaffected. Cameras-off -> loop ~260 Hz
+            # -> ticks_per_sec 200 + SCHED_LOOP_RATE 100 for stable attitude control.
+            # Re-enable these (and drop ticks/SCHED back) for vision-perception work.
+            # - sensor_type: RGBCamera
+            #   ros_publish: true
+            #   Hz: 10
+            #   configuration: {CaptureWidth: 640, CaptureHeight: 480, FOV: 90}
+            # - sensor_type: DepthCamera
+            #   ros_publish: true
+            #   Hz: 10
+            #   configuration: {CaptureWidth: 640, CaptureHeight: 480, FOV: 90}
           dynamics:
             batch_size : 1
           control_abstraction : 'accel'
