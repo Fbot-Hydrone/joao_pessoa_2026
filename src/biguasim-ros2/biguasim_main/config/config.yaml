@@ -41,16 +41,16 @@
             # Cameras ON. Rendering caps the loop at ~82 Hz, but with synthetic
             # clock the attitude loop runs in sim-time, so keeping ticks_per_sec=200
             # + SCHED_LOOP_RATE=100 keeps flight STABLE — the cost is the sim runs
-            # ~0.4x wall-clock (slow-motion) while the cameras are on. Hz must divide
-            # ticks_per_sec (200/10=20). For faster/real-time flight without vision,
+            # slow-motion wall-clock while the cameras are on (more so at higher Hz).
+            # Hz must divide ticks_per_sec (200/20=10). For real-time flight w/o vision,
             # comment these out and the loop reaches ~260 Hz (real-time at ticks 200).
             - sensor_type: RGBCamera
               ros_publish: true
-              Hz: 10
+              Hz: 20
               configuration: {CaptureWidth: 640, CaptureHeight: 480, FOV: 90}
             - sensor_type: DepthCamera
               ros_publish: true
-              Hz: 10
+              Hz: 20
               configuration: {CaptureWidth: 640, CaptureHeight: 480, FOV: 90}
           dynamics:
             batch_size : 1
