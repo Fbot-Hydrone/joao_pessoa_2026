@@ -1,0 +1,19 @@
+# MAVROS distance_sensor plugin config for the down-facing rangefinder.
+# The plugin subscribes to a sensor_msgs/Range on ~distance_sensor/<name>
+# (rangefinder_bridge publishes /mavros/distance_sensor/rangefinder) and emits
+# DISTANCE_SENSOR to ArduPilot, which reads it as RNGFND1 (RNGFND1_TYPE=10).
+# Orientation PITCH_270 = straight down (matches RNGFND1_ORIENT=25).
+# Loaded after the stock apm_config.yaml so this distance_sensor block wins.
+/**:
+  ros__parameters:
+    distance_sensor:
+      rangefinder:
+        subscriber: true
+        id: 0
+        orientation: PITCH_270
+        field_of_view: 0.1
+        send_tf: false
+        sensor_position:
+          x: 0.0
+          y: 0.0
+          z: -0.05

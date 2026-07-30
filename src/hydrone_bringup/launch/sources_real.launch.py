@@ -1,0 +1,84 @@
+"""
+hydrone_bringup/launch/sources_real.launch.py
+
+REAL SOURCES layer (STUB — hardware drivers not integrated yet).
+
+This is the real-drone counterpart of sources_sim.launch.py. It MUST produce the
+SAME agnostic output contract so the autonomy stack (hydrone.launch.py) runs
+unchanged when the flag flips:
+
+  OUTPUT CONTRACT (must match sources_sim.launch.py 1:1):
+    /zed/zed_node/rgb/image_rect_color, /zed/zed_node/rgb/camera_info,
+    /zed/zed_node/depth/depth_registered, /zed/zed_node/depth/camera_info,
+    /zed/zed_node/imu/data, /zed/zed_node/odom,
+    /mavros/*  (incl. /mavros/vision_pose/pose, /mavros/distance_sensor/rangefinder)
+
+Difference vs sim (only the SOURCES change, never the autonomy):
+  - NO SITL, NO ardubridge, NO zed_mimic, NO visual_odometry_node,
+    NO rangefinder_bridge.
+  - zed_wrapper (ZED SDK on the Jetson) publishes /zed/zed_node/* INCLUDING
+    /zed/zed_node/odom natively (its own VIO) — that is why visual_odometry_node
+    is sim-only.
+  - The VL53L1X rangefinder is wired over I2C into the Pixhawk; ArduPilot reads
+    it natively and MAVROS PUBLISHES /mavros/distance_sensor/* (publisher mode) —
+    that is why rangefinder_bridge is sim-only.
+  - vision_odom_bridge is AGNOSTIC and runs here too (same node as sim).
+
+The nodes below are intentionally left COMMENTED (stub) until the ZED SDK / FCU
+are integrated: a launch pointing at drivers that don't exist yet would fail and
+teach us nothing. This file is the scaffold + checklist — uncomment and fill in
+the real device parameters when the hardware arrives, keeping the output topics
+above exactly as-is.
+"""
+
+from launch import LaunchDescription
+from launch.actions import LogInfo
+# from launch_ros.actions import Node
+# from ament_index_python.packages import get_package_share_directory
+# import os
+
+
+def generate_launch_description():
+    # ── REAL SOURCES (stub — uncomment when hardware/drivers are integrated) ──
+    #
+    # mavros_share = get_package_share_directory("mavros")
+    # bringup_pkg  = get_package_share_directory("hydrone_bringup")
+    #
+    # 1) ZED SDK wrapper — publishes /zed/zed_node/* incl. /zed/zed_node/odom (VIO).
+    #    Replaces zed_mimic_node AND visual_odometry_node from the sim side.
+    # zed_wrapper = Node(
+    #     package="zed_wrapper", executable="zed_wrapper", output="screen",
+    #     parameters=[{"general.camera_model": "zed2i",
+    #                  "pos_tracking.pos_tracking_enabled": True}],
+    #     # Ensure it publishes under /zed/zed_node/* (namespace/remap as needed).
+    # )
+    #
+    # 2) MAVROS against the real FCU. Same plugins as sim, but:
+    #    - fcu_url points at the physical Pixhawk (serial or companion UDP), and
+    #    - NO mavros_distance_sensor.yaml: the distance_sensor plugin PUBLISHES
+    #      /mavros/distance_sensor/* from the natively-read VL53L1X (I2C).
+    # mavros = Node(
+    #     package="mavros", executable="mavros_node", output="screen",
+    #     parameters=[
+    #         os.path.join(mavros_share, "launch", "apm_pluginlists.yaml"),
+    #         os.path.join(mavros_share, "launch", "apm_config.yaml"),
+    #         {"fcu_url": "/dev/ttyACM0:921600",   # <- real FCU (placeholder)
+    #          "gcs_url": "", "tgt_system": 1, "tgt_component": 1,
+    #          "fcu_protocol": "v2.0"},
+    #     ],
+    # )
+    #
+    # 3) AGNOSTIC plumbing — identical node to sim: /zed/zed_node/odom ->
+    #    /mavros/vision_pose/pose.
+    # vision_odom = Node(
+    #     package="hydrone_bringup", executable="vision_odom_bridge", output="screen",
+    # )
+    #
+    # return LaunchDescription([zed_wrapper, mavros, vision_odom])
+
+    return LaunchDescription([
+        LogInfo(msg=("[sources_real] STUB — real drivers not integrated. "
+                     "Uncomment zed_wrapper + mavros(FCU) + vision_odom_bridge; "
+                     "they must publish /zed/zed_node/* and /mavros/* exactly as "
+                     "sources_sim does. No autonomy changes.")),
+    ])
