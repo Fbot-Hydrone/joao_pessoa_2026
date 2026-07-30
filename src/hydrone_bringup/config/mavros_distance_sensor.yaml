@@ -1,19 +1,27 @@
-# MAVROS distance_sensor plugin config for the down-facing rangefinder.
-# The plugin subscribes to a sensor_msgs/Range on ~distance_sensor/<name>
-# (rangefinder_bridge publishes /mavros/distance_sensor/rangefinder) and emits
-# DISTANCE_SENSOR to ArduPilot, which reads it as RNGFND1 (RNGFND1_TYPE=10).
-# Orientation PITCH_270 = straight down (matches RNGFND1_ORIENT=25).
-# Loaded after the stock apm_config.yaml so this distance_sensor block wins.
-/**:
+# MAVROS distance_sensor plugin config for the down-facing rangefinder. SIM-ONLY.
+#
+# This puts the plugin in SUBSCRIBER mode: it listens to the sensor_msgs/Range
+# that rangefinder_bridge publishes and SENDS it to the FCU as DISTANCE_SENSOR,
+# which ArduPilot reads as RNGFND1 (RNGFND1_TYPE=10). This is the sim inverse of
+# the real drone, where a VL53L1X is read natively over I2C and the plugin
+# PUBLISHES /mavros/distance_sensor/* — so this file is NOT used on real.
+#
+# Format note: this MAVROS (ROS 2) build takes a single `config` YAML-STRING
+# param under the plugin node (/**/distance_sensor), NOT a nested map. See the
+# stock mavros apm_config.yaml. Loaded AFTER apm_config.yaml so this `config`
+# overrides the stock one (which defaulted to a publisher + a mismatched sub).
+#
+# Topic: a subscriber sensor named `rangefinder` makes the plugin subscribe to
+# ~/rangefinder from the /mavros namespace = /mavros/rangefinder (NOT
+# /mavros/distance_sensor/rangefinder). rangefinder_bridge publishes there.
+# orientation PITCH_270 = straight down (matches RNGFND1_ORIENT=25).
+/**/distance_sensor:
   ros__parameters:
-    distance_sensor:
+    config: |
       rangefinder:
         subscriber: true
         id: 0
         orientation: PITCH_270
         field_of_view: 0.1
         send_tf: false
-        sensor_position:
-          x: 0.0
-          y: 0.0
-          z: -0.05
+        sensor_position: {x: 0.0, y: 0.0, z: -0.05}

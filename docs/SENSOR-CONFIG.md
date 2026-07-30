@@ -83,7 +83,7 @@ Target (real drone) vs. what is configured now in `config/params/holybro_sitl.pa
 ZED VIO:   zed_mimic RGB/depth ─> visual_odometry_node ─> /zed/zed_node/odom
                                         ─> vision_odom_bridge ─> VISION_POSITION_ESTIMATE ─> EKF3
 Rangefinder: BiguaSim RangeFinderSensor (LaserScan, nadir)
-                 ─> rangefinder_bridge ─> /mavros/distance_sensor/rangefinder (Range)
+                 ─> rangefinder_bridge ─> /mavros/rangefinder (Range)
                  ─> MAVROS distance_sensor plugin ─> DISTANCE_SENSOR ─> ArduPilot RNGFND1
 ```
 
@@ -106,7 +106,8 @@ stack (`hydrone.launch.py`) is unchanged and agnostic.
    `LaserScan` with a plausible **downward** range (≈ takeoff altitude). **If the range
    looks horizontal**, Holodeck's RangeFinderSensor scanned sideways — adjust the
    `rotation` (or use a socket) in `config.yaml`; it is natively a horizontal scanner.
-2. Adapter: `ros2 topic echo /mavros/distance_sensor/rangefinder` — a `Range`.
+2. Adapter: `ros2 topic echo /mavros/rangefinder` — a `Range` (the topic the
+   MAVROS distance_sensor subscriber listens on in this build).
 3. ArduPilot sees it: in QGC/MAVProxy check `RANGEFINDER` distance updates, or
    `ros2 topic echo /mavros/rangefinder/rangefinder`.
 4. Confirm it is **not** driving height: EKF altitude should still track baro, and

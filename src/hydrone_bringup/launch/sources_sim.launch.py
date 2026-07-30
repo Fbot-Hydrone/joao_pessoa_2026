@@ -203,7 +203,13 @@ def generate_launch_description():
         package="hydrone_bringup",
         executable="rangefinder_bridge",
         output="screen",
-        parameters=[{'in_scan': f'{prefix}/RangeFinderSensor'}],
+        parameters=[{
+            'in_scan': f'{prefix}/RangeFinderSensor',
+            # This MAVROS build's distance_sensor subscriber listens on ~/<name>
+            # from the /mavros namespace, i.e. /mavros/rangefinder (NOT
+            # /mavros/distance_sensor/rangefinder). Align the bridge output to it.
+            'out_range': '/mavros/rangefinder',
+        }],
     )
 
     return LaunchDescription([
