@@ -9,8 +9,11 @@ node is the small adapter in between:
 
   /biguasim/<agent>/RangeFinderSensor (LaserScan)
       --> this node -->
-  /mavros/distance_sensor/rangefinder (Range)  --(MAVROS distance_sensor)-->
+  /mavros/rangefinder (Range)  --(MAVROS distance_sensor, subscriber mode)-->
   DISTANCE_SENSOR --> ArduPilot RNGFND1
+
+  (This MAVROS build's distance_sensor subscriber listens on ~/<name> from the
+  /mavros namespace, i.e. /mavros/rangefinder — not /mavros/distance_sensor/*.)
 
 The rangefinder is a nadir altimeter for landing/flare only (see holybro_sitl.parm:
 it is NOT a global EKF height source). We publish the single downward beam; if the
@@ -32,7 +35,7 @@ class RangefinderBridge(Node):
         super().__init__("rangefinder_bridge")
 
         self.declare_parameter("in_scan", "/biguasim/uav0_id0/RangeFinderSensor")
-        self.declare_parameter("out_range", "/mavros/distance_sensor/rangefinder")
+        self.declare_parameter("out_range", "/mavros/rangefinder")
         self.declare_parameter("min_range", 0.20)   # m; matches RNGFND1_MIN_CM
         self.declare_parameter("max_range", 40.0)    # m; matches RNGFND1_MAX_CM
         self.declare_parameter("field_of_view", 0.1) # rad; narrow single beam
