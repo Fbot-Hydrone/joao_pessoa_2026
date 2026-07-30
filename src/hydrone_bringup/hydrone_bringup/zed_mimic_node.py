@@ -79,6 +79,11 @@ class ZedMimicNode(Node):
         # Where to publish odom. When the real VO node owns /zed/zed_node/odom,
         # ground truth is pointed at /zed/zed_node/odom_GT for comparison/debug.
         self.declare_parameter("out_odom", "/zed/zed_node/odom")
+        # Whether to broadcast the dynamic odom->base_link TF. Default False: the
+        # real VO (visual_odometry_node) is the single owner of that transform.
+        # Set True only if zed_mimic is the odom source and nothing else owns TF
+        # (e.g. running the mimic standalone). Static TFs below are always sent.
+        self.declare_parameter("publish_tf", False)
         # Multiply sim depth values to get meters (set to 0.01 if the sim
         # turns out to report centimeters — verify in RViz once).
         self.declare_parameter("depth_scale", 1.0)
@@ -107,6 +112,7 @@ class ZedMimicNode(Node):
             Imu, "/zed/zed_node/imu/data", 10)
 
         # ── TF broadcasters ─────────────────────────────────────────────────
+        self.publish_tf = self.get_parameter("publish_tf").value
         self.tf_dynamic = TransformBroadcaster(self)
         self.tf_static = StaticTransformBroadcaster(self)
         self._send_static_tfs()
@@ -207,7 +213,11 @@ class ZedMimicNode(Node):
         msg.child_frame_id = FRAME_BASE
         self.pub_odom.publish(msg)
 
-        # Same data as TF, so consumers can transform between odom/base_link.
+        # Broadcast odom->base_link only when this node is the designated TF owner
+        # (publish_tf=True). By default the real VO (visual_odometry_node) owns it,
+        # so we stay silent here to avoid a second broadcaster of the same TF.
+        if not self.publish_tf:
+            return
         t = TransformStamped()
         t.header = msg.header
         t.child_frame_id = FRAME_BASE

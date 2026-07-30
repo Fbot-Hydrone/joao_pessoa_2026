@@ -3,15 +3,16 @@
 vision_odom_bridge — feed ZED visual odometry into ArduPilot as external nav.
 
 CBR rules ban GPS, so the drone must localise from the ZED's visual odometry.
-This node takes /zed/zed_node/odom (nav_msgs/Odometry, ENU odom->base_link) and
-republishes the pose on /mavros/vision_pose/pose (geometry_msgs/PoseStamped),
-which MAVROS turns into VISION_POSITION_ESTIMATE for the FCU. With EKF3 sources
-set to ExternalNav (see holybro_sitl.parm), ArduPilot then flies on this instead
-of GPS.
+This node takes /zed/zed_node/odom (nav_msgs/Odometry, NWU odom->base_link as
+produced by the sim VO) and republishes the pose on /mavros/vision_pose/pose
+(geometry_msgs/PoseStamped), which MAVROS turns into VISION_POSITION_ESTIMATE for
+the FCU. With EKF3 sources set to ExternalNav (see holybro_sitl.parm), ArduPilot
+then flies on this instead of GPS.
 
-MAVROS's vision_pose plugin does the ENU->NED conversion, so we forward the pose
-as-is. On the real drone the exact same topic is produced by the real ZED VO —
-no code change.
+Frame: the input is NWU, so we rotate +90deg about Z to ENU (see _cb); MAVROS's
+vision_pose plugin then does ENU->NED for the FCU. NOTE sim->real contract risk:
+the real zed_wrapper publishes odom already in ENU (REP-103), so that +90deg must
+be dropped when running on hardware — see docs/SENSOR-CONFIG.md contract checklist.
 """
 
 import rclpy

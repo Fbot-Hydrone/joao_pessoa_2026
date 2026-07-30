@@ -20,6 +20,16 @@ EK3_SRC1_VELZ   0
 # -> position not OK -> GUIDED takeoff refused). Compass is reliable; vision
 # supplies position only. Revisit once real VO yaw is validated in NED.
 EK3_SRC1_YAW    1
+# --- Down-facing rangefinder (Phase 1&2 sensor config) ---
+# MAVLink rangefinder fed by rangefinder_bridge -> MAVROS distance_sensor ->
+# DISTANCE_SENSOR. Used as a Z REFERENCE for landing/flare only, deliberately
+# NOT a global EKF height source: EK3_SRC*_POSZ stays on baro (=1) and
+# EK3_RNG_USE_HGT is left disabled (-1). Baro remains the complementary Z.
+RNGFND1_TYPE    10
+RNGFND1_ORIENT  25
+RNGFND1_MIN_CM  20
+RNGFND1_MAX_CM  4000
+EK3_RNG_USE_HGT -1
 # Keep in step with the BiguaSim JSON FDM rate (config.yaml ticks_per_sec): the
 # scheduler must not expect updates faster than the bridge loop delivers, and
 # arming needs gyro (= ticks_per_sec) >= 1.8 * SCHED_LOOP_RATE. Cameras off, the
