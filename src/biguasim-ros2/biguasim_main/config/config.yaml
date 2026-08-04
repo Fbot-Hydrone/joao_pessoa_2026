@@ -47,24 +47,31 @@
             - sensor_type: RGBCamera
               ros_publish: true
               Hz: 20
-              configuration: {CaptureWidth: 640, CaptureHeight: 480, FOV: 90}
+              location: [0.14, 0, -0.08]              
+              configuration: {CaptureWidth: 640, CaptureHeight: 480}
             - sensor_type: DepthCamera
               ros_publish: true
               Hz: 20
+              location: [0.14, 0, -0.08
+              ]         
               configuration: {CaptureWidth: 640, CaptureHeight: 480, FOV: 90}
             # Down-facing rangefinder (nadir altimeter) — Phase 1&2 sensor config.
             # Holodeck's RangeFinderSensor is a LaserScan scanner; LaserCount:1 +
-            # pitch -90 gives a single downward beam. Published as LaserScan on
-            # /biguasim/<agent>/RangeFinderSensor; rangefinder_bridge converts it to
-            # a MAVLink DISTANCE_SENSOR for ArduPilot (landing/flare Z ref, NOT EKF
-            # height). If the beam reads horizontal in-sim, adjust rotation/socket.
+            # LaserAngle:-90 aims the single beam straight down. Published as
+            # LaserScan on /biguasim/<agent>/RangeFinderSensor; rangefinder_bridge
+            # converts it to a MAVLink DISTANCE_SENSOR for ArduPilot (landing/flare
+            # Z ref, NOT EKF height).
             - sensor_type: RangeFinderSensor
               ros_publish: true
               Hz: 20
-              rotation: [0, -90, 0]
-              configuration: {LaserCount: 1, LaserMaxDistance: 40}
+              configuration:
+                LaserCount: 1
+                LaserAngle: -90        # feixe reto pra baixo
+                LaserMaxDistance: 40
           dynamics:
             batch_size : 1
           control_abstraction : 'accel'
           location: [0, 0, 0.3]
           rotation: [0, 0, 0]
+
+          # 
