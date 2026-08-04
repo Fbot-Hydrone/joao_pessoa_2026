@@ -18,6 +18,16 @@ Nodes (all sim-only or agnostic plumbing):
   - mavros_node       : SITL MAVLink <-> /mavros/* (fcu_url = SITL via MAVProxy)      [agnostic role, sim fcu_url]
   - vision_odom_bridge: /zed/zed_node/odom -> /mavros/vision_pose/pose                [AGNOSTIC — also on real]
   - rangefinder_bridge: BiguaSim RangeFinderSensor -> /mavros/distance_sensor/*       [SIM-ONLY shim]
+  - odom_error_node   : /zed/zed_node/odom vs odom_GT -> VO drift CSV at the repo     [SIM-ONLY debug]
+                        root. Measurement only — publishes nothing, so it cannot
+                        affect flight. Disable with odom_error:=false.
+
+Launch arguments:
+  odom_error:=true|false        run the VO drift logger            (default true)
+  odom_error_print:=true|false  also echo drift to stdout at 1 Hz  (default false)
+  odom_error_dir:=<path>        where the CSV goes (default: repo root, /ws in
+                                the container — which is NOT bind-mounted, so
+                                point this at a mounted path to keep the file)
 
 OUTPUT CONTRACT (must match sources_real.launch.py 1:1):
   /zed/zed_node/rgb/image_rect_color, /zed/zed_node/rgb/camera_info,
@@ -37,9 +47,12 @@ import os
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 # Must match the namespace set in biguasim_main/launch/ardubridge.launch.py.
@@ -63,18 +76,52 @@ def _find_biguasim_scenario(node):
     return None
 
 
-def _biguasim_topic_prefix(config_path):
-    """Build the ROS topic prefix that ardubridge_node publishes sensors under.
+def _biguasim_agent(config_path):
+    """Return the first agent's config block from biguasim's config.yaml.
 
-    The agent name comes from config.yaml (single source of truth). BiguaSim's
-    environment appends a batch suffix to it -> '<name>-id0', which the ROS
-    bridge renders as '<name>_id0'. Single-agent only for now; multi-agent would
-    need per-index prefixes.
+    Single source of truth for everything sim-side below: agent name (-> topic
+    prefix) and the sensor blocks (-> camera mount offset, rangefinder range).
+    Single-agent only for now; multi-agent would need per-index lookups.
     """
     with open(config_path) as f:
         scenario = _find_biguasim_scenario(yaml.safe_load(f))
-    agent_name = scenario['agents'][0]['agent_name']
-    return f'/{BIGUASIM_NS}/{agent_name}_id0'
+    return scenario['agents'][0]
+
+
+def _biguasim_topic_prefix(agent):
+    """Build the ROS topic prefix that ardubridge_node publishes sensors under.
+
+    The agent name comes from config.yaml. BiguaSim's environment appends a
+    batch suffix to it -> '<name>-id0', which the ROS bridge renders as
+    '<name>_id0'.
+    """
+    return f"/{BIGUASIM_NS}/{agent['agent_name']}_id0"
+
+
+def _sensor(agent, sensor_type):
+    """First sensor block of the given sensor_type, or None if not configured."""
+    return next((s for s in agent.get('sensors', [])
+                 if s.get('sensor_type') == sensor_type), None)
+
+
+def _camera_offset_xyz(agent, default=(0.14, 0.0, -0.08)):
+    """Camera mounting position on the body, from the config.yaml sensor block.
+
+    BiguaSim's body frame is GLU (x forward, y left, z up) — identical to ROS
+    base_link (FLU) — so the sensor `location` carries over 1:1 with no sign
+    flip. Floats are forced because YAML writes bare integers (e.g. `0`) and a
+    mixed int/float list is not a valid double_array parameter override.
+    """
+    cam = _sensor(agent, 'RGBCamera') or _sensor(agent, 'DepthCamera')
+    loc = (cam or {}).get('location', default)
+    return [float(v) for v in loc]
+
+
+def _rangefinder_max_range(agent, default=40.0):
+    """Rangefinder max distance in meters, from the config.yaml sensor block."""
+    rf = _sensor(agent, 'RangeFinderSensor') or {}
+    value = rf.get('configuration', {}).get('LaserMaxDistance', default)
+    return float(value)
 
 
 def generate_launch_description():
@@ -120,11 +167,13 @@ def generate_launch_description():
 
     # Fake ZED: republishes BiguaSim sensors under the real ZED wrapper's
     # topic names and frames. On the real drone, launch zed_wrapper instead.
-    # Input topics are derived from the biguasim agent name in config.yaml so
-    # renaming the agent in one place propagates to the bridge and here.
+    # Input topics AND the camera mount offset are derived from biguasim's
+    # config.yaml, so editing the agent name or the sensor position there
+    # propagates to the bridge and to every node below — one source of truth.
     biguasim_config = os.path.join(
         get_package_share_directory('biguasim_main'), 'config', 'config.yaml')
-    prefix = _biguasim_topic_prefix(biguasim_config)
+    agent = _biguasim_agent(biguasim_config)
+    prefix = _biguasim_topic_prefix(agent)
 
     zed_mimic = Node(
         package='hydrone_bringup',
@@ -141,6 +190,9 @@ def generate_launch_description():
             'out_odom':    '/zed/zed_node/odom_GT',
             # TF owner is visual_odometry_node; keep mimic silent (Phase 1).
             'publish_tf':  False,
+            # base_link -> zed_camera_link static TF, taken from the camera's
+            # `location` in config.yaml (same GLU/FLU convention, no conversion).
+            'camera_offset_xyz': _camera_offset_xyz(agent),
         }],
     )
 
@@ -171,6 +223,12 @@ def generate_launch_description():
             # On real, the plugin PUBLISHES /mavros/distance_sensor/* from the
             # VL53L1X that ArduPilot read natively — no subscriber config needed.
             os.path.join(bringup_pkg, "config", "mavros_distance_sensor.yaml"),
+            # SIM-ONLY: widen the steady-clock command/link timeouts, which do
+            # NOT stretch with the synthetic clock when the sim runs below
+            # real-time (MAVROS waits for COMMAND_ACK on a steady-clock futex,
+            # so `use_sim_time` cannot fix it). Same file the autonomy layer
+            # reads in hydrone.launch.py — one place to tune everything.
+            os.path.join(bringup_pkg, "config", "timeouts.yaml"),
             {
                 "fcu_url": "udp://:14551@",   # SITL via MAVProxy (sim fcu_url)
                 "gcs_url": "",
@@ -188,6 +246,7 @@ def generate_launch_description():
         package="hydrone_bringup",
         executable="vision_odom_bridge",
         output="screen",
+        parameters=[os.path.join(bringup_pkg, "config", "timeouts.yaml")],
     )
 
     # Down-facing rangefinder — SIM-ONLY shim (analogous to zed_mimic).
@@ -209,10 +268,44 @@ def generate_launch_description():
             # from the /mavros namespace, i.e. /mavros/rangefinder (NOT
             # /mavros/distance_sensor/rangefinder). Align the bridge output to it.
             'out_range': '/mavros/rangefinder',
+            # Valid-range ceiling = the sim sensor's LaserMaxDistance, so raising
+            # it in config.yaml doesn't silently keep the bridge clipping returns.
+            'max_range': _rangefinder_max_range(agent),
+        }],
+    )
+
+    # SIM-ONLY debug: measures how far visual_odometry_node has drifted from the
+    # BiguaSim ground truth on /zed/zed_node/odom_GT and logs it to a timestamped
+    # CSV at the repo root. It only SUBSCRIBES — no topics, no TF — so it cannot
+    # perturb the flight stack; the cost is one extra process and one file per run.
+    # Both streams are anchored on their first synchronized pair before being
+    # compared (they do not share an origin), and pairs whose stamps are more than
+    # max_dt apart are dropped rather than compared. See odom_error_node.py.
+    odom_error = Node(
+        package='hydrone_bringup',
+        executable='odom_error_node',
+        output='screen',
+        condition=IfCondition(LaunchConfiguration('odom_error')),
+        parameters=[{
+            # ParameterValue with an explicit type: LaunchConfiguration resolves
+            # to the STRING 'false', which would fail the node's bool parameter.
+            'print_diff': ParameterValue(
+                LaunchConfiguration('odom_error_print'), value_type=bool),
+            'log_dir': ParameterValue(
+                LaunchConfiguration('odom_error_dir'), value_type=str),
         }],
     )
 
     return LaunchDescription([
+        DeclareLaunchArgument(
+            'odom_error', default_value='true',
+            description='Run odom_error_node (VO drift vs ground truth -> CSV).'),
+        DeclareLaunchArgument(
+            'odom_error_print', default_value='false',
+            description='Echo the VO drift to stdout at 1 Hz as well as the CSV.'),
+        DeclareLaunchArgument(
+            'odom_error_dir', default_value='',
+            description='Directory for the drift CSV. Empty = repo root.'),
         ardubridge,
         sitl_dds,
         zed_mimic,
@@ -220,4 +313,5 @@ def generate_launch_description():
         mavros,
         vision_odom,
         rangefinder,
+        odom_error,
     ])

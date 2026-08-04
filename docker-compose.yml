@@ -26,4 +26,7 @@ services:
       # GPU access for the UE5 binary (Intel/AMD via mesa). For NVIDIA install
       # nvidia-container-toolkit and add:  gpus: all
       - /dev/dri:/dev/dri
-    command: ros2 launch hydrone_bringup hydrone_sim.launch.py
+    # odom_error_print defaults ON here (the sim is where you want to see VO
+    # drift), unlike the launch file's own default. scripts/docker_up.sh flips
+    # ODOM_ERROR_PRINT to false when given --no-odom-print.
+    command: ros2 launch hydrone_bringup hydrone_sim.launch.py odom_error_print:=${ODOM_ERROR_PRINT:-true}

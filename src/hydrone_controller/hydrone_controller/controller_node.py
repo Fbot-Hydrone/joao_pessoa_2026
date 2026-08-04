@@ -51,6 +51,13 @@ YAW_TOLERANCE_RAD  = 0.08   # radians
 
 SETPOINT_HZ = 20            # Hz — MAVROS requires continuous setpoints
 
+# Service/command timeout defaults, in seconds. These are monotonic-clock
+# budgets, so they do NOT stretch when the simulator runs below real-time —
+# hydrone_bringup/config/timeouts.yaml overrides them with the sim values.
+SERVICE_WAIT_TIMEOUT = 3.0   # waiting for a MAVROS service to appear
+ARM_TIMEOUT          = 5.0   # waiting for the arm/disarm COMMAND_ACK
+LAND_TIMEOUT         = 10.0  # waiting for the land COMMAND_ACK
+
 
 class HydroneControllerNode(Node):
 
@@ -61,10 +68,16 @@ class HydroneControllerNode(Node):
         self.declare_parameter("takeoff_height", TAKEOFF_HEIGHT_M)
         self.declare_parameter("position_tolerance", POSITION_TOLERANCE)
         self.declare_parameter("setpoint_hz", SETPOINT_HZ)
+        self.declare_parameter("service_wait_timeout", SERVICE_WAIT_TIMEOUT)
+        self.declare_parameter("arm_timeout", ARM_TIMEOUT)
+        self.declare_parameter("land_timeout", LAND_TIMEOUT)
 
         self.takeoff_height  = self.get_parameter("takeoff_height").value
         self.pos_tol         = self.get_parameter("position_tolerance").value
         hz                   = self.get_parameter("setpoint_hz").value
+        self.svc_wait_tmo    = self.get_parameter("service_wait_timeout").value
+        self.arm_tmo         = self.get_parameter("arm_timeout").value
+        self.land_tmo        = self.get_parameter("land_timeout").value
 
         # ── Internal state ──────────────────────────────────────────────────
         self.mav_state       = State()
@@ -210,7 +223,7 @@ class HydroneControllerNode(Node):
     # ────────────────────────────────────────────────────────────────────────
 
     def _svc_arm(self, request, response):
-        if not self.cli_arm.wait_for_service(timeout_sec=3.0):
+        if not self.cli_arm.wait_for_service(timeout_sec=self.svc_wait_tmo):
             response.success = False
             response.message = "ARM service unavailable"
             return response
@@ -223,7 +236,7 @@ class HydroneControllerNode(Node):
         arm_req           = CommandBool.Request()
         arm_req.value     = True
         future            = self.cli_arm.call_async(arm_req)
-        rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
+        rclpy.spin_until_future_complete(self, future, timeout_sec=self.arm_tmo)
 
         if future.result() and future.result().success:
             self._is_landed      = False
@@ -239,7 +252,7 @@ class HydroneControllerNode(Node):
         arm_req       = CommandBool.Request()
         arm_req.value = False
         future        = self.cli_arm.call_async(arm_req)
-        rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
+        rclpy.spin_until_future_complete(self, future, timeout_sec=self.arm_tmo)
 
         response.success = bool(future.result() and future.result().success)
         response.message = "Disarmed" if response.success else "Disarm failed"
@@ -276,7 +289,7 @@ class HydroneControllerNode(Node):
         """
         Use MAVROS land command for a clean touchdown.
         """
-        if not self.cli_land.wait_for_service(timeout_sec=3.0):
+        if not self.cli_land.wait_for_service(timeout_sec=self.svc_wait_tmo):
             response.success = False
             response.message = "LAND service unavailable"
             return response
@@ -288,7 +301,7 @@ class HydroneControllerNode(Node):
         land_req.min_pitch     = 0.0
         land_req.yaw           = 0.0
         future = self.cli_land.call_async(land_req)
-        rclpy.spin_until_future_complete(self, future, timeout_sec=10.0)
+        rclpy.spin_until_future_complete(self, future, timeout_sec=self.land_tmo)
 
         if future.result() and future.result().success:
             self._is_landed  = True

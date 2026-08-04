@@ -1,0 +1,72 @@
+# ONE PLACE to tune every service/command timeout in the stack.
+#
+# WHY THESE ARE SO LARGE
+# BiguaSim runs below real-time (UE5 rendering is the bottleneck). ArduPilot SITL
+# runs on the synthetic clock (--synthetic-clock, see sources_sim.launch.py), so
+# its scheduler — and therefore the COMMAND_LONG -> COMMAND_ACK round trip —
+# advances in SIM time. Every sim-time interval is stretched in wall time by
+# 1/speed: at 0.4x real-time a 2 s exchange takes 5 s of wall clock.
+#
+# None of these timeouts stretch with it. They are all monotonic/steady-clock
+# budgets and CANNOT be fixed by `use_sim_time`:
+#   - MAVROS CommandPlugin waits for COMMAND_ACK on a std::condition_variable::
+#     wait_for -> a steady-clock futex wait (_M_futex_wait_until_steady, verified
+#     in libmavros_plugins.so). Steady clock ignores /clock entirely.
+#   - rclpy's spin_until_future_complete / wait_for_service budgets are monotonic.
+# So they have to be widened by hand. Values below are 10x stock.
+#
+# Symptom when they are too tight: MAVROS logs
+#     CMD: Command 400 -- ack timeout
+# and arming/takeoff report failure even though the FCU accepted the command.
+# It goes away on a faster machine — that is the tell that it is a timing issue,
+# not a logic one.
+#
+# HOW TO TUNE: measure the sim speed ratio (sim seconds per wall second) and set
+# these to roughly stock / ratio, with headroom for UE5 hitches.
+
+# ── Autonomy layer (loaded by hydrone.launch.py, sim AND real) ────────────────
+# These are patience budgets before declaring a call failed, so the generous sim
+# values are harmless on the real drone — they only delay a failure report.
+
+/hydrone_controller:
+  ros__parameters:
+    # Waiting for /mavros/cmd/arming and /mavros/cmd/land to appear. Stock: 3.0
+    service_wait_timeout: 30.0
+    # Waiting for the arm/disarm response (MAVROS COMMAND_ACK). Stock: 5.0
+    arm_timeout: 50.0
+    # Waiting for the land response — longer because ArduPilot acks LAND after
+    # it has accepted the mode change. Stock: 10.0
+    land_timeout: 100.0
+
+/hydrone_mission:
+  ros__parameters:
+    # Availability check before each fire-and-forget mission service call.
+    # Stock: 2.0
+    service_wait_timeout: 20.0
+
+/vision_odom_bridge:
+  ros__parameters:
+    # Backstop only. The origin resends stop as soon as the FCU confirms home on
+    # /mavros/home_position/home, so this cap is just to avoid publishing
+    # forever if home never arrives. It is NOT a deadline to tune against: the
+    # old fixed 30-send budget expired before EKF3 went active on a slow machine
+    # and silently cost us home (see vision_odom_bridge._send_origin).
+    origin_max_sends: 600
+
+# ── MAVROS (loaded by sources_sim.launch.py ONLY — see note below) ────────────
+# NOT applied on the real drone: sources_real.launch.py deliberately keeps the
+# stock values, because on real hardware a long conn_timeout would hide a
+# genuinely dead radio link instead of surfacing it.
+
+# command — COMMAND_ACK wait (arming, takeoff, land). Stock default: 5.0
+/**/cmd:
+  ros__parameters:
+    command_ack_timeout: 50.0
+
+# sys_status — heartbeat liveness. Stock apm_config.yaml: 10.0
+# SITL emits its 1 Hz heartbeat on sim time, so at 0.4x real-time it arrives
+# every ~2.5 s wall; a UE5 hitch (asset load) freezes sim time outright and
+# trips the stock timeout, dropping the link mid-flight.
+/**/sys:
+  ros__parameters:
+    conn_timeout: 100.0

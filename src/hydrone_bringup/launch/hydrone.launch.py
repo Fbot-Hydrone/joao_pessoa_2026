@@ -51,6 +51,12 @@ def generate_launch_description():
     config_dir = PathJoinSubstitution(
         [FindPackageShare("hydrone_bringup"), "config"])
 
+    # Single tuning point for every service/command timeout in the stack. Also
+    # loaded by sources_sim.launch.py for the MAVROS-side timeouts. Agnostic:
+    # these are only patience budgets before declaring a call failed, so the
+    # same values are safe on the real drone.
+    timeouts = PathJoinSubstitution([config_dir, "timeouts.yaml"])
+
     # ── Nodes ─────────────────────────────────────────────────────────────
 
     vision_node = Node(
@@ -71,6 +77,7 @@ def generate_launch_description():
         name       = "hydrone_controller",
         output     = "screen",
         parameters = [
+            timeouts,
             {"takeoff_height":       1.2},
             {"position_tolerance":   0.12},
             {"setpoint_hz":          20},
@@ -95,6 +102,7 @@ def generate_launch_description():
         name       = "hydrone_mission",
         output     = "screen",
         parameters = [
+            timeouts,
             {"phase":           phase},
             {"open_hardware":   open_hw},
             {"use_two_drones":  two_drones},

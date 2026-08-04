@@ -9,14 +9,15 @@ drone the zed_wrapper provides them. Switching = swap which node you launch.
 Nothing downstream changes.
 
 Inputs (from biguasim_main ardubridge_node, namespace /biguasim, agent name
-from config.yaml with biguasim's '_id0' batch suffix — e.g. agent auv0):
-  /biguasim/auv0_id0/RGBCamera               sensor_msgs/Image   (bgr8, no stamp!)
-  /biguasim/auv0_id0/RGBCamera/camera_info   sensor_msgs/CameraInfo
-  /biguasim/auv0_id0/DepthCamera             sensor_msgs/Image   (32FC1, no stamp!)
-  /biguasim/auv0_id0/DynamicsSensor/Odom     nav_msgs/Odometry   (ground truth)
-  /biguasim/auv0_id0/DynamicsSensor/IMU      sensor_msgs/Imu
-The launch file overrides these from config.yaml; the defaults below are only a
-fallback when the node is run standalone.
+from config.yaml with biguasim's '_id0' batch suffix — currently agent uav0):
+  /biguasim/uav0_id0/RGBCamera               sensor_msgs/Image   (bgr8, no stamp!)
+  /biguasim/uav0_id0/RGBCamera/camera_info   sensor_msgs/CameraInfo
+  /biguasim/uav0_id0/DepthCamera             sensor_msgs/Image   (32FC1, no stamp!)
+  /biguasim/uav0_id0/DynamicsSensor/Odom     nav_msgs/Odometry   (ground truth)
+  /biguasim/uav0_id0/DynamicsSensor/IMU      sensor_msgs/Imu
+sources_sim.launch.py is the source of truth: it reads biguasim's config.yaml
+and overrides every input topic (and the camera offset) from it. The defaults
+below only matter when the node is run standalone with `ros2 run`.
 
 Outputs (real ZED wrapper names):
   /zed/zed_node/rgb/image_rect_color     sensor_msgs/Image
@@ -69,13 +70,15 @@ class ZedMimicNode(Node):
         super().__init__("zed_mimic")
 
         # ── Parameters ──────────────────────────────────────────────────────
-        # Input topics: where BiguaSim's bridge publishes. Parameters so a
-        # different agent name / namespace only needs a launch-file change.
-        self.declare_parameter("in_rgb", "/biguasim/auv0_id0/RGBCamera")
-        self.declare_parameter("in_rgb_info", "/biguasim/auv0_id0/RGBCamera/camera_info")
-        self.declare_parameter("in_depth", "/biguasim/auv0_id0/DepthCamera")
-        self.declare_parameter("in_odom", "/biguasim/auv0_id0/DynamicsSensor/Odom")
-        self.declare_parameter("in_imu", "/biguasim/auv0_id0/DynamicsSensor/IMU")
+        # Input topics: where BiguaSim's bridge publishes. Parameters because
+        # sources_sim.launch.py derives them from biguasim's config.yaml —
+        # renaming the agent there is the ONLY edit needed. These defaults are
+        # standalone-run fallbacks and mirror config.yaml's current agent (uav0).
+        self.declare_parameter("in_rgb", "/biguasim/uav0_id0/RGBCamera")
+        self.declare_parameter("in_rgb_info", "/biguasim/uav0_id0/RGBCamera/camera_info")
+        self.declare_parameter("in_depth", "/biguasim/uav0_id0/DepthCamera")
+        self.declare_parameter("in_odom", "/biguasim/uav0_id0/DynamicsSensor/Odom")
+        self.declare_parameter("in_imu", "/biguasim/uav0_id0/DynamicsSensor/IMU")
         # Where to publish odom. When the real VO node owns /zed/zed_node/odom,
         # ground truth is pointed at /zed/zed_node/odom_GT for comparison/debug.
         self.declare_parameter("out_odom", "/zed/zed_node/odom")
@@ -88,8 +91,12 @@ class ZedMimicNode(Node):
         # turns out to report centimeters — verify in RViz once).
         self.declare_parameter("depth_scale", 1.0)
         # Camera mounting position on the drone body, in meters, in base_link
-        # (X forward, Y left, Z up). Adjust to the real ZED mount.
-        self.declare_parameter("camera_offset_xyz", [0.12, 0.0, 0.05])
+        # (X forward, Y left, Z up). In sim this is overridden from the camera's
+        # `location` in biguasim's config.yaml — BiguaSim's body frame is GLU,
+        # the same axes as base_link, so the value carries over unchanged. On
+        # the real drone, set it to the measured ZED mount. Default mirrors the
+        # current config.yaml so a standalone run is not silently off.
+        self.declare_parameter("camera_offset_xyz", [0.14, 0.0, -0.08])
 
         self.depth_scale = self.get_parameter("depth_scale").value
 

@@ -106,10 +106,14 @@ class HydroneMissionNode(Node):
         self.declare_parameter("open_hardware",   False)
         self.declare_parameter("phase",           1)
         self.declare_parameter("use_two_drones",  False)
+        # Monotonic-clock budget: does not stretch when the sim runs below
+        # real-time. Overridden by hydrone_bringup/config/timeouts.yaml.
+        self.declare_parameter("service_wait_timeout", 2.0)
 
         self.open_hardware  = self.get_parameter("open_hardware").value
         self.active_phase   = self.get_parameter("phase").value
         self.two_drones     = self.get_parameter("use_two_drones").value
+        self.svc_wait_tmo   = self.get_parameter("service_wait_timeout").value
 
         # ── Scoring & state ──────────────────────────────────────────────────
         self.score          = 0.0
@@ -466,7 +470,7 @@ class HydroneMissionNode(Node):
 
     def _call_service(self, client, request):
         """Fire-and-forget async service call with availability check."""
-        if not client.wait_for_service(timeout_sec=2.0):
+        if not client.wait_for_service(timeout_sec=self.svc_wait_tmo):
             self.get_logger().warn(
                 f"Service {client.srv_name} not available — skipping.")
             return

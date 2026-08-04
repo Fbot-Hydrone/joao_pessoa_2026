@@ -43,6 +43,12 @@ def generate_launch_description():
         DeclareLaunchArgument("phase",          default_value="1"),
         DeclareLaunchArgument("open_hardware",  default_value="false"),
         DeclareLaunchArgument("use_two_drones", default_value="false"),
+        # Sim-only VO drift logger; see sources_sim.launch.py. Re-declared here
+        # so it is settable from this file's command line, and ignored outright
+        # when use_sim:=false (there is no ground truth on the real drone).
+        DeclareLaunchArgument("odom_error",       default_value="true"),
+        DeclareLaunchArgument("odom_error_print", default_value="false"),
+        DeclareLaunchArgument("odom_error_dir",   default_value=""),
     ]
 
     # ── SOURCES layer (exactly one, chosen by use_sim) ──────────────────────
@@ -50,6 +56,11 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(
             os.path.join(launch_dir, "sources_sim.launch.py")),
         condition=IfCondition(use_sim),
+        launch_arguments={
+            "odom_error": LaunchConfiguration("odom_error"),
+            "odom_error_print": LaunchConfiguration("odom_error_print"),
+            "odom_error_dir": LaunchConfiguration("odom_error_dir"),
+        }.items(),
     )
     sources_real = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
