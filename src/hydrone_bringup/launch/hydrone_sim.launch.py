@@ -16,15 +16,39 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
 
 
 def generate_launch_description():
     launch_dir = os.path.join(
         get_package_share_directory("hydrone_bringup"), "launch")
-    return LaunchDescription([
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                os.path.join(launch_dir, "sources_sim.launch.py"))),
-    ])
+
+    # Re-declared and forwarded rather than inherited: an argument declared only
+    # in the included file is not settable from THIS file's command line, so
+    # `hydrone_sim.launch.py odom_error_print:=true` would otherwise be silently
+    # ignored. Defaults must match sources_sim.launch.py.
+    args = [
+        DeclareLaunchArgument(
+            "odom_error", default_value="true",
+            description="Run odom_error_node (VO drift vs ground truth -> CSV)."),
+        DeclareLaunchArgument(
+            "odom_error_print", default_value="false",
+            description="Echo the VO drift to stdout at 1 Hz as well as the CSV."),
+        DeclareLaunchArgument(
+            "odom_error_dir", default_value="",
+            description="Directory for the drift CSV. Empty = repo root."),
+    ]
+
+    sources_sim = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(launch_dir, "sources_sim.launch.py")),
+        launch_arguments={
+            "odom_error": LaunchConfiguration("odom_error"),
+            "odom_error_print": LaunchConfiguration("odom_error_print"),
+            "odom_error_dir": LaunchConfiguration("odom_error_dir"),
+        }.items(),
+    )
+
+    return LaunchDescription(args + [sources_sim])

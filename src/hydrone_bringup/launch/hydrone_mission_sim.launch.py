@@ -41,6 +41,11 @@ def generate_launch_description():
         DeclareLaunchArgument("phase",          default_value="1"),
         DeclareLaunchArgument("open_hardware",  default_value="false"),
         DeclareLaunchArgument("use_two_drones", default_value="false"),
+        # Sim-only VO drift logger; see sources_sim.launch.py. Re-declared and
+        # forwarded so it is settable from this file's command line too.
+        DeclareLaunchArgument("odom_error",       default_value="true"),
+        DeclareLaunchArgument("odom_error_print", default_value="false"),
+        DeclareLaunchArgument("odom_error_dir",   default_value=""),
     ]
 
     # Base sim now brings up MAVROS + the vision_odom_bridge itself (the vehicle
@@ -49,7 +54,12 @@ def generate_launch_description():
     sim = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(launch_dir, "hydrone_sim.launch.py")
-        )
+        ),
+        launch_arguments={
+            "odom_error": LaunchConfiguration("odom_error"),
+            "odom_error_print": LaunchConfiguration("odom_error_print"),
+            "odom_error_dir": LaunchConfiguration("odom_error_dir"),
+        }.items(),
     )
 
     autonomy = IncludeLaunchDescription(

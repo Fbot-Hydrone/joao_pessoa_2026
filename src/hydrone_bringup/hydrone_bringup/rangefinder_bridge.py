@@ -34,10 +34,13 @@ class RangefinderBridge(Node):
     def __init__(self):
         super().__init__("rangefinder_bridge")
 
+        # in_scan and max_range are derived from biguasim's config.yaml by
+        # sources_sim.launch.py (agent name and LaserMaxDistance); the defaults
+        # here mirror it and only apply to a standalone `ros2 run`.
         self.declare_parameter("in_scan", "/biguasim/uav0_id0/RangeFinderSensor")
         self.declare_parameter("out_range", "/mavros/rangefinder")
         self.declare_parameter("min_range", 0.20)   # m; matches RNGFND1_MIN_CM
-        self.declare_parameter("max_range", 40.0)    # m; matches RNGFND1_MAX_CM
+        self.declare_parameter("max_range", 40.0)    # m; = LaserMaxDistance / RNGFND1_MAX_CM
         self.declare_parameter("field_of_view", 0.1) # rad; narrow single beam
         self.declare_parameter("frame_id", "rangefinder_link")
 

@@ -1,7 +1,24 @@
 #!/usr/bin/env bash
 # Bring up the full simulation stack in Docker.
+#
+# Usage: scripts/docker_up.sh [--no-odom-print] [docker compose up args...]
+#   --no-odom-print   silence odom_error_node's 1 Hz VO-drift line (the CSV is
+#                     still written either way). On by default.
+# Anything else is forwarded untouched to `docker compose up` (-d, --force-recreate, ...).
 set -e
 cd "$(dirname "$0")/.."
+
+# Consume our own flag and pass the rest through. Only an exact match is
+# intercepted, so compose's own flags are never swallowed by accident.
+ODOM_ERROR_PRINT=true
+compose_args=()
+for arg in "$@"; do
+    case "$arg" in
+        --no-odom-print) ODOM_ERROR_PRINT=false ;;
+        *)               compose_args+=("$arg") ;;
+    esac
+done
+export ODOM_ERROR_PRINT   # interpolated into `command:` in docker-compose.yml
 
 # Let the containerized UE5 viewport open on the host X server
 xhost +local:docker
@@ -38,4 +55,6 @@ else
     echo "No NVIDIA container runtime — rendering on the iGPU (see README for dGPU setup)"
 fi
 
-docker compose "${compose_files[@]}" up --build "$@"
+echo "VO drift print: $ODOM_ERROR_PRINT (CSV is written either way)"
+
+docker compose "${compose_files[@]}" up --build "${compose_args[@]}"

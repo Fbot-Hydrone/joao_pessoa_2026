@@ -22,6 +22,9 @@ dumpstack.sh_*.out
 frames_*.gv
 mav.parm
 
+# ─── VO drift logs (odom_error_node) ─────────────────────────────
+odom_error_*.csv
+
 # ─── Python ──────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]

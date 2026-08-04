@@ -10,8 +10,9 @@ from biguasim.ardubridge import ArduBiguaSimRunner, VEHICLE_REGISTRY
 from biguasim_main.interface import BiguaSimInterface
 
 GPS_ORIGIN = (33.810313, -118.393867)
-PACKAGE_NAME = "Competition"
-WORLD = "CompetionMap"
+# Fallbacks only — package_name/world come from config.yaml (biguasim_scenario).
+DEFAULT_PACKAGE_NAME = "Competition"
+DEFAULT_WORLD = "CompetionMap"
 
 
 class ArduBridgeNode(Node):
@@ -38,8 +39,8 @@ class ArduBridgeNode(Node):
         #    MAS adiciona os sensores extras do YAML (para publicação ROS2)
         ardu_scenario = ArduBiguaSimRunner.build_scenario(
             self.profile,
-            package_name=PACKAGE_NAME,
-            world=WORLD,
+            package_name=scenario_cfg.get('package_name', DEFAULT_PACKAGE_NAME),
+            world=scenario_cfg.get('world', DEFAULT_WORLD),
             agent_name=agent_cfg['agent_name'],
             ticks_per_sec=scenario_cfg.get('ticks_per_sec', 200),
             location=agent_cfg.get('location', [0, 0, 5]),

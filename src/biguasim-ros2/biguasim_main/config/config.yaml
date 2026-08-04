@@ -3,7 +3,10 @@
     biguasim_scenario:
       package_name: Competition
       world: CompetionMap
-      main_agent: auv0     
+      # Must match an agent_name below — biguasim matches this against
+      # '<agent_name>-id0' to flag the main agent (environments.py). It read
+      # 'auv0' while the agent is 'uav0', so no agent was ever the main one.
+      main_agent: uav0
       ticks_per_sec: 200
       frames_per_sec: 60
       octree_min: 0.1
