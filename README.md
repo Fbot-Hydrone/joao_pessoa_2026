@@ -31,11 +31,12 @@ project: it starts the BiguaSim⇄ArduPilot physics bridge and ArduPilot SITL
 | `src/hydrone_mission` | Mission state machine (phases 1–4, scoring) |
 | `src/hydrone_nav` | Route planning + precision landing |
 | `src/hydrone_controller` | Setpoint/offboard control |
-| `src/hydrone_vision` | Camera perception: bases (ArUco), gestures (MediaPipe), QR (pyzbar) |
+| `src/hydrone_vision` | Camera perception: landing pads (classic CV), bases (ArUco), gestures (MediaPipe), QR (pyzbar) |
 | `src/hydrone_msgs` | Custom messages/services (`MissionState`, `SetPhase`, …) |
 | `deps.repos` | Pinned source dependencies (ArduPilot, micro-ROS agent/msgs, XRCE-Gen) |
 | `docker/`, `Dockerfile`, `docker-compose.yml` | Reproducible containerized bringup |
-| `docs/` | Onboarding notes and historical docs |
+| `docker-compose.dev.yml` | Dev override: bind-mounts `src/` so code edits need no image rebuild (`docker_up.sh --dev`) |
+| `docs/` | Onboarding notes and historical docs. Start with [`LANDING-SITES.md`](docs/LANDING-SITES.md) and [`DEVELOP-PIPELINES.md`](docs/DEVELOP-PIPELINES.md) |
 
 Third-party sources (`src/ardupilot`, `src/micro_ros_agent`, `src/micro_ros_msgs`,
 `tools/Micro-XRCE-DDS-Gen`) are **not committed** — they are pinned in
@@ -56,6 +57,8 @@ anywhere else, point `BS_SIM_DIR` at it).
 ./scripts/docker_up.sh
 # sim repo in a custom location:
 BS_SIM_DIR=~/Documents/bs-drone-competition ./scripts/docker_up.sh
+# autonomous landing-site mission (find a pad, land, take off, keep going):
+./scripts/docker_up.sh --landing-sites      # docs/LANDING-SITES.md
 ```
 
 That's it — the script allows X access, builds the image (first build compiles
@@ -67,6 +70,49 @@ simulation bringup. The container:
 - reuses worlds already downloaded on the host (`~/.local/share/biguasim`);
 - uses host networking, so `ros2 topic list` from the host (same `ROS_DOMAIN_ID`)
   sees everything.
+
+### Iterating on ROS code without rebuilding the image
+
+`docker_up.sh` rebuilds the image by default, which is right for a clean run
+but far too slow to sit in an edit-run loop. Use `--dev` instead:
+
+```bash
+./scripts/docker_up.sh --dev                # bind-mounts ./src, no image build
+# edit a node / launch file / config yaml on the host, then:
+docker compose restart hydrone
+```
+
+`docker-compose.dev.yml` mounts the project packages over `/ws/src/<pkg>`, and
+because the image is built with `colcon build --symlink-install` (which chains
+`install/` → `build/` → `src/`), your working tree is what the container runs.
+Node code, existing launch files and existing config YAML need no build at all.
+
+Four kinds of change *do* need a build, but only an in-container colcon build
+(seconds), not an image rebuild:
+
+```bash
+./scripts/dev_rebuild.sh --restart                 # all project packages
+./scripts/dev_rebuild.sh hydrone_msgs --restart    # or just one
+```
+
+- `.msg` changes in `hydrone_msgs` / `biguasim_interfaces`
+- new `entry_points` / `data_files` in a `setup.py`
+- **new** launch or config files (the symlinks are made per file at build time,
+  so a file that didn't exist at build time has nothing pointing at it)
+- new `package.xml` dependencies
+
+That build lives in the container's writable layer: it survives
+`docker compose stop/start` and `restart`, and is lost on `docker compose down`.
+After a `down`, just run `dev_rebuild.sh` once more.
+
+Rebuild the image (`./scripts/docker_up.sh`, no `--dev`) when you change the
+`Dockerfile`, `deps.repos`, or want a from-scratch verification — and always
+before flying anything for real, so the image and the source agree.
+
+> **Dockerfile layer order.** Everything in the image that doesn't depend on
+> this repo (torch, MAVROS, Vulkan — about 1 GB of downloads) sits *above*
+> `COPY src/`, so a source edit can't invalidate it. If you add a pip or apt
+> dependency, add it above the marked line in the `Dockerfile`, not below it.
 
 **GPU:** by default the container renders on the integrated GPU (`/dev/dri`
 via mesa). To use an NVIDIA dGPU, install the container toolkit once on the
@@ -139,6 +185,17 @@ ros2 launch hydrone_bringup hydrone.launch.py phase:=1
 `hydrone.launch.py` arguments: `phase:=1..4`, `open_hardware:=true|false`
 (2× score), `use_two_drones:=true|false` (phase 3), `camera_topic`, `depth_topic`.
 
+**Landing-site mission** — the autonomous find-a-pad / land / take-off / continue
+behaviour, sim and autonomy in one command:
+
+```bash
+ros2 launch hydrone_bringup landing_sites_sim.launch.py
+```
+
+It is an **alternative** to `hydrone.launch.py`, not an addition: both publish
+position setpoints and must not run together. Full description, tuning and
+limitations in [`docs/LANDING-SITES.md`](docs/LANDING-SITES.md).
+
 ### Start a mission
 
 ```bash
@@ -156,6 +213,15 @@ ros2 topic echo /hydrone/mission_state           # mission state + score
 ros2 topic echo /hydrone/vision/landing_bases    # detected bases
 ros2 run rqt_image_view rqt_image_view /hydrone/vision/debug_image
 ros2 node list                                   # what's alive
+```
+
+Landing-site mission (`landing_sites_sim.launch.py`):
+
+```bash
+ros2 topic echo /hydrone/mission/status          # state machine, 1 Hz
+ros2 topic echo /hydrone/pads/map                # the pad map (incl. `visited`)
+ros2 run rqt_image_view rqt_image_view /hydrone/pads/down/debug_image
+# RViz, fixed frame `map`: /hydrone/pads/markers, /hydrone/map/features
 ```
 
 ## Configuration

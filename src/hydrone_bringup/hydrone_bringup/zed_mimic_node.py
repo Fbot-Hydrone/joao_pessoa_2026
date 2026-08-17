@@ -26,6 +26,10 @@ Outputs (real ZED wrapper names):
   /zed/zed_node/depth/camera_info        sensor_msgs/CameraInfo
   /zed/zed_node/odom                     nav_msgs/Odometry (odom -> base_link)
   /zed/zed_node/imu/data                 sensor_msgs/Imu
+  /zed/zed_node/pose_GT                  geometry_msgs/PoseStamped  (SIM-ONLY:
+                                         ground-truth position AND quaternion,
+                                         the same data as the odometry but flat
+                                         enough to echo/plot/RViz directly)
 
 TF:
   odom -> base_link                      dynamic, from the odometry
@@ -46,7 +50,7 @@ from rclpy.node import Node
 
 from sensor_msgs.msg import Image, CameraInfo, Imu
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import TransformStamped
+from geometry_msgs.msg import PoseStamped, TransformStamped
 from tf2_ros import TransformBroadcaster, StaticTransformBroadcaster
 
 
@@ -82,6 +86,14 @@ class ZedMimicNode(Node):
         # Where to publish odom. When the real VO node owns /zed/zed_node/odom,
         # ground truth is pointed at /zed/zed_node/odom_GT for comparison/debug.
         self.declare_parameter("out_odom", "/zed/zed_node/odom")
+        # Ground-truth pose as a plain PoseStamped: BiguaSim knows the drone's
+        # exact position AND orientation, but on the Odometry topic the
+        # quaternion is buried inside pose.pose.orientation, which is awkward to
+        # echo, to plot, and to point an RViz Axes display at. This publishes the
+        # same truth in the form you actually want when you are asking "is the
+        # estimate's attitude right, or has the airframe genuinely flipped?" —
+        # the question that separates a broken estimator from a real crash.
+        self.declare_parameter("out_pose", "/zed/zed_node/pose_GT")
         # Whether to broadcast the dynamic odom->base_link TF. Default False: the
         # real VO (visual_odometry_node) is the single owner of that transform.
         # Set True only if zed_mimic is the odom source and nothing else owns TF
@@ -117,6 +129,8 @@ class ZedMimicNode(Node):
             Odometry, self.get_parameter("out_odom").value, 10)
         self.pub_imu = self.create_publisher(
             Imu, "/zed/zed_node/imu/data", 10)
+        self.pub_pose_gt = self.create_publisher(
+            PoseStamped, self.get_parameter("out_pose").value, 10)
 
         # ── TF broadcasters ─────────────────────────────────────────────────
         self.publish_tf = self.get_parameter("publish_tf").value
@@ -219,6 +233,13 @@ class ZedMimicNode(Node):
         msg.header.frame_id = FRAME_ODOM
         msg.child_frame_id = FRAME_BASE
         self.pub_odom.publish(msg)
+
+        # Same truth, flat and inspectable:
+        #   ros2 topic echo /zed/zed_node/pose_GT --field pose.orientation
+        pose = PoseStamped()
+        pose.header = msg.header
+        pose.pose = msg.pose.pose
+        self.pub_pose_gt.publish(pose)
 
         # Broadcast odom->base_link only when this node is the designated TF owner
         # (publish_tf=True). By default the real VO (visual_odometry_node) owns it,

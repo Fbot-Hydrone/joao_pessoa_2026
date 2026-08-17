@@ -107,12 +107,18 @@ class VisualOdometryNode(Node):
         self.declare_parameter("max_depth", 20.0)
         # Minimum RANSAC inliers to trust a motion estimate.
         self.declare_parameter("min_inliers", 12)
+        # Whether this node owns the odom->base_link TF. False when it is
+        # demoted to an observer publishing to a side topic while ground
+        # truth flies the vehicle — two broadcasters of the same transform
+        # is a corrupt TF tree. See odom_source in sources_sim.launch.py.
+        self.declare_parameter("publish_tf", True)
 
         self.max_features = int(self.get_parameter("max_features").value)
         self.match_ratio = float(self.get_parameter("match_ratio").value)
         self.min_depth = float(self.get_parameter("min_depth").value)
         self.max_depth = float(self.get_parameter("max_depth").value)
         self.min_inliers = int(self.get_parameter("min_inliers").value)
+        self.publish_tf = bool(self.get_parameter("publish_tf").value)
 
         self.bridge = CvBridge()
         self.orb = cv2.ORB_create(nfeatures=self.max_features)
@@ -244,6 +250,8 @@ class VisualOdometryNode(Node):
         odom.pose.pose.orientation.w = qw
         self.pub_odom.publish(odom)
 
+        if not self.publish_tf:
+            return
         t = TransformStamped()
         t.header = odom.header
         t.child_frame_id = FRAME_BASE

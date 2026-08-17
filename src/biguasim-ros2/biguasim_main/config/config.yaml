@@ -56,7 +56,39 @@
               ros_publish: true
               Hz: 20
               location: [0.14, 0, -0.08
-              ]         
+              ]
+              configuration: {CaptureWidth: 640, CaptureHeight: 480, FOV: 90}
+            # Down-facing RGB camera (nadir). The ZED faces forward, so it can
+            # SPOT a landing pad ahead but loses it under the airframe exactly
+            # when precision matters — during the final descent. This is the
+            # camera the drone lands on. On the real drone it is a plain USB/CSI
+            # RGB camera on the belly; here it is a second RGBCamera.
+            #
+            # sensor_name is what makes a second camera of the same type
+            # possible: BiguaSim keys sensors by name (defaulting to the type),
+            # and the ROS bridge publishes under that name — so this one lands on
+            # /biguasim/<agent>/DownCamera instead of colliding with the ZED's
+            # /biguasim/<agent>/RGBCamera.
+            #
+            # rotation is [roll, pitch, yaw] in DEGREES about the agent's body
+            # axes, positive pitch = nose up (BiguaSim's RangeFinderSensor uses
+            # the same sense: LaserAngle -90 is straight down). So pitch -90
+            # aims the lens at the ground. down_cam_mimic_node derives the ROS
+            # mount TF from this same value — see _down_cam_rpy_deg() in
+            # sources_sim.launch.py, and the one-time visual check in
+            # docs/LANDING-SITES.md.
+            #
+            # Hz 10, half the ZED's: a third render is the single most expensive
+            # thing on this list, and the landing loop closes fine at 10 Hz.
+            - sensor_type: RGBCamera
+              sensor_name: DownCamera
+              ros_publish: true
+              Hz: 10
+              # z must clear the airframe: at -0.12 the camera renders
+              # from INSIDE the body mesh and sees the frame instead of
+              # the ground. Check once in RViz on /down_cam/image_raw.
+              location: [0.0, 0, -0.1]
+              rotation: [0, 90, 0]
               configuration: {CaptureWidth: 640, CaptureHeight: 480, FOV: 90}
             # Down-facing rangefinder (nadir altimeter) — Phase 1&2 sensor config.
             # Holodeck's RangeFinderSensor is a LaserScan scanner; LaserCount:1 +
@@ -74,7 +106,7 @@
           dynamics:
             batch_size : 1
           control_abstraction : 'accel'
-          location: [0, 0, 0.3]
+          location: [0, -3, 3]
           rotation: [0, 0, 0]
 
           # 
