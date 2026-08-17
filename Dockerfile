@@ -19,35 +19,19 @@ RUN apt-get update && apt-get install -y \
 RUN pip3 install --no-cache-dir \
     empy==3.3.4 pexpect pymavlink dronecan future lxml MAVProxy
 
-# Hydrone stack runtime deps
-RUN pip3 install --no-cache-dir mediapipe pyzbar opencv-python numpy
-
-WORKDIR /ws
-
-# 1. Pinned source dependencies (this layer re-runs only when deps.repos changes)
-COPY deps.repos ./
-RUN vcs import --recursive . < deps.repos
-
-# 2. IDL generator required by ArduPilot's DDS build
-ENV MICROXRCEDDSGEN_DIR=/ws/tools/Micro-XRCE-DDS-Gen
-RUN cd "$MICROXRCEDDSGEN_DIR" && ./gradlew assemble -x submodulesUpdate
-ENV PATH="$MICROXRCEDDSGEN_DIR/scripts:$PATH"
-
-# 3. Third-party ROS packages (ArduPilot SITL is the slow one — cached
-#    independently of project code changes). Sequential executor: building
-#    micro_ros_agent and ardupilot_sitl in parallel starves the AP_DDS IDL
-#    generator's JVM, which dies with exit 255.
-RUN . /opt/ros/humble/setup.sh && \
-    colcon build --symlink-install --executor sequential \
-      --packages-up-to ardupilot_sitl ardupilot_msgs micro_ros_agent
-
-# 4. Project packages
-COPY src/ src/
-RUN . /opt/ros/humble/setup.sh && \
-    colcon build --symlink-install \
-      --packages-select hydrone_msgs biguasim_interfaces biguasim_main \
-        hydrone_bringup hydrone_vision hydrone_controller hydrone_nav \
-        hydrone_mission
+# Hydrone stack runtime deps.
+#
+# numpy is PINNED BELOW 2.0 on purpose. ROS Humble's cv_bridge ships a compiled
+# boost extension linked against numpy 1.x; installing numpy 2.x over it does
+# not fail at install time, and `import cv_bridge` only prints
+#   AttributeError: _ARRAY_API not found
+# before carrying on — then the first imgmsg_to_cv2() call SEGFAULTS the node.
+# That takes down visual_odometry_node, which with GPS disabled is what feeds
+# the EKF its position. Do not relax this pin without checking cv_bridge again:
+#   python3 -c 'from cv_bridge import CvBridge; CvBridge()'
+# The landing-pad nodes sidestep cv_bridge entirely (hydrone_vision/
+# image_convert.py), but vision_node and visual_odometry_node still use it.
+RUN pip3 install --no-cache-dir mediapipe pyzbar opencv-python "numpy<2"
 
 # Runtime deps of biguasim that its setup.py doesn't declare (its code
 # imports torch/roma/matplotlib). CPU-only torch: the CUDA wheels add
@@ -72,10 +56,53 @@ RUN apt-get update && apt-get install -y \
     && (geographiclib-get-geoids egm96-5 || true) \
     && rm -rf /var/lib/apt/lists/*
 
-# The biguasim Python package (simulator client) is installed at container
-# start from the mounted bs-drone-competition repo — see docker/entrypoint.sh
+# ─────────────────────────────────────────────────────────────────────────────
+# LAYER ORDER MATTERS BELOW THIS LINE.
+#
+# Everything above is environment: ~1 GB of pip/apt that depends on nothing in
+# this repo. It is deliberately placed ahead of `COPY src/` so that editing a
+# node does NOT invalidate it — Docker rebuilds every layer below a changed
+# one, and torch alone is an 800 MB re-download.
+#
+# Keep the project `COPY src/` + colcon build LAST. If you add a new pip/apt
+# dependency, put it above this line, not below.
+# ─────────────────────────────────────────────────────────────────────────────
+
+WORKDIR /ws
+
+# 1. Pinned source dependencies (this layer re-runs only when deps.repos changes)
+COPY deps.repos ./
+RUN vcs import --recursive . < deps.repos
+
+# 2. IDL generator required by ArduPilot's DDS build
+ENV MICROXRCEDDSGEN_DIR=/ws/tools/Micro-XRCE-DDS-Gen
+RUN cd "$MICROXRCEDDSGEN_DIR" && ./gradlew assemble -x submodulesUpdate
+ENV PATH="$MICROXRCEDDSGEN_DIR/scripts:$PATH"
+
+# 3. Third-party ROS packages (ArduPilot SITL is the slow one — cached
+#    independently of project code changes). Sequential executor: building
+#    micro_ros_agent and ardupilot_sitl in parallel starves the AP_DDS IDL
+#    generator's JVM, which dies with exit 255.
+RUN . /opt/ros/humble/setup.sh && \
+    colcon build --symlink-install --executor sequential \
+      --packages-up-to ardupilot_sitl ardupilot_msgs micro_ros_agent
+
+# 4. The biguasim Python package (simulator client) is installed at container
+#    start from the mounted bs-drone-competition repo — see docker/entrypoint.sh.
+#    Above `COPY src/` so editing a node doesn't re-run it (and vice versa: the
+#    entrypoint changes rarely, and then only step 5 replays).
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
+
+# 5. Project packages — LAST, so a source edit replays only this build.
+#    `--symlink-install` chains install/ -> build/ -> src/, which is what makes
+#    docker-compose.dev.yml's bind mounts live without any rebuild at all.
+COPY src/ src/
+RUN . /opt/ros/humble/setup.sh && \
+    colcon build --symlink-install \
+      --packages-select hydrone_msgs biguasim_interfaces biguasim_main \
+        hydrone_bringup hydrone_vision hydrone_controller hydrone_nav \
+        hydrone_mission
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["ros2", "launch", "hydrone_bringup", "hydrone_sim.launch.py"]
