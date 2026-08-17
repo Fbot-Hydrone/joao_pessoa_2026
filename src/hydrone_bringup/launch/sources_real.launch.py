@@ -11,18 +11,31 @@ unchanged when the flag flips:
     /zed/zed_node/rgb/image_rect_color, /zed/zed_node/rgb/camera_info,
     /zed/zed_node/depth/depth_registered, /zed/zed_node/depth/camera_info,
     /zed/zed_node/imu/data, /zed/zed_node/odom,
+    /down_cam/image_raw, /down_cam/camera_info,
     /mavros/*  (incl. /mavros/vision_pose/pose, /mavros/distance_sensor/rangefinder)
+    TF: base_link -> zed_camera_link -> zed_left_camera_optical_frame
+        base_link -> down_cam_link   -> down_cam_optical_frame
 
 Difference vs sim (only the SOURCES change, never the autonomy):
-  - NO SITL, NO ardubridge, NO zed_mimic, NO visual_odometry_node,
-    NO rangefinder_bridge.
+  - NO SITL, NO ardubridge, NO zed_mimic, NO down_cam_mimic,
+    NO visual_odometry_node, NO rangefinder_bridge.
   - zed_wrapper (ZED SDK on the Jetson) publishes /zed/zed_node/* INCLUDING
     /zed/zed_node/odom natively (its own VIO) — that is why visual_odometry_node
     is sim-only.
   - The VL53L1X rangefinder is wired over I2C into the Pixhawk; ArduPilot reads
     it natively and MAVROS PUBLISHES /mavros/distance_sensor/* (publisher mode) —
     that is why rangefinder_bridge is sim-only.
+  - The belly camera is a real USB/CSI camera. Its driver publishes
+    /down_cam/image_raw + /down_cam/camera_info directly, replacing
+    down_cam_mimic_node — plus a static_transform_publisher for the mount,
+    which the mimic was providing in sim.
   - vision_odom_bridge is AGNOSTIC and runs here too (same node as sim).
+
+ONE THING THE AUTONOMY LAYER DOES NEED TOLD APART (the only sim/real difference
+above the sources): the downward rangefinder's topic. In sim, rangefinder_bridge
+FEEDS MAVROS on /mavros/rangefinder; on real, MAVROS PUBLISHES the natively-read
+VL53L1X on /mavros/distance_sensor/rangefinder. Launch the landing-site stack
+with range_topic:=/mavros/distance_sensor/rangefinder here.
 
 The nodes below are intentionally left COMMENTED (stub) until the ZED SDK / FCU
 are integrated: a launch pointing at drivers that don't exist yet would fail and
@@ -68,17 +81,43 @@ def generate_launch_description():
     #     ],
     # )
     #
-    # 3) AGNOSTIC plumbing — identical node to sim: /zed/zed_node/odom ->
+    # 3) Belly camera for the landing-pad detector. Any driver will do as long
+    #    as it publishes /down_cam/image_raw (bgr8/rgb8/mono8) and a
+    #    /down_cam/camera_info with real intrinsics — the projection is only as
+    #    good as fx/fy/cx/cy, so calibrate it, do not assume the nominal FOV.
+    # down_cam = Node(
+    #     package="usb_cam", executable="usb_cam_node_exe", output="screen",
+    #     parameters=[{"video_device": "/dev/video0",
+    #                  "image_width": 640, "image_height": 480,
+    #                  "pixel_format": "yuyv", "frame_id": "down_cam_optical_frame",
+    #                  "camera_info_url": "file:///.../down_cam.yaml"}],
+    #     remappings=[("image_raw", "/down_cam/image_raw"),
+    #                 ("camera_info", "/down_cam/camera_info")],
+    # )
+    #
+    # 4) The belly camera's mount, in place of down_cam_mimic's static TFs.
+    #    Measure the offset on the airframe. The rotation below is the standard
+    #    optical convention for a lens pointing straight down (x y z yaw pitch
+    #    roll, radians): base_link -> down_cam_optical_frame in one hop.
+    # down_cam_tf = Node(
+    #     package="tf2_ros", executable="static_transform_publisher",
+    #     arguments=["0", "0", "-0.12", "-1.5707963", "0", "-3.1415927",
+    #                "base_link", "down_cam_optical_frame"],
+    # )
+    #
+    # 5) AGNOSTIC plumbing — identical node to sim: /zed/zed_node/odom ->
     #    /mavros/vision_pose/pose.
     # vision_odom = Node(
     #     package="hydrone_bringup", executable="vision_odom_bridge", output="screen",
     # )
     #
-    # return LaunchDescription([zed_wrapper, mavros, vision_odom])
+    # return LaunchDescription([zed_wrapper, mavros, down_cam, down_cam_tf,
+    #                           vision_odom])
 
     return LaunchDescription([
         LogInfo(msg=("[sources_real] STUB — real drivers not integrated. "
-                     "Uncomment zed_wrapper + mavros(FCU) + vision_odom_bridge; "
-                     "they must publish /zed/zed_node/* and /mavros/* exactly as "
+                     "Uncomment zed_wrapper + mavros(FCU) + down_cam + its "
+                     "static TF + vision_odom_bridge; they must publish "
+                     "/zed/zed_node/*, /down_cam/* and /mavros/* exactly as "
                      "sources_sim does. No autonomy changes.")),
     ])

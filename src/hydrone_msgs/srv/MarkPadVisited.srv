@@ -1,0 +1,10 @@
+# Record that the drone has landed on a pad, so it is never targeted again.
+# Called by hydrone_mission/pad_mission_node after a confirmed touchdown.
+uint16 id
+# Top-surface height measured at touchdown (drone altitude on the ground), in
+# metres above the takeoff plane. Set height_valid=false to leave it untouched.
+float32 height
+bool height_valid
+---
+bool success
+string message

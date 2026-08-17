@@ -31,6 +31,10 @@ def generate_launch_description():
     # ignored. Defaults must match sources_sim.launch.py.
     args = [
         DeclareLaunchArgument(
+            "odom_source", default_value="vo",
+            description="EKF odometry source: ground_truth | vo. "
+                        "See sources_sim.launch.py."),
+        DeclareLaunchArgument(
             "odom_error", default_value="true",
             description="Run odom_error_node (VO drift vs ground truth -> CSV)."),
         DeclareLaunchArgument(
@@ -45,6 +49,7 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(
             os.path.join(launch_dir, "sources_sim.launch.py")),
         launch_arguments={
+            "odom_source": LaunchConfiguration("odom_source"),
             "odom_error": LaunchConfiguration("odom_error"),
             "odom_error_print": LaunchConfiguration("odom_error_print"),
             "odom_error_dir": LaunchConfiguration("odom_error_dir"),

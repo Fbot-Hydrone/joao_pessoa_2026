@@ -22,6 +22,8 @@ setup(
     entry_points={
         'console_scripts': [
             'nav_node = hydrone_nav.nav_node:main',
+            'pad_map_node = hydrone_nav.pad_map_node:main',
+            'feature_map_node = hydrone_nav.feature_map_node:main',
         ],
     },
 )
