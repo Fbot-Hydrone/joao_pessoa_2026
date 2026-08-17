@@ -1,0 +1,41 @@
+# Dev override — edit ROS code on the host, run it in the container without
+# rebuilding the image. Enabled by `scripts/docker_up.sh --dev`; manual use:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# HOW IT WORKS
+# The image is built with `colcon build --symlink-install`, which chains:
+#
+#   install/<pkg>/.../<pkg>.egg-link      -> /ws/build/<pkg>
+#   build/<pkg>/<pkg>                     -> /ws/src/<pkg>/<pkg>
+#   build/<pkg>/launch/x.launch.py        -> /ws/src/<pkg>/launch/x.launch.py
+#
+# so bind-mounting a host package over /ws/src/<pkg> puts your working tree at
+# the end of that chain. Node code, existing launch files and existing config
+# YAML are then live: `docker compose restart hydrone` runs the new code.
+#
+# WHAT STILL NEEDS A BUILD (use scripts/dev_rebuild.sh — seconds, in-container):
+#   * .msg changes in hydrone_msgs / biguasim_interfaces (code generation)
+#   * new entry_points/console_scripts in setup.py (wrapper scripts)
+#   * NEW launch/config files — the symlinks above are created per file at
+#     build time, so a file that didn't exist then has nothing pointing at it
+#   * new package.xml dependencies
+#
+# WHY PER-PACKAGE AND NOT `./src:/ws/src`
+# ardupilot_sitl is built inside the image and its install/ symlinks point at
+# /ws/src/ardupilot/build/sitl/lib/*.a, which exists only in the image. A
+# blanket src/ mount would shadow it and break SITL. Only project packages are
+# mounted here; the vcs-imported deps stay untouched.
+services:
+  hydrone:
+    volumes:
+      - ./src/hydrone_bringup:/ws/src/hydrone_bringup
+      - ./src/hydrone_controller:/ws/src/hydrone_controller
+      - ./src/hydrone_mission:/ws/src/hydrone_mission
+      - ./src/hydrone_msgs:/ws/src/hydrone_msgs
+      - ./src/hydrone_nav:/ws/src/hydrone_nav
+      - ./src/hydrone_vision:/ws/src/hydrone_vision
+      # Note the path: these live under src/biguasim-ros2/ in the image too,
+      # and that is what the build/ symlinks point at.
+      - ./src/biguasim-ros2/biguasim_interfaces:/ws/src/biguasim-ros2/biguasim_interfaces
+      - ./src/biguasim-ros2/biguasim_main:/ws/src/biguasim-ros2/biguasim_main
