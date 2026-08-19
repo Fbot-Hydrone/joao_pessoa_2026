@@ -107,6 +107,20 @@ class VisualOdometryNode(Node):
         self.declare_parameter("max_depth", 20.0)
         # Minimum RANSAC inliers to trust a motion estimate.
         self.declare_parameter("min_inliers", 12)
+        # Minimum inlier RATIO (inliers / usable matches). 12 inliers out of 13
+        # matches is a solid solution; 12 out of 80 is RANSAC scraping together
+        # a story from noise. Measured 2026-08-18: one such frame moved the pose
+        # 11 m / 95 deg in a single step while the drone sat still on the pad —
+        # and with GPS off that jump WAS the EKF position, so the vehicle armed
+        # 10 m from where it believed it was and flew away. The absolute count
+        # alone cannot catch that; the ratio does.
+        self.declare_parameter("min_inlier_ratio", 0.5)
+        # Physical plausibility bounds on ONE frame-to-frame step. At 20 Hz
+        # even 2 m/s of real motion is 0.1 m/frame; a solution claiming more
+        # than max_step_m or max_step_deg in one frame is a degenerate PnP fit,
+        # not motion. Rejected steps hold pose (exactly like a starved frame).
+        self.declare_parameter("max_step_m", 0.5)
+        self.declare_parameter("max_step_deg", 20.0)
         # Whether this node owns the odom->base_link TF. False when it is
         # demoted to an observer publishing to a side topic while ground
         # truth flies the vehicle — two broadcasters of the same transform
@@ -118,6 +132,10 @@ class VisualOdometryNode(Node):
         self.min_depth = float(self.get_parameter("min_depth").value)
         self.max_depth = float(self.get_parameter("max_depth").value)
         self.min_inliers = int(self.get_parameter("min_inliers").value)
+        self.min_inlier_ratio = float(self.get_parameter("min_inlier_ratio").value)
+        self.max_step_m = float(self.get_parameter("max_step_m").value)
+        self.max_step_rad = np.radians(
+            float(self.get_parameter("max_step_deg").value))
         self.publish_tf = bool(self.get_parameter("publish_tf").value)
 
         self.bridge = CvBridge()
@@ -221,8 +239,23 @@ class VisualOdometryNode(Node):
             self.get_logger().warn(f"VO: PnP failed / {n} inliers; holding pose")
             return
 
+        ratio = len(inliers) / len(obj)
+        if ratio < self.min_inlier_ratio:
+            self.get_logger().warn(
+                f"VO: inlier ratio {ratio:.2f} ({len(inliers)}/{len(obj)}) "
+                f"< {self.min_inlier_ratio:.2f}; holding pose")
+            return
+
         # solvePnP gives T_cur_prev: p_cur = R·p_prev + t. The camera pose update
         # is the inverse of that relative motion.
+        step_t = float(np.linalg.norm(tvec))
+        step_r = float(np.linalg.norm(rvec))
+        if step_t > self.max_step_m or step_r > self.max_step_rad:
+            self.get_logger().warn(
+                f"VO: implausible step {step_t:.2f} m / "
+                f"{np.degrees(step_r):.1f} deg in one frame; holding pose")
+            return
+
         R, _ = cv2.Rodrigues(rvec)
         T_cur_prev = np.eye(4)
         T_cur_prev[:3, :3] = R

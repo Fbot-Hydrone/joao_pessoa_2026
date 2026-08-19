@@ -1,8 +1,8 @@
 """
 hydrone_bringup/launch/landing_sites.launch.py
 
-AUTONOMY layer for the landing-site mission: find the pads, land on them, take
-off again, keep going.
+AUTONOMY layer for the landing-site mission: fly forward, land on each pad the
+down camera finds, take off again, keep going.
 
 This is an ALTERNATIVE to hydrone.launch.py, not an addition to it. Both drive
 the vehicle, and running them together would put two nodes on
@@ -17,7 +17,8 @@ Nodes
   pad_detector (down)     belly RGB      -> /hydrone/pads/detections
   pad_map                 detections     -> /hydrone/pads/map + RViz markers
   feature_map             ZED RGB-D      -> /hydrone/map/features + coverage
-  pad_mission             map + MAVROS   -> the flight itself
+  map_odom_tf             static identity map -> odom (joins TF's two trees)
+  pad_mission             down cam + MAVROS -> the flight itself
 
 Like the rest of the autonomy layer this consumes ONLY the agnostic contract
 buses (/zed/zed_node/*, /down_cam/*, /mavros/*), so it is identical in sim and
@@ -38,29 +39,30 @@ def generate_launch_description():
     args = [
         DeclareLaunchArgument(
             "cruise_alt", default_value="2.5",
-            description="Search altitude, m above takeoff. MUST clear the "
+            description="Cruise altitude, m above takeoff. MUST clear the "
                         "arena's tallest structure (1.5 m) — there is no "
                         "forward obstacle avoidance."),
         DeclareLaunchArgument(
-            "align_alt", default_value="2.0",
-            description="Altitude the drone settles at over a pad before it "
-                        "starts descending, m. Lower than cruise_alt so the pad "
-                        "fills more of the down camera; must still clear the "
-                        "1.5 m structure if one is nearby."),
+            "forward_step", default_value="1.0",
+            description="How far ahead the position setpoint is placed, m. Each "
+                        "step is a position error the FCU answers with "
+                        "acceleration, so a big step is an aggressive demand — "
+                        "which is what flips the vehicle under the sim's "
+                        "actuation lag. Keep it small."),
         DeclareLaunchArgument(
-            "search_radius", default_value="12.0",
-            description="Half-width of the search box around the takeoff point, "
-                        "m. Bounds the search so the drone cannot roam the "
-                        "empty plane forever."),
+            "forward_limit_m", default_value="0.0",
+            description="Land and finish after covering this much ground, m. "
+                        "0 = fly forward until aborted."),
         DeclareLaunchArgument(
-            "search_step", default_value="3.0",
-            description="Spacing between spiral legs, m. Keep below the down "
-                        "camera's ground footprint (2*alt*tan(FOV/2)) for "
-                        "overlapping coverage."),
+            "rearm_distance_m", default_value="3.0",
+            description="Ignore the down camera for this much ground after each "
+                        "takeoff, m. Without it the drone lands again on the "
+                        "pad it just left, forever."),
         DeclareLaunchArgument(
-            "max_pads", default_value="0",
-            description="Stop and return home after this many landings. "
-                        "0 = keep going until the pattern is exhausted."),
+            "min_confidence", default_value="0.60",
+            description="Down-camera confidence that counts as 'a pad is "
+                        "below'. Raise it if the drone lands on things that are "
+                        "merely blue."),
         DeclareLaunchArgument(
             "auto_start", default_value="true",
             description="Arm and take off as soon as the FCU is ready. Set "
@@ -74,6 +76,12 @@ def generate_launch_description():
             description="Run the ZED feature/coverage mapper. Pure observer — "
                         "turn it off to save CPU."),
         DeclareLaunchArgument(
+            "map_odom_tf", default_value="true",
+            description="Publish the static identity map -> odom that joins "
+                        "TF's two trees. See the node below for why it is an "
+                        "approximation. Set false once something estimates the "
+                        "real map->odom offset."),
+        DeclareLaunchArgument(
             "range_topic", default_value="/mavros/rangefinder",
             description="Downward rangefinder Range topic, used to measure pad "
                         "heights. SIM: /mavros/rangefinder (what "
@@ -84,6 +92,34 @@ def generate_launch_description():
 
     cruise_alt = LaunchConfiguration("cruise_alt")
     debug_images = LaunchConfiguration("debug_images")
+
+    # HSV thresholds, shared by both detectors. The library's floor for both
+    # colours is S >= 110, but UE's tonemapping/bloom pushes the whole pad
+    # toward white (V saturates at ~251-254), so nothing on it reaches that.
+    #
+    # MEASURED inside the pad's bounding box on a lossless /down_cam frame at
+    # 3 m hover (2026-08-18):
+    #
+    #     blue field        S 37-75, mean 56    ->      0 px survive S >= 110
+    #     yellow ring+cross S 38-59, mean 48    ->      0 px survive S >= 110
+    #
+    # BOTH floors have to come down. Lowering only yellow cannot work: detect()
+    # runs findContours on the BLUE mask and iterates over blue contours, so an
+    # empty blue mask means zero candidates and the yellow, ring, cross and
+    # concentricity checks never execute at all.
+    #
+    # An earlier grab over the spawn pad put the sim's yellow at S ~ 82-109,
+    # well above what it measures at hover — the pad's saturation varies a lot
+    # with altitude and local lighting inside the map. S >= 30 covers the whole
+    # observed range with margin (it admits every one of the pad's blue and
+    # yellow pixels in both grabs) and leaves the discrimination to the
+    # structural checks, which is where it belongs: on a confirmed detection
+    # ring coverage is 1.0, arms 4, concentricity offset 0.005.
+    #
+    # SIM VALUES. The library defaults and its tests are unchanged; retune
+    # against the real arena lighting per docs/LANDING-SITES.md §3.
+    blue_hsv_low = [95, 30, 50]
+    yellow_hsv_low = [18, 30, 90]
 
     # ── Detectors: one per camera, same algorithm, different geometry ───────
     # The forward ZED sees pads at range and has depth to place them with.
@@ -99,6 +135,8 @@ def generate_launch_description():
             "depth_topic": "/zed/zed_node/depth/depth_registered",
             "optical_frame": "zed_left_camera_optical_frame",
             "publish_debug": ParameterValue(debug_images, value_type=bool),
+            "blue_hsv_low": blue_hsv_low,
+            "yellow_hsv_low": yellow_hsv_low,
         }],
     )
 
@@ -117,6 +155,8 @@ def generate_launch_description():
             "depth_topic": "",
             "optical_frame": "down_cam_optical_frame",
             "publish_debug": ParameterValue(debug_images, value_type=bool),
+            "blue_hsv_low": blue_hsv_low,
+            "yellow_hsv_low": yellow_hsv_low,
         }],
     )
 
@@ -127,6 +167,13 @@ def generate_launch_description():
         output="screen",
         parameters=[{
             "range_topic": LaunchConfiguration("range_topic"),
+            # The default 20 s is wall-clock, and BiguaSim runs ~5-8x below
+            # real time — so a candidate had ~3 FLIGHT-seconds to be re-seen
+            # before being dropped as a false positive (measured 2026-08-18:
+            # the spawn pad was sighted once on climb-out and pruned 20 s
+            # later while the drone was still crawling to its first search
+            # waypoint). Same wall-vs-sim trap as config/timeouts.yaml.
+            "provisional_ttl_s": 120.0,
         }],
     )
 
@@ -138,6 +185,41 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration("feature_map")),
     )
 
+    # Joins TF's two disconnected trees.
+    #
+    # Nobody publishes a link between `map` and `odom`, in sim or on the real
+    # drone, so TF comes up as two separate trees:
+    #
+    #   odom -> base_link -> {zed_camera_link, down_cam_link, ...}   (VO / zed_wrapper)
+    #   map  -> map_ned                                              (MAVROS static)
+    #
+    # Everything this launch file MAPS is published in `map`, because it is
+    # built from /mavros/local_position/pose and MAVROS stamps that with
+    # frame_id "map" (apm_config.yaml: local_position.frame_id). Everything it
+    # SENSES lives under base_link. With no edge between them, RViz can render
+    # the map or the vehicle but never both, and `tf2_echo map base_link` fails
+    # with "Tf has two or more unconnected trees".
+    #
+    # Identity is the honest first approximation, not the right answer: `odom`
+    # is the VO's origin (wherever the drone booted) and `map` is the FCU's EKF
+    # origin, so the two coincide at takeoff and diverge afterwards by exactly
+    # the accumulated VO drift. That offset IS the localization error — this
+    # node does not correct it, it just declares it zero so the frames connect.
+    # When something finally estimates it (loop closure, a fiducial, anything),
+    # that estimator publishes map->odom and this node goes away: pass
+    # map_odom_tf:=false.
+    #
+    # NOT done by turning on MAVROS local_position.tf.send, which would
+    # broadcast map->base_link while the VO already broadcasts odom->base_link.
+    # Two parents for one frame is not a tree, and TF rejects it.
+    map_odom_tf = Node(
+        package="tf2_ros",
+        executable="static_transform_publisher",
+        name="map_odom_tf",
+        arguments=["--frame-id", "map", "--child-frame-id", "odom"],
+        condition=IfCondition(LaunchConfiguration("map_odom_tf")),
+    )
+
     mission = Node(
         package="hydrone_mission",
         executable="pad_mission_node",
@@ -145,14 +227,14 @@ def generate_launch_description():
         output="screen",
         parameters=[{
             "cruise_alt": ParameterValue(cruise_alt, value_type=float),
-            "align_alt": ParameterValue(
-                LaunchConfiguration("align_alt"), value_type=float),
-            "search_radius": ParameterValue(
-                LaunchConfiguration("search_radius"), value_type=float),
-            "search_step": ParameterValue(
-                LaunchConfiguration("search_step"), value_type=float),
-            "max_pads": ParameterValue(
-                LaunchConfiguration("max_pads"), value_type=int),
+            "forward_step": ParameterValue(
+                LaunchConfiguration("forward_step"), value_type=float),
+            "forward_limit_m": ParameterValue(
+                LaunchConfiguration("forward_limit_m"), value_type=float),
+            "rearm_distance_m": ParameterValue(
+                LaunchConfiguration("rearm_distance_m"), value_type=float),
+            "min_confidence": ParameterValue(
+                LaunchConfiguration("min_confidence"), value_type=float),
             "auto_start": ParameterValue(
                 LaunchConfiguration("auto_start"), value_type=bool),
         }],
@@ -163,5 +245,6 @@ def generate_launch_description():
         down_detector,
         pad_map,
         feature_map,
+        map_odom_tf,
         mission,
     ])

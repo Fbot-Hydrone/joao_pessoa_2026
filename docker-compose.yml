@@ -35,4 +35,8 @@ services:
     # odom_error_print defaults ON here (the sim is where you want to see VO
     # drift), unlike the launch file's own default. scripts/docker_up.sh flips
     # ODOM_ERROR_PRINT to false when given --no-odom-print.
-    command: ros2 launch hydrone_bringup ${HYDRONE_LAUNCH:-hydrone_sim.launch.py} odom_error_print:=${ODOM_ERROR_PRINT:-true}
+    #
+    # ODOM_SOURCE selects what the EKF navigates on (docker_up.sh --ground-truth
+    # sets it to ground_truth). Default vo — the estimator the real drone will
+    # fly on; ground_truth is a debugging aid only. See sources_sim.launch.py.
+    command: ros2 launch hydrone_bringup ${HYDRONE_LAUNCH:-hydrone_sim.launch.py} odom_error_print:=${ODOM_ERROR_PRINT:-true} odom_source:=${ODOM_SOURCE:-vo}

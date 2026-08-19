@@ -36,13 +36,14 @@ def generate_launch_description():
     # argument declared only inside an included file is silently ignored here.
     args = [
         DeclareLaunchArgument("cruise_alt", default_value="2.5"),
-        DeclareLaunchArgument("align_alt", default_value="2.0"),
-        DeclareLaunchArgument("search_radius", default_value="12.0"),
-        DeclareLaunchArgument("search_step", default_value="3.0"),
-        DeclareLaunchArgument("max_pads", default_value="0"),
+        DeclareLaunchArgument("forward_step", default_value="1.0"),
+        DeclareLaunchArgument("forward_limit_m", default_value="0.0"),
+        DeclareLaunchArgument("rearm_distance_m", default_value="3.0"),
+        DeclareLaunchArgument("min_confidence", default_value="0.60"),
         DeclareLaunchArgument("auto_start", default_value="true"),
         DeclareLaunchArgument("debug_images", default_value="true"),
         DeclareLaunchArgument("feature_map", default_value="true"),
+        DeclareLaunchArgument("map_odom_tf", default_value="true"),
         # The real visual odometry flies the vehicle, as it will on the
         # drone. odom_source:=ground_truth swaps in BiguaSim dynamics, but
         # only as a debugging tool — see sources_sim.launch.py.
@@ -69,13 +70,14 @@ def generate_launch_description():
             os.path.join(launch_dir, "landing_sites.launch.py")),
         launch_arguments={
             "cruise_alt": LaunchConfiguration("cruise_alt"),
-            "align_alt": LaunchConfiguration("align_alt"),
-            "search_radius": LaunchConfiguration("search_radius"),
-            "search_step": LaunchConfiguration("search_step"),
-            "max_pads": LaunchConfiguration("max_pads"),
+            "forward_step": LaunchConfiguration("forward_step"),
+            "forward_limit_m": LaunchConfiguration("forward_limit_m"),
+            "rearm_distance_m": LaunchConfiguration("rearm_distance_m"),
+            "min_confidence": LaunchConfiguration("min_confidence"),
             "auto_start": LaunchConfiguration("auto_start"),
             "debug_images": LaunchConfiguration("debug_images"),
             "feature_map": LaunchConfiguration("feature_map"),
+            "map_odom_tf": LaunchConfiguration("map_odom_tf"),
             # SIM: the Range lives where rangefinder_bridge puts it, which is
             # what this MAVROS build's distance_sensor plugin subscribes to.
             "range_topic": "/mavros/rangefinder",

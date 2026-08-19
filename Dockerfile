@@ -106,3 +106,7 @@ RUN . /opt/ros/humble/setup.sh && \
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["ros2", "launch", "hydrone_bringup", "hydrone_sim.launch.py"]
+
+RUN printf '%s\n' \
+    'source /opt/ros/humble/setup.bash' \
+    'source /ws/install/setup.bash' >> /etc/bash.bashrc

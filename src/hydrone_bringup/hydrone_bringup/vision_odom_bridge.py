@@ -28,7 +28,7 @@ from mavros_msgs.msg import HomePosition
 class VisionOdomBridge(Node):
     def __init__(self):
         super().__init__("vision_odom_bridge")
-        self.declare_parameter("in_odom", "/zed/zed_node/odom")
+        self.declare_parameter("in_odom", "/zed/zed_node/odom_GT")
         self.declare_parameter("out_pose", "/mavros/vision_pose/pose")
         # GPS-denied flight needs a global origin, or ArduPilot never sets home
         # and GUIDED takeoff's altitude-frame conversion silently fails
