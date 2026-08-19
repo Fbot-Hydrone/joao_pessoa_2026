@@ -28,14 +28,18 @@ produced them.
 The mount rotation
 ------------------
 `camera_rpy_deg` is the sensor's mounting rotation as written in BiguaSim's
-config.yaml — [roll, pitch, yaw] in degrees, positive pitch = nose up. The
-launch file reads it straight from that file so the simulated camera and the TF
-can never disagree: one edit moves both.
+config.yaml — [roll, pitch, yaw] in degrees. VERIFIED against a running UE5
+render (2026-08-18, docs/LANDING-SITES.md §8's one-time check): pitch +90 aims
+the lens at the GROUND. That is rotation about the body's RIGHT axis with the
+right-hand rule — exactly how ROS RPY's pitch about +Y (left) moves the +X
+axis: R_y(+90)·x̂ = -ẑ, straight down. The two conventions agree, so the value
+carries into the ROS TF with NO sign flip. (An earlier version assumed
+BiguaSim meant "+pitch = nose up" and flipped the sign; that aimed the TF at
+the sky while the image showed the ground, and every down-camera detection
+was refused at projection time as "ray at or above the horizon".)
 
-ROS RPY about base_link (X fwd, Y left, Z up) is right-handed, so a nose-up
-pitch is a NEGATIVE rotation about +Y there — hence the sign flip in
-`_mount_quaternion`. If the sim's down camera ever comes out looking at the sky,
-the fix is the single `rotation:` line in config.yaml, not this file.
+The launch file reads the value straight from config.yaml so the simulated
+camera and the TF can never disagree: one edit moves both.
 """
 
 import math
@@ -85,7 +89,7 @@ class DownCamMimicNode(Node):
         self.declare_parameter("out_info", "/down_cam/camera_info")
         # Mount pose on the body, from BiguaSim's config.yaml (see module docs).
         self.declare_parameter("camera_offset_xyz", [0.0, 0.0, -0.12])
-        self.declare_parameter("camera_rpy_deg", [0.0, -90.0, 0.0])
+        self.declare_parameter("camera_rpy_deg", [0.0, 90.0, 0.0])
 
         p = lambda name: self.get_parameter(name).value
 
@@ -145,13 +149,14 @@ class DownCamMimicNode(Node):
 
     @staticmethod
     def _mount_quaternion(rpy_deg):
-        """BiguaSim mount RPY (degrees, +pitch = nose up) -> ROS quaternion.
+        """BiguaSim mount RPY (degrees) -> ROS quaternion, 1:1.
 
-        Only the pitch sign differs: ROS RPY about base_link is right-handed
-        about +Y (left), where nose-up is negative. Roll and yaw already agree.
+        BiguaSim's pitch is rotation about the body's RIGHT axis (right-hand
+        rule), which moves +X exactly the way ROS RPY's pitch does — +90 takes
+        forward to straight down. Verified in UE 2026-08-18; see module docs.
         """
         roll, pitch, yaw = (math.radians(float(v)) for v in rpy_deg)
-        return _quat_from_rpy(roll, -pitch, yaw)
+        return _quat_from_rpy(roll, pitch, yaw)
 
     def _cb_info(self, msg: CameraInfo):
         self.last_info = msg

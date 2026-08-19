@@ -80,8 +80,8 @@ def set_pose(node, x, y, z, yaw=0.0, frame="map"):
 
 def mount_down(node, offset=(0.0, 0.0, -0.12)):
     """Install the belly camera's mount, derived the same way the launch does:
-    from config.yaml's `rotation: [0, -90, 0]` via down_cam_mimic_node."""
-    q = DownCamMimicNode._mount_quaternion([0.0, -90.0, 0.0])
+    from config.yaml's `rotation: [0, 90, 0]` via down_cam_mimic_node."""
+    q = DownCamMimicNode._mount_quaternion([0.0, 90.0, 0.0])
     node.R_base_opt = quat_to_matrix(*q) @ R_LINK_OPT
     node.t_base_opt = np.array(offset, dtype=float)
 
@@ -95,12 +95,13 @@ def mount_forward(node, offset=(0.14, 0.0, -0.08)):
 # ── The mount rotation itself ────────────────────────────────────────────────
 
 def test_down_camera_mount_points_the_lens_at_the_ground():
-    """config.yaml `rotation: [0, -90, 0]` must end up aiming DOWN, not at the sky.
+    """config.yaml `rotation: [0, 90, 0]` must end up aiming DOWN, not at the sky.
 
-    BiguaSim's pitch is nose-up-positive; ROS RPY about base_link's +Y (left) is
-    not. down_cam_mimic_node owns that sign flip, and this is what pins it.
+    BiguaSim's pitch is rotation about the body's RIGHT axis (verified against
+    a running UE5 render 2026-08-18), which matches ROS RPY 1:1 — +90 takes
+    forward to straight down, with no sign flip. This pins that mapping.
     """
-    R = quat_to_matrix(*DownCamMimicNode._mount_quaternion([0.0, -90.0, 0.0]))
+    R = quat_to_matrix(*DownCamMimicNode._mount_quaternion([0.0, 90.0, 0.0]))
     # down_cam_link's own X (its "forward") must point along base_link -Z.
     assert np.allclose(R @ [1, 0, 0], [0, 0, -1], atol=1e-9)
     # And it must not have rolled or yawed on the way.
@@ -109,7 +110,7 @@ def test_down_camera_mount_points_the_lens_at_the_ground():
 
 def test_down_camera_optical_axis_points_down():
     """Through the optical convention too: +Z_optical is the viewing direction."""
-    q = DownCamMimicNode._mount_quaternion([0.0, -90.0, 0.0])
+    q = DownCamMimicNode._mount_quaternion([0.0, 90.0, 0.0])
     R_base_opt = quat_to_matrix(*q) @ R_LINK_OPT
     assert np.allclose(R_base_opt @ [0, 0, 1], [0, 0, -1], atol=1e-9)
 
@@ -144,7 +145,7 @@ def test_real_hardware_static_tf_matches_the_simulated_mount():
                          [0, math.sin(a), math.cos(a)]])
 
     real = rz(yaw) @ ry(pitch) @ rx(roll)
-    sim = (quat_to_matrix(*DownCamMimicNode._mount_quaternion([0.0, -90.0, 0.0]))
+    sim = (quat_to_matrix(*DownCamMimicNode._mount_quaternion([0.0, 90.0, 0.0]))
            @ R_LINK_OPT)
     assert np.allclose(real, sim, atol=1e-9), (
         f"real-drone TF and sim mount disagree:\n{real}\nvs\n{sim}")

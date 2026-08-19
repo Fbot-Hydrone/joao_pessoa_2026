@@ -95,7 +95,7 @@ Stop it early: `ros2 service call /hydrone/mission/abort std_srvs/srv/Trigger`
 |---|---|---|
 | `pad_detector_node` | `hydrone_vision` | one per camera: detect pads, place them in the world |
 | `pad_map_node` | `hydrone_nav` | fuse detections into a persistent map; track `visited` |
-| `feature_map_node` | `hydrone_nav` | sparse ZED-feature cloud + observation-coverage grid |
+| `feature_map_node` | `hydrone_nav` | sparse ZED-feature cloud + observation-coverage grid — see [`ZED-FEATURE-MAP.md`](ZED-FEATURE-MAP.md) |
 | `pad_mission_node` | `hydrone_mission` | the flight: search, land, take off, repeat |
 | `down_cam_mimic_node` | `hydrone_bringup` | **sim only**: BiguaSim's belly camera → `/down_cam/*` + TF |
 
@@ -187,6 +187,14 @@ Point the drone at the real pad, watch `/hydrone/pads/<camera>/debug_image`, and
 widen the hue or lower the saturation floor until the pad is solidly masked. The
 saturation floor is what keeps pale look-alikes out — lower it as little as you
 can get away with.
+
+**The sim already needed exactly this.** Measured on BiguaSim's rendering
+(2026-08-18): UE's tonemapping/bloom pushes the pad's yellow toward white —
+S ≈ 82–109 against the built-in floor of 110 — so the yellow mask came out
+empty and NO pad was ever detected, from any altitude. `landing_sites.launch.py`
+therefore passes `yellow_hsv_low: [18, 60, 90]` to both detectors. The library
+default (and its tests) are unchanged; re-do this tuning against the real
+arena's light.
 
 ---
 
@@ -365,10 +373,10 @@ Added to `src/biguasim-ros2/biguasim_main/config/config.yaml`:
 - sensor_type: RGBCamera
   sensor_name: DownCamera        # what lets a 2nd RGBCamera coexist with the ZED
   ros_publish: true
-  Hz: 10                         # half the ZED's — a 3rd render is expensive
-  location: [0.0, 0, -0.12]
-  rotation: [0, -90, 0]          # [roll, pitch, yaw] deg, +pitch = nose up
-  configuration: {CaptureWidth: 640, CaptureHeight: 480, FOV: 90}
+  Hz: 10
+  location: [0.0, 0, -0.1]
+  rotation: [0, 90, 0]           # [roll, pitch, yaw] deg — +90 pitch = lens DOWN (verified in UE)
+  configuration: {CaptureWidth: 320, CaptureHeight: 240, FOV: 90}
 ```
 
 `sensor_name` is the mechanism: BiguaSim keys sensors by name (defaulting to the
@@ -381,29 +389,34 @@ them. Same numbers aim the simulated camera and build the transform, so the two
 cannot drift apart — and `_camera_offset_xyz` is pinned to `sensor_name:
 RGBCamera` so adding this camera cannot hand the ZED the wrong mount.
 
-### The one thing to check by eye, once
+### The rotation sign — checked, and it was the other one
 
 BiguaSim's own docs describe pitch inconsistently ("rotation around the fixed
-**right** (y) axis", in a frame where y is **left**). The convention used here —
-positive pitch = nose up, matching `RangeFinderSensor`'s `LaserAngle: -90` for
-straight down — is the reasonable reading, but it has not been confirmed against
-a running UE5 render.
+**right** (y) axis", in a frame where y is **left**). **Checked by eye against a
+running UE5 render 2026-08-18: the literal reading wins.** Pitch is rotation
+about the RIGHT axis with the right-hand rule, so `rotation: [0, 90, 0]` aims
+the lens at the ground — the original "+pitch = nose up" guess was backwards.
+That reading also matches ROS RPY 1:1, so `down_cam_mimic_node` carries the
+value into the mount TF with **no sign flip** (the original flip pointed the
+TF at the sky while the image showed the ground, and every down-camera
+detection died at projection time as "ray at or above the horizon").
 
-**So: start the sim once and look at `/down_cam/image_raw`.** If it shows the
-ground, everything below is right and nothing needs doing. If it shows the sky,
-flip the sign in `config.yaml` (`rotation: [0, 90, 0]`) — the mimic derives the TF
-from that same line, so one edit fixes both the camera and the transform. Nothing
-else anywhere needs to change.
+### Cost — and why it is not optional
 
-### Cost
-
-A third camera render. The two existing 640×480 cameras cap the sim loop at
-~82 Hz; this one runs at half their rate to keep the bill down. If it is too
-slow, in order of preference: drop `Hz` to 5, drop `CaptureWidth/Height` to
-320×240 (render cost scales with pixels; `Hz` only changes how often you pay
-it), or comment the sensor out entirely — the launch only starts
-`down_cam_mimic_node` when the sensor is actually declared, so nothing is left
-spinning on a dead topic. Note that `Hz` must divide `ticks_per_sec` (200).
+A third camera render, and the render budget turned out to be a FLIGHT-SAFETY
+parameter, not a frame-rate preference. With the ZED pair at 640×480@20 plus
+this camera at 640×480@10, the sim loop fell far enough behind that the FDM
+picked up ~0.3–0.5 s of actuation lag — visible in the dataflash `RATE` stream
+as the actual rate trailing the demanded rate — and the attitude controller
+oscillated to a flip within seconds of the first real maneuver
+("Crash: Disarming: AngErr=170>30", reproduced on ground-truth odometry, so it
+was not a localization problem). 2×640×480@20 was the proven-stable budget;
+three renders now fit inside it: the ZED pair runs at **10 Hz** and this camera
+at **320×240@10** (a 1 m pad at 2.5 m altitude still spans ~64 px there, far
+above the detector's ~18 px floor). If the sim still runs hot on a weaker
+machine: drop `Hz` to 5, or comment the sensor out entirely — the launch only
+starts `down_cam_mimic_node` when the sensor is actually declared. Note that
+`Hz` must divide `ticks_per_sec` (200).
 
 ---
 
@@ -474,16 +487,25 @@ end is the airframe lying upside down — a *consequence*, not the cause.
 simulator flies on an estimator too. A simulator that flies on truth has stopped
 testing the thing that has to work.
 
-### The likely fix, when someone takes it on
+### Partially fixed 2026-08-18: the catastrophic jumps are gated out
 
-`visual_odometry_node`'s only gate on a motion estimate is `inliers >= 12`
-(`_match_and_update`). Any RANSAC solution that scrapes together 12 spurious
-inliers is integrated into the pose and never revisited — that is the mechanism
-behind the stationary random walk. Standard gates it lacks: a minimum inlier
-*ratio*, and a plausibility bound on per-frame translation and rotation. Note
-also that on the ground the forward ZED is looking at the horizon and sky, which
-is the worst possible input; the view improves once airborne, so there is a
-chicken-and-egg worth being aware of.
+The 2026-08-18 run showed the failure was worse than a random walk: ONE
+degenerate PnP solution moved the pose **11 m / 95° in a single frame** while
+the drone sat still, and with GPS off that jump became the EKF position on the
+spot. `visual_odometry_node` now carries the standard gates it lacked: a
+minimum inlier **ratio** (`min_inlier_ratio`, 0.5 — 12 inliers out of 80
+matches is RANSAC telling a story, not a solution) and a physical plausibility
+bound on one frame-to-frame step (`max_step_m` 0.5 / `max_step_deg` 20 — at
+20 Hz nothing real moves further than that in one frame). Rejected steps hold
+pose, exactly like a starved frame.
+
+What the gates do NOT fix: on this featureless map the forward camera still
+starves (4–11 matches against a 12 minimum), so the VO holds pose while the
+drone actually moves — safe, but blind. Flying the mission on `vo` needs
+either a feature-rich map or the IMU-fusion step below. Note also that on the
+ground the forward ZED is looking at the horizon and sky, which is the worst
+possible input; the view improves once airborne, so there is a chicken-and-egg
+worth being aware of.
 
 Worth remembering: **this node is SIM-ONLY**. The real drone runs `zed_wrapper`
 and the ZED SDK's own stereo-inertial VIO, a far better estimator. This is a

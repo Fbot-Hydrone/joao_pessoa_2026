@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """
-Tests for pad_mission_node's search pattern and target selection.
+Tests for pad_mission_node's forward run and its landing trigger.
 
-These are the two pieces of mission logic whose failure modes are expensive and
-silent: a search pattern that leaves the arena flies the drone into the empty
-plane, and target selection that forgets a `visited` flag lands on the same pad
-until the battery runs out. Both are pure functions of state, so both can be
-pinned without a simulator.
+The mission is deliberately tiny — fly +X, land on what the down camera sees,
+take off, repeat — so there is not much logic to pin. What IS worth pinning is
+the handful of decisions whose failure is silent and expensive:
+
+  * the setpoint must never sit far ahead of the vehicle. The position error is
+    what the FCU converts into acceleration, and an aggressive demand is what
+    flips the vehicle under BiguaSim's actuation lag (see
+    ~/work/biguasim-problems.md, 2026-08-18).
+  * a stale or unconfident detection must not trigger a landing.
+  * the pad the drone JUST took off from must not trigger a landing, or the
+    mission lands on it forever and never advances.
 
 The flight states themselves (arming, takeoff, landing) are not covered here —
 they are conversations with ArduPilot, and mocking one proves nothing about the
@@ -19,70 +25,14 @@ Run inside the stack container, with the workspace built:
        src/hydrone_mission/test/test_pad_mission.py -q'
 """
 
-import math
-
 import pytest
 import rclpy
 
 from geometry_msgs.msg import PoseStamped
 
 from hydrone_msgs.msg import Pad, PadDetection, PadMap
-from hydrone_mission.pad_mission_node import PadMissionNode, spiral_waypoints
+from hydrone_mission.pad_mission_node import PadMissionNode
 
-
-# ── The search pattern ───────────────────────────────────────────────────────
-
-def test_spiral_first_leg_runs_straight_ahead():
-    """'Take off and go forward' must literally be the first thing it does."""
-    points = spiral_waypoints(step=3.0, radius=12.0, heading=0.0)
-    assert points[0] == pytest.approx((3.0, 0.0))
-
-
-def test_spiral_first_leg_follows_the_takeoff_heading():
-    """Facing +Y, forward is +Y — the pattern is body-relative, not world-fixed."""
-    points = spiral_waypoints(step=3.0, radius=12.0, heading=math.pi / 2.0)
-    assert points[0][0] == pytest.approx(0.0, abs=1e-9)
-    assert points[0][1] == pytest.approx(3.0, abs=1e-9)
-
-
-def test_spiral_stays_inside_the_search_radius():
-    """The whole point of bounding the search: the arena is an island in an
-    otherwise empty, featureless plane."""
-    radius = 12.0
-    for point in spiral_waypoints(step=3.0, radius=radius):
-        assert math.hypot(*point) <= radius + 1e-9
-
-
-def test_spiral_terminates_and_covers_the_area():
-    """It must be a finite list — an unbounded generator would never let the
-    mission conclude 'there is nothing left to find'."""
-    points = spiral_waypoints(step=3.0, radius=12.0)
-    assert 20 < len(points) < 400
-    # It really spirals: later waypoints get further out than the first ones.
-    assert math.hypot(*points[-1]) > math.hypot(*points[0])
-
-
-def test_spiral_never_repeats_a_waypoint():
-    points = spiral_waypoints(step=2.0, radius=10.0)
-    rounded = {(round(x, 6), round(y, 6)) for x, y in points}
-    assert len(rounded) == len(points)
-
-
-def test_spiral_expands_outward_over_time():
-    """Near ground first, far ground later: the pad is most likely close by."""
-    points = spiral_waypoints(step=2.0, radius=20.0)
-    first_half = max(math.hypot(*p) for p in points[:len(points) // 4])
-    last_half = max(math.hypot(*p) for p in points[-len(points) // 4:])
-    assert last_half > first_half
-
-
-def test_degenerate_spiral_parameters_give_nothing():
-    assert spiral_waypoints(step=0.0, radius=10.0) == []
-    assert spiral_waypoints(step=3.0, radius=0.0) == []
-    assert spiral_waypoints(step=-1.0, radius=10.0) == []
-
-
-# ── Target selection ─────────────────────────────────────────────────────────
 
 @pytest.fixture(scope="module", autouse=True)
 def _ros():
@@ -95,24 +45,168 @@ def _ros():
 def node():
     n = PadMissionNode(parameter_overrides=[
         rclpy.parameter.Parameter("auto_start", value=False),
-        rclpy.parameter.Parameter("min_observations", value=3),
+        rclpy.parameter.Parameter("forward_step", value=1.0),
+        rclpy.parameter.Parameter("rearm_distance_m", value=3.0),
+        rclpy.parameter.Parameter("min_confidence", value=0.60),
     ])
-    pose = PoseStamped()
-    pose.header.frame_id = "map"
-    pose.pose.orientation.w = 1.0
-    n.pose = pose
+    n.home = (0.0, 0.0)
+    n.leg_start_x = 0.0
+    n.target_x = 1.0
+    n.state = n.FORWARD
+    set_pose(n, 0.0, 0.0, 2.5)
     yield n
     n.destroy_node()
 
 
-def make_pad(pad_id, x, y, observations=5, visited=False, confidence=0.9):
+def set_pose(node, x, y=0.0, z=2.5):
+    pose = PoseStamped()
+    pose.header.frame_id = "map"
+    pose.pose.position.x = float(x)
+    pose.pose.position.y = float(y)
+    pose.pose.position.z = float(z)
+    pose.pose.orientation.w = 1.0
+    node.pose = pose
+
+
+def see_pad(node, confidence=0.9, age_s=0.0):
+    """Pretend the down camera just reported a pad."""
+    det = PadDetection()
+    det.camera = "down"
+    det.confidence = float(confidence)
+    det.position_valid = True
+    node._last_down = det
+    node._last_down_t = node._now() - age_s
+
+
+# ── The forward run ──────────────────────────────────────────────────────────
+
+def test_the_setpoint_starts_one_step_ahead(node):
+    node._do_forward()
+    assert node.setpoint[0] == pytest.approx(1.0)
+    assert node.stream_setpoint
+
+
+def test_the_setpoint_only_advances_once_the_vehicle_arrives(node):
+    node._do_forward()
+    set_pose(node, 0.6)                 # short of the 0.5 m tolerance band
+    node._do_forward()
+    assert node.setpoint[0] == pytest.approx(1.0)
+
+    set_pose(node, 0.9)                 # inside tolerance of the 1.0 m target
+    node._do_forward()
+    assert node.setpoint[0] == pytest.approx(2.0)
+
+
+def test_the_setpoint_never_runs_far_ahead_of_the_vehicle(node):
+    """The whole point of stepping: bounded position error, gentle demand.
+
+    A setpoint metres ahead is a full-throttle acceleration command, which is
+    what the sim's lagging actuation turns into a flip.
+    """
+    for x in [v / 10.0 for v in range(0, 300)]:
+        set_pose(node, x)
+        node._do_forward()
+        assert node.setpoint[0] - x <= node.forward_step + node.wp_tol
+
+
+def test_the_run_holds_its_lateral_line_and_altitude(node):
+    set_pose(node, 5.0, y=1.7, z=2.5)   # blown sideways off the line
+    node._do_forward()
+    assert node.setpoint[1] == pytest.approx(node.home[1])
+    assert node.setpoint[2] == pytest.approx(node.cruise_alt)
+
+
+def test_forward_limit_of_zero_never_ends_the_run(node):
+    node.forward_limit = 0.0
+    set_pose(node, 500.0)
+    node._do_forward()
+    assert node.state == node.FORWARD
+
+
+def test_forward_limit_ends_the_run(node):
+    node.forward_limit = 10.0
+    set_pose(node, 10.5)
+    node._do_forward()
+    assert node.state == node.ABORTED
+    assert not node.stream_setpoint
+
+
+# ── The landing trigger ──────────────────────────────────────────────────────
+
+def test_a_fresh_confident_pad_below_triggers_a_landing(node):
+    set_pose(node, 5.0)
+    see_pad(node, confidence=0.9)
+    node._do_forward()
+    assert node.state == node.LAND
+    # The FCU owns the descent from here; a position setpoint would fight it.
+    assert not node.stream_setpoint
+
+
+def test_a_stale_detection_does_not_trigger_a_landing(node):
+    set_pose(node, 5.0)
+    see_pad(node, confidence=0.9, age_s=5.0)
+    assert not node._pad_below()
+
+
+def test_a_low_confidence_detection_does_not_trigger_a_landing(node):
+    set_pose(node, 5.0)
+    see_pad(node, confidence=0.3)
+    assert not node._pad_below()
+
+
+def test_no_detection_at_all_does_not_trigger_a_landing(node):
+    set_pose(node, 5.0)
+    assert not node._pad_below()
+
+
+def test_the_forward_camera_is_ignored(node):
+    """This mission has no phase that flies to a distant pad, so a forward-cam
+    sighting must not reach the landing trigger at all."""
+    set_pose(node, 5.0)
+    det = PadDetection()
+    det.camera = "forward"
+    det.confidence = 0.99
+    node._cb_detection(det)
+    assert node._last_down is None
+    assert not node._pad_below()
+
+
+# ── Taking off again ─────────────────────────────────────────────────────────
+
+def test_the_pad_just_left_does_not_trigger_another_landing(node):
+    """Without the ignore window the drone lands on the pad under it, takes off,
+    sees it again, and never advances."""
+    node.leg_start_x = 5.0
+    set_pose(node, 5.2)
+    see_pad(node, confidence=0.9)
+    assert not node._pad_below()
+
+
+def test_a_pad_past_the_ignore_window_does_trigger(node):
+    node.leg_start_x = 5.0
+    set_pose(node, 8.5)                 # 3.5 m > rearm_distance_m
+    see_pad(node, confidence=0.9)
+    assert node._pad_below()
+
+
+def test_the_ignore_window_is_measured_from_the_last_takeoff(node):
+    """It resets each leg — it is 'since takeoff', not 'since home'."""
+    node.leg_start_x = 0.0
+    set_pose(node, 4.0)
+    see_pad(node, confidence=0.9)
+    assert node._pad_below()            # 4 m into the first leg: armed
+
+    node.leg_start_x = 4.0              # landed here, took off again
+    assert not node._pad_below()        # same spot, now inside the window
+
+
+# ── Recording the landing ────────────────────────────────────────────────────
+
+def make_pad(pad_id, x, y):
     pad = Pad()
     pad.id = pad_id
     pad.position.x = float(x)
     pad.position.y = float(y)
-    pad.observations = observations
-    pad.visited = visited
-    pad.confidence = confidence
     return pad
 
 
@@ -123,248 +217,37 @@ def set_map(node, *pads):
     node.pad_map = msg
 
 
-def test_nearest_confirmed_pad_is_chosen(node):
-    set_map(node, make_pad(0, 10.0, 0.0), make_pad(1, 2.0, 0.0))
-    assert node._next_target().id == 1
+def test_the_pad_underneath_is_the_one_marked_visited(node):
+    set_pose(node, 8.0, y=0.1, z=0.12)
+    set_map(node, make_pad(0, 0.0, 0.0), make_pad(7, 8.1, 0.0))
+    assert node._pad_id_below() == 7
 
 
-def test_visited_pads_are_never_targeted_again(node):
-    """The flag that turns 'land' into 'land, then keep going'."""
-    set_map(node, make_pad(0, 2.0, 0.0, visited=True), make_pad(1, 9.0, 0.0))
-    assert node._next_target().id == 1
+def test_a_landing_nowhere_near_a_mapped_pad_marks_nothing(node):
+    """The map is optional to this mission — landing off-map must not crash it,
+    it just goes unrecorded."""
+    set_pose(node, 40.0, z=0.12)
+    set_map(node, make_pad(0, 0.0, 0.0))
+    assert node._pad_id_below() is None
 
 
-def test_unconfirmed_pads_are_not_targeted(node):
-    """One sighting is noise. Flying to it would waste the attempt window."""
-    set_map(node, make_pad(0, 2.0, 0.0, observations=1))
-    assert node._next_target() is None
+def test_an_empty_map_marks_nothing(node):
+    set_pose(node, 8.0, z=0.12)
+    assert node._pad_id_below() is None
 
 
-def test_blacklisted_pads_are_skipped(node):
-    """A candidate the down camera refused to confirm must not be retried
-    forever — otherwise a blue tarp deadlocks the mission."""
-    set_map(node, make_pad(0, 2.0, 0.0), make_pad(1, 9.0, 0.0))
-    node.blacklist.add(0)
-    assert node._next_target().id == 1
+# ── Holding still until the FCU is ready ─────────────────────────────────────
 
-
-def test_all_pads_done_means_no_target(node):
-    set_map(node, make_pad(0, 2.0, 0.0, visited=True),
-            make_pad(1, 9.0, 0.0, visited=True))
-    assert node._next_target() is None
-
-
-def test_empty_map_means_no_target(node):
-    set_map(node)
-    assert node._next_target() is None
-    node.pad_map = None
-    assert node._next_target() is None
-
-
-# ── Down-camera confirmation gate ────────────────────────────────────────────
-
-def _down_look(node, x, y, confidence=0.9, age_s=0.0):
-    det = PadDetection()
-    det.camera = "down"
-    det.position_valid = True
-    det.confidence = confidence
-    det.position.x = float(x)
-    det.position.y = float(y)
-    node._last_down = det
-    node._last_down_t = node._now() - age_s
-
-
-def test_fresh_confident_look_confirms(node):
-    node.target_xy = (4.0, -2.0)
-    _down_look(node, 4.05, -1.95)
-    assert node._down_confirms()
-
-
-def test_stale_look_does_not_confirm(node):
-    """Descending on a detection from five seconds ago is descending blind."""
-    node.target_xy = (4.0, -2.0)
-    _down_look(node, 4.0, -2.0, age_s=5.0)
-    assert not node._down_confirms()
-
-
-def test_low_confidence_look_does_not_confirm(node):
-    """0.7 is what an unresolved blob scores. commit_confidence exists so that
-    'probably a pad, seen from far away' never becomes a landing."""
-    node.target_xy = (4.0, -2.0)
-    _down_look(node, 4.0, -2.0, confidence=0.70)
-    assert not node._down_confirms()
-
-
-def test_look_at_a_different_pad_does_not_confirm(node):
-    """Two bases in the arena: seeing the OTHER one must not green-light a
-    descent onto this one's coordinates."""
-    node.target_xy = (4.0, -2.0)
-    _down_look(node, 9.0, -2.0)
-    assert not node._down_confirms()
-
-
-def test_no_look_at_all_does_not_confirm(node):
-    node.target_xy = (4.0, -2.0)
-    node._last_down = None
-    assert not node._down_confirms()
-
-
-# ── Travelling to a candidate vs. hovering over it ───────────────────────────
-
-def _enter_inspect(node, pad_x, pad_y, timeout=5.0, travel=60.0):
-    node.inspect_timeout = timeout
-    node.travel_timeout = travel
-    node.target_id = 0
-    node.target_xy = (pad_x, pad_y)
-    node.target_height = 0.0
-    set_map(node, make_pad(0, pad_x, pad_y))
-    node._enter(PadMissionNode.INSPECT)
-
-
-def test_a_distant_candidate_is_not_blacklisted_while_still_flying_to_it(node):
-    """The trap these are two separate clocks for.
-
-    inspect_timeout is patience for 'hovering over it and the down camera still
-    will not confirm'. These are wall-clock budgets and BiguaSim runs well below
-    real time, so a flight across the arena would blow a merged budget and
-    blacklist a perfectly good pad before ever looking at it.
-    """
-    _enter_inspect(node, 30.0, 0.0, timeout=0.0)   # drone is at the origin
-    for _ in range(30):
-        node._tick()
-    assert node.state == PadMissionNode.INSPECT
-    assert 0 not in node.blacklist
-
-
-def test_a_candidate_that_will_not_confirm_from_above_is_blacklisted(node):
-    """Arrived, hovering, no down-camera confirmation: this is the blue tarp."""
-    _enter_inspect(node, 0.0, 0.0, timeout=0.0)    # drone is already on top
-    node._tick()
-    assert node.state == PadMissionNode.SEARCH
-    assert 0 in node.blacklist
-
-
-def test_an_unreachable_candidate_eventually_gives_up(node):
-    """If the vehicle never gets there at all, the mission must still move on."""
-    _enter_inspect(node, 30.0, 0.0, travel=0.0)
-    node._tick()
-    assert node.state == PadMissionNode.SEARCH
-    assert 0 in node.blacklist
-
-
-def test_arrival_does_not_leak_between_candidates(node):
-    """Time spent over pad A must not count against pad B the instant it is
-    chosen — that would blacklist the second pad on sight."""
-    _enter_inspect(node, 0.0, 0.0, timeout=100.0)
-    node._tick()
-    assert node._arrived_since is not None
-    node._enter(PadMissionNode.SEARCH)
-    assert node._arrived_since is None
-
-
-# ── Relaunch after a landing ─────────────────────────────────────────────────
-
-def _set_fcu(node, mode, armed, z=0.0):
-    node.mav_state.connected = True
-    node.mav_state.mode = mode
-    node.mav_state.armed = armed
-    node.pose.pose.position.z = float(z)
-
-
-def test_relaunch_does_not_try_to_take_off_while_still_in_land(node):
-    """The trap on the way back up.
-
-    ArduCopter auto-disarms only after DISARM_DELAY (10 s by default) and the
-    dwell on the pad is shorter, so after a landing the vehicle is usually still
-    ARMED and still in LAND. Treating 'armed' as ready-to-fly would send a
-    takeoff in LAND mode, which ArduPilot refuses — forever.
-    """
-    node.state = PadMissionNode.ARMING
-    _set_fcu(node, mode="LAND", armed=True)
-    node._tick()
-    assert node.state == PadMissionNode.ARMING, "left ARMING while still in LAND"
-
-
-def test_relaunch_proceeds_once_guided_is_confirmed(node):
-    """Still armed from the landing, now in GUIDED: skip arming, go take off."""
-    node.state = PadMissionNode.ARMING
-    _set_fcu(node, mode="GUIDED", armed=True)
-    node._tick()
-    assert node.state == PadMissionNode.TAKEOFF
-
-
-def test_cold_start_waits_for_guided_before_arming(node):
-    node.state = PadMissionNode.ARMING
-    _set_fcu(node, mode="STABILIZE", armed=False)
-    node._tick()
-    assert node.state == PadMissionNode.ARMING
-
-
-# ── The landing quota ────────────────────────────────────────────────────────
-
-def test_max_pads_stops_the_search_even_with_a_pad_in_view(node):
-    """Once the quota is met, a pad still sitting in the map must not pull the
-    drone back out — the quota is what the operator asked for."""
-    node.max_pads = 1
-    node.landed_count = 1
-    node.home = (0.0, 0.0)
-    node.route = [(3.0, 0.0)]
-    node.state = PadMissionNode.SEARCH
-    set_map(node, make_pad(0, 5.0, 0.0))
-    node._tick()
-    assert node.state == PadMissionNode.RETURN_HOME
-
-
-def test_max_pads_stops_a_divert_on_the_way_home(node):
-    # Home is far off so the leg is still in progress; without the quota the
-    # pad at 5 m would be a divert.
-    node.max_pads = 1
-    node.landed_count = 1
-    node.home = (20.0, 0.0)
-    node.state = PadMissionNode.RETURN_HOME
-    set_map(node, make_pad(0, 5.0, 0.0))
-    node._tick()
-    assert node.state == PadMissionNode.RETURN_HOME
-
-
-def test_a_late_pad_is_still_taken_on_the_way_home_without_a_quota(node):
-    """The other side of it: with no quota, a pad found late is worth the detour."""
-    node.max_pads = 0
-    node.landed_count = 1
-    node.home = (20.0, 0.0)
-    node.state = PadMissionNode.RETURN_HOME
-    set_map(node, make_pad(0, 5.0, 0.0))
-    node._tick()
-    assert node.state == PadMissionNode.INSPECT
-
-
-def test_zero_max_pads_means_no_quota(node):
-    """0 is 'keep going until the pattern is exhausted', not 'stop immediately'."""
-    node.max_pads = 0
-    node.landed_count = 3
-    node.home = (0.0, 0.0)
-    node.route = [(3.0, 0.0)]
-    node.route_idx = 0
-    node.state = PadMissionNode.SEARCH
-    set_map(node, make_pad(0, 5.0, 0.0))
-    node._tick()
-    assert node.state == PadMissionNode.INSPECT
-
-
-# ── Startup behaviour ────────────────────────────────────────────────────────
-
-def test_mission_holds_until_the_fcu_is_ready(node):
-    """No MAVROS link means no arming attempt, and certainly no takeoff."""
+def test_the_mission_holds_until_the_fcu_is_ready(node):
+    node.state = node.WAIT_FCU
     node.auto_start = True
-    node.pose = None
-    for _ in range(20):
-        node._tick()
-    assert node.state == PadMissionNode.WAIT_FCU
-    assert not node.stream_setpoint
+    node.mav_state.connected = False
+    node._do_wait_fcu()
+    assert node.state == node.WAIT_FCU
 
 
 def test_setpoints_are_not_streamed_before_takeoff(node):
-    """A setpoint stream while landed is how a vehicle gets pushed around on the
-    ground. It starts only once the drone is up."""
+    node.state = node.WAIT_FCU
+    node.stream_setpoint = False
+    node._tick()
     assert not node.stream_setpoint
-    node._stream()      # must be a no-op, not a crash

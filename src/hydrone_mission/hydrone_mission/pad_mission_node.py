@@ -1,54 +1,40 @@
 #!/usr/bin/env python3
 """
-pad_mission_node — search the arena, land on every landing pad, take off again.
+pad_mission_node — the simplest mission that flies: go forward, land on what
+the down camera sees, take off, repeat.
 
-The behaviour, end to end:
-
-    take off  ->  fly a bounded search pattern  ->  spot a pad ahead on the ZED
-              ->  fly over it and confirm it on the down camera
-              ->  align, descend, LAND
-              ->  sit on it, mark it visited
-              ->  take off again and resume the search where it left off
-              ->  ... until nothing unvisited is left, then come home and land.
+    take off  ->  fly straight ahead (+X)
+              ->  down camera sees a pad  ->  stop and LAND on the spot
+              ->  mark it visited in the map
+              ->  take off again and carry on forward
+              ->  ... forever, or until forward_limit_m is reached.
 
 State machine
 -------------
-    WAIT_FCU -> ARMING -> TAKEOFF -> SEARCH -+-> INSPECT -> ALIGN -> DESCEND
-                                    ^        |                        |
-                                    |        |                     LAND -> DWELL
-                                    +--------+------------------------+
-                                    |
-                                    +-> RETURN_HOME -> FINAL_LAND -> DONE
+    WAIT_FCU -> ARMING -> TAKEOFF -> FORWARD -> LAND -> DWELL -+-> DONE
+                  ^                                            |
+                  +--------------------------------------------+
 
-Every transition is driven by a 10 Hz tick, every service call is asynchronous
-with its own deadline, and nothing ever blocks the executor — a blocking call
-inside a timer callback would stall the setpoint stream and hand the vehicle
-back to the FCU's failsafe.
+There is deliberately no search pattern, no forward-camera lead, no align or
+descend phase, and no return-home leg. This is the skeleton: get one full
+takeoff/detect/land/takeoff cycle working in the sim first, then add robustness
+back one piece at a time. Anything more here is another thing that can break
+while you are trying to find out why the drone will not fly.
 
-Why the search is bounded
--------------------------
-The world outside the arena is an empty plane. A drone told to "fly forward
-until you see something" flies forward forever. The search is therefore an
-expanding square spiral, centred on the takeoff point and clipped to
-`search_radius`, whose FIRST leg runs straight ahead — so the simple case ("take
-off, go forward, the pad is there") is the first thing that happens, and the
-failure case ("there is nothing out there") terminates instead of running until
-the battery does.
+Everything is driven by a 10 Hz tick and every service call is asynchronous with
+its own deadline — a blocking call inside a timer callback would stall the
+setpoint stream and hand the vehicle back to the FCU's failsafe.
 
-Why a pad is confirmed twice
-----------------------------
-The forward camera finds pads at range, where the detector cannot resolve the
-ring and the cross and so caps its confidence at 0.75 (see pad_detector.py).
-That is enough to be worth flying to, not enough to land on. The drone flies
-over the candidate and re-checks it with the down camera from a few metres, where
-the structure IS resolvable and confidence clears `commit_confidence`. A
-candidate that fails to confirm is blacklisted and the search resumes — that is
-how a blue tarp costs twenty seconds instead of the mission.
+Forward is world +X, not the vehicle's heading. The setpoints published here
+carry yaw = 0, so the FCU holds the nose along +X anyway; making "forward" mean
+anything else would put the flight path and the nose in disagreement. Spawn the
+vehicle at x = 0 and it flies out along the arena's +X axis.
 
 Interfaces
 ----------
-in:   /hydrone/pads/map           hydrone_msgs/PadMap        (what to fly to)
-      /hydrone/pads/detections    hydrone_msgs/PadDetection  (fresh down-cam look)
+in:   /hydrone/pads/detections    hydrone_msgs/PadDetection  (down camera only)
+      /hydrone/pads/map           hydrone_msgs/PadMap        (only to name the
+                                                              pad we landed on)
       /mavros/state, /mavros/local_position/pose
 out:  /mavros/setpoint_position/local
       /hydrone/mission/status     std_msgs/String
@@ -72,44 +58,6 @@ from mavros_msgs.srv import CommandBool, CommandTOL, SetMode
 
 from hydrone_msgs.msg import PadDetection, PadMap
 from hydrone_msgs.srv import MarkPadVisited
-
-
-# ── Search pattern ───────────────────────────────────────────────────────────
-
-def spiral_waypoints(step: float, radius: float,
-                     heading: float = 0.0) -> list[tuple[float, float]]:
-    """Expanding square spiral about the origin, clipped to a square of `radius`.
-
-    Leg lengths go 1,1,2,2,3,3,... times `step`, turning left each time — the
-    classic lawn-search pattern, which covers the area near the start first
-    (where the pad probably is) without ever revisiting a leg.
-
-    The first leg runs along `heading` (radians, 0 = +X), so with the drone's
-    takeoff heading passed in, "take off and go forward" is literally step one.
-    """
-    if step <= 0.0 or radius <= 0.0:
-        return []
-
-    ch, sh = math.cos(heading), math.sin(heading)
-    # Unit legs in the rotated frame: forward, left, back, right.
-    dirs = [(ch, sh), (-sh, ch), (-ch, -sh), (sh, -ch)]
-
-    points: list[tuple[float, float]] = []
-    x = y = 0.0
-    leg = 1
-    d = 0
-    # Once a leg is longer than the diameter, every further waypoint is outside.
-    while leg * step <= 2.0 * radius + step:
-        for _ in range(2):
-            dx, dy = dirs[d % 4]
-            for _ in range(leg):
-                x += dx * step
-                y += dy * step
-                if math.hypot(x, y) <= radius:
-                    points.append((x, y))
-            d += 1
-        leg += 1
-    return points
 
 
 # ── Async service helper ─────────────────────────────────────────────────────
@@ -152,14 +100,9 @@ class PadMissionNode(Node):
     WAIT_FCU = "WAIT_FCU"
     ARMING = "ARMING"
     TAKEOFF = "TAKEOFF"
-    SEARCH = "SEARCH"
-    INSPECT = "INSPECT"
-    ALIGN = "ALIGN"
-    DESCEND = "DESCEND"
+    FORWARD = "FORWARD"
     LAND = "LAND"
     DWELL = "DWELL"
-    RETURN_HOME = "RETURN_HOME"
-    FINAL_LAND = "FINAL_LAND"
     DONE = "DONE"
     ABORTED = "ABORTED"
 
@@ -169,41 +112,33 @@ class PadMissionNode(Node):
         super().__init__("pad_mission", **kwargs)
 
         # ── Parameters ──────────────────────────────────────────────────────
-        # Altitudes are metres above the takeoff plane, which is what the FCU's
-        # local frame measures and what the pad map stores.
-        # cruise_alt MUST clear the tallest thing in the arena (the 1.5 m
-        # structure) — there is no forward obstacle avoidance in this node.
+        # Metres above the takeoff plane, which is what the FCU's local frame
+        # measures. Must clear the tallest thing in the arena — there is no
+        # obstacle avoidance here.
         self.declare_parameter("cruise_alt", 2.5)
-        self.declare_parameter("align_alt", 2.0)
-        # Height above the PAD's own top surface at which LAND is handed to the
-        # FCU. Its rangefinder flare takes it from there.
-        self.declare_parameter("land_trigger_agl", 0.8)
-        self.declare_parameter("descend_step", 0.25)
 
-        self.declare_parameter("search_radius", 12.0)
-        self.declare_parameter("search_step", 3.0)
-        self.declare_parameter("waypoint_tol", 0.6)
-        self.declare_parameter("align_tol", 0.25)
-        self.declare_parameter("align_hold_s", 2.0)
+        # How far ahead the position setpoint is placed. Each step is a jump the
+        # FCU's position controller answers with acceleration, so a big step is
+        # an aggressive demand; keep it small.
+        self.declare_parameter("forward_step", 1.0)
+        self.declare_parameter("waypoint_tol", 0.5)
+        # 0 = fly forward forever (until aborted). Anything else ends the run
+        # with a landing once that many metres have been covered.
+        self.declare_parameter("forward_limit_m", 0.0)
 
-        # Below this a detection is a lead, not a landing site. 0.75 is the
-        # ceiling for an unresolved pad, so >0.75 means the ring AND the cross
-        # were actually verified — see pad_detector.py.
-        self.declare_parameter("commit_confidence", 0.80)
-        self.declare_parameter("min_observations", 3)
-        self.declare_parameter("fresh_detection_s", 2.0)
-        self.declare_parameter("inspect_timeout_s", 25.0)
-        # Separate budget for GETTING to a candidate, which under a
-        # slow-running sim dominates. See _do_inspect.
-        self.declare_parameter("travel_timeout_s", 120.0)
+        # A detection counts if it is this confident and this recent.
+        self.declare_parameter("min_confidence", 0.60)
+        self.declare_parameter("fresh_detection_s", 1.0)
+        # After taking off from a pad, that same pad is still directly below.
+        # Ignore detections until this much ground has been covered, or the
+        # mission lands on the pad it just left, forever.
+        self.declare_parameter("rearm_distance_m", 3.0)
 
         self.declare_parameter("dwell_s", 4.0)
         self.declare_parameter("land_timeout_s", 60.0)
         self.declare_parameter("land_settle_s", 2.0)
         self.declare_parameter("takeoff_timeout_s", 45.0)
         self.declare_parameter("service_timeout_s", 30.0)
-        self.declare_parameter("mission_timeout_s", 900.0)
-        self.declare_parameter("max_pads", 0)     # 0 = no limit
         self.declare_parameter("setpoint_hz", 10.0)
         self.declare_parameter("auto_start", True)
         # Gap between repeats of a mode/arm/takeoff command. MAVROS acking a
@@ -213,26 +148,17 @@ class PadMissionNode(Node):
 
         p = lambda n: self.get_parameter(n).value
         self.cruise_alt = float(p("cruise_alt"))
-        self.align_alt = float(p("align_alt"))
-        self.land_trigger_agl = float(p("land_trigger_agl"))
-        self.descend_step = float(p("descend_step"))
-        self.search_radius = float(p("search_radius"))
-        self.search_step = float(p("search_step"))
+        self.forward_step = float(p("forward_step"))
         self.wp_tol = float(p("waypoint_tol"))
-        self.align_tol = float(p("align_tol"))
-        self.align_hold = float(p("align_hold_s"))
-        self.commit_conf = float(p("commit_confidence"))
-        self.min_obs = int(p("min_observations"))
+        self.forward_limit = float(p("forward_limit_m"))
+        self.min_conf = float(p("min_confidence"))
         self.fresh_s = float(p("fresh_detection_s"))
-        self.inspect_timeout = float(p("inspect_timeout_s"))
-        self.travel_timeout = float(p("travel_timeout_s"))
+        self.rearm_distance = float(p("rearm_distance_m"))
         self.dwell_s = float(p("dwell_s"))
         self.land_timeout = float(p("land_timeout_s"))
         self.land_settle = float(p("land_settle_s"))
         self.takeoff_timeout = float(p("takeoff_timeout_s"))
         self.svc_timeout = float(p("service_timeout_s"))
-        self.mission_timeout = float(p("mission_timeout_s"))
-        self.max_pads = int(p("max_pads"))
         self.auto_start = bool(p("auto_start"))
         self.retry_period = float(p("retry_period_s"))
 
@@ -244,21 +170,14 @@ class PadMissionNode(Node):
         self.pad_map: PadMap | None = None
 
         self.home: tuple[float, float] | None = None
-        self.home_yaw = 0.0
-        self.route: list[tuple[float, float]] = []
-        self.route_idx = 0
-
-        self.target_id: int | None = None
-        self.target_xy: tuple[float, float] = (0.0, 0.0)
-        self.target_height = 0.0
-        self.blacklist: set[int] = set()
+        # Where the current forward leg started, so rearm_distance is measured
+        # from the pad we just left rather than from home.
+        self.leg_start_x = 0.0
+        self.target_x = 0.0
         self.landed_count = 0
 
         self.setpoint: list[float] = [0.0, 0.0, 0.0]
         self.stream_setpoint = False
-        self._descend_target_z = 0.0
-        self._align_ok_since: float | None = None
-        self._arrived_since: float | None = None
         self._settle_since: float | None = None
         self._call: _Call | None = None
         self._pending: str | None = None    # what _call is for
@@ -269,7 +188,6 @@ class PadMissionNode(Node):
         # Last refusal ArduPilot gave us, and when. See _cb_statustext.
         self._fcu_gripe = ""
         self._fcu_gripe_t = 0.0
-        self._mission_start: float | None = None
 
         # ── I/O ─────────────────────────────────────────────────────────────
         sensor_qos = QoSProfile(
@@ -294,8 +212,12 @@ class PadMissionNode(Node):
         # own logger, which means the reason and the failure end up in two
         # different places and correlating them means diffing timestamps across
         # log streams. Mirror it here so the mission's own log says why.
+        # MAVROS publishes statustext/recv BEST_EFFORT; a plain (RELIABLE)
+        # subscription is QoS-incompatible and receives NOTHING — measured
+        # 2026-08-18, every arm failure said "no reason given by the FCU" while
+        # MAVROS was logging the real reason ("Arm: Accels inconsistent").
         self.create_subscription(StatusText, "/mavros/statustext/recv",
-                                 self._cb_statustext, 10)
+                                 self._cb_statustext, sensor_qos)
 
         self.cli_mode = self.create_client(SetMode, "/mavros/set_mode")
         self.cli_arm = self.create_client(CommandBool, "/mavros/cmd/arming")
@@ -311,9 +233,12 @@ class PadMissionNode(Node):
         self.create_timer(0.1, self._tick)
         self.create_timer(1.0, self._publish_status)
 
+        limit = (f"{self.forward_limit:.0f} m of it"
+                 if self.forward_limit > 0.0 else "no distance limit")
         self.get_logger().info(
-            f"pad_mission ready — search {self.search_radius:.0f} m radius in "
-            f"{self.search_step:.0f} m legs at {self.cruise_alt:.1f} m. "
+            f"pad_mission ready — forward along +X at {self.cruise_alt:.1f} m "
+            f"in {self.forward_step:.1f} m steps, {limit}, landing on whatever "
+            "the down camera sees. "
             f"{'Auto-starting.' if self.auto_start else 'Call /hydrone/mission/start.'}")
 
     # ────────────────────────────────────────────────────────────────────────
@@ -330,9 +255,10 @@ class PadMissionNode(Node):
         self.pad_map = msg
 
     def _cb_detection(self, msg: PadDetection):
-        """Keep the freshest look from the DOWN camera — that is the one that
-        proves we are actually over the pad, not merely near its map entry."""
-        if msg.camera == "down" and msg.position_valid:
+        """Keep the freshest look from the DOWN camera. The forward camera is
+        ignored entirely: it sees pads at a range this mission has no phase to
+        fly to, so acting on it would only complicate the path."""
+        if msg.camera == "down":
             self._last_down = msg
             self._last_down_t = self._now()
 
@@ -374,12 +300,8 @@ class PadMissionNode(Node):
 
     def _reset(self):
         self.state = self.WAIT_FCU
-        self.route, self.route_idx = [], 0
         self.home = None
-        self.target_id = None
-        self.blacklist.clear()
         self.landed_count = 0
-        self._mission_start = None
 
     # ────────────────────────────────────────────────────────────────────────
     # Setpoint stream
@@ -414,28 +336,13 @@ class PadMissionNode(Node):
     def _tick(self):
         if self.state in (self.DONE, self.ABORTED):
             return
-        if self._mission_start is not None:
-            elapsed = self._now() - self._mission_start
-            if elapsed > self.mission_timeout:
-                self.get_logger().warn(
-                    f"mission timeout after {elapsed:.0f} s — landing in place.")
-                self.stream_setpoint = False
-                self._enter(self.ABORTED)
-                self._set_mode("LAND")
-                return
-
         handler = {
             self.WAIT_FCU: self._do_wait_fcu,
             self.ARMING: self._do_arming,
             self.TAKEOFF: self._do_takeoff,
-            self.SEARCH: self._do_search,
-            self.INSPECT: self._do_inspect,
-            self.ALIGN: self._do_align,
-            self.DESCEND: self._do_descend,
+            self.FORWARD: self._do_forward,
             self.LAND: self._do_land,
             self.DWELL: self._do_dwell,
-            self.RETURN_HOME: self._do_return_home,
-            self.FINAL_LAND: self._do_final_land,
         }[self.state]
         handler()
 
@@ -447,22 +354,16 @@ class PadMissionNode(Node):
         if not (self.mav_state.connected and self.pose is not None):
             self._throttle("waiting for MAVROS link and a local position...")
             return
-        if not self.cli_arm.service_is_ready() or not self.cli_mode.service_is_ready():
+        if not (self.cli_arm.service_is_ready()
+                and self.cli_mode.service_is_ready()):
             self._throttle("waiting for MAVROS command services...")
             return
 
-        # Home is wherever we are standing. Everything downstream — the search
-        # spiral, the return leg — is relative to it.
+        # Home is wherever we are standing; the forward run is measured from it.
         self.home = (self.pose.pose.position.x, self.pose.pose.position.y)
-        self.home_yaw = self._yaw()
-        self.route = spiral_waypoints(self.search_step, self.search_radius,
-                                      self.home_yaw)
-        self.route_idx = 0
-        self._mission_start = self._now()
         self.get_logger().info(
-            f"home = ({self.home[0]:.1f}, {self.home[1]:.1f}), heading "
-            f"{math.degrees(self.home_yaw):.0f} deg. "
-            f"{len(self.route)} search waypoints planned.")
+            f"home = ({self.home[0]:.1f}, {self.home[1]:.1f}) — flying +X "
+            "from here.")
         self._enter(self.ARMING)
 
     # ── ARMING ───────────────────────────────────────────────────────────────
@@ -514,12 +415,18 @@ class PadMissionNode(Node):
         needs an explicit takeoff — so this is a command, not a setpoint, and the
         setpoint stream only starts once we are up.
         """
-        if self.pose is not None and self.pose.pose.position.z >= self.cruise_alt - 0.25:
+        if (self.pose is not None
+                and self.pose.pose.position.z >= self.cruise_alt - 0.25):
+            x = self.pose.pose.position.x
             self.get_logger().info(
-                f"airborne at {self.pose.pose.position.z:.2f} m — searching.")
-            self._goto(self.pose.pose.position.x, self.pose.pose.position.y,
-                       self.cruise_alt)
-            self._enter(self.SEARCH)
+                f"airborne at {self.pose.pose.position.z:.2f} m — "
+                "heading forward.")
+            # The pad we just left is at this x. Both the ignore window and the
+            # first waypoint are measured from here.
+            self.leg_start_x = x
+            self.target_x = x + self.forward_step
+            self._goto(self.target_x, self.home[1], self.cruise_alt)
+            self._enter(self.FORWARD)
             return
 
         if self._poll_call() == "pending":
@@ -543,200 +450,64 @@ class PadMissionNode(Node):
             req.altitude = float(self.cruise_alt)
             self._start_call("takeoff", self.cli_takeoff, req)
 
-    # ── SEARCH ───────────────────────────────────────────────────────────────
+    # ── FORWARD ──────────────────────────────────────────────────────────────
 
-    def _do_search(self):
-        """Fly the spiral, breaking off the moment the map offers a target."""
-        # Checked before target selection: once the landing quota is met, a pad
-        # appearing in the map must not pull the drone back out again.
-        if self.max_pads and self.landed_count >= self.max_pads:
-            self.get_logger().info(
-                f"{self.landed_count} pads visited (max_pads) — heading home.")
-            self._enter(self.RETURN_HOME)
-            return
+    def _do_forward(self):
+        """Walk the setpoint forward along +X, landing the moment a pad shows up.
 
-        target = self._next_target()
-        if target is not None:
-            self.target_id = target.id
-            self.target_xy = (target.position.x, target.position.y)
-            self.target_height = target.height
-            self.get_logger().info(
-                f"pad {target.id} at ({target.position.x:.2f}, "
-                f"{target.position.y:.2f}) looks like a landing site "
-                f"(conf {target.confidence:.2f}, {target.observations} looks) "
-                "— going to check it.")
-            self._enter(self.INSPECT)
-            return
-
-        if self.route_idx >= len(self.route):
-            self.get_logger().info(
-                "search pattern exhausted and no unvisited pad left — "
-                f"{self.landed_count} landing(s) made. Heading home.")
-            self._enter(self.RETURN_HOME)
-            return
-
-        wx, wy = self.route[self.route_idx]
-        gx, gy = self.home[0] + wx, self.home[1] + wy
-        self._goto(gx, gy, self.cruise_alt)
-
-        if self._dist_xy(gx, gy) < self.wp_tol:
-            self.route_idx += 1
-            self.get_logger().info(
-                f"search waypoint {self.route_idx}/{len(self.route)} reached.")
-
-    def _next_target(self):
-        """The nearest confirmed, unvisited, un-blacklisted pad — or None."""
-        if self.pad_map is None or self.pose is None:
-            return None
-        best, best_d = None, float("inf")
-        for pad in self.pad_map.pads:
-            if pad.visited or pad.id in self.blacklist:
-                continue
-            if pad.observations < self.min_obs:
-                continue
-            d = self._dist_xy(pad.position.x, pad.position.y)
-            if d < best_d:
-                best, best_d = pad, d
-        return best
-
-    # ── INSPECT ──────────────────────────────────────────────────────────────
-
-    def _do_inspect(self):
-        """Fly over the candidate and wait for the down camera to vouch for it.
-
-        The two clocks here are deliberately separate. `inspect_timeout` is the
-        patience for "I am hovering over it and the down camera still will not
-        confirm" — the actual verdict on the candidate. Flying there is a
-        different thing entirely, and gets `travel_timeout`.
-
-        Merging them would blacklist good pads: these are wall-clock budgets and
-        BiguaSim runs well below real time, so the flight across the arena eats
-        far more of the budget than it appears to (same trap as
-        config/timeouts.yaml documents for the MAVROS timeouts).
+        The setpoint is placed one `forward_step` ahead and only advanced once
+        the vehicle has actually got there — so the position error the FCU sees
+        never exceeds one step, and the acceleration it demands stays small.
         """
-        self._refresh_target()
-        self._goto(self.target_xy[0], self.target_xy[1], self.cruise_alt)
-
-        if self._down_confirms():
-            self.get_logger().info(
-                f"pad {self.target_id} confirmed from below "
-                f"(conf {self._last_down.confidence:.2f}) — aligning.")
-            self._align_ok_since = None
-            self._enter(self.ALIGN)
+        if self.pose is None:
             return
 
-        if self._dist_xy(*self.target_xy) > 2.0 * self.wp_tol:
-            self._arrived_since = None          # still on the way
-        elif self._arrived_since is None:
-            self._arrived_since = self._now()
-
-        stalled = (self._arrived_since is not None
-                   and self._now() - self._arrived_since > self.inspect_timeout)
-        unreachable = self._since_entered() > self.travel_timeout
-
-        if stalled or unreachable:
-            self.get_logger().warn(
-                f"pad {self.target_id} "
-                + ("never confirmed from below while hovering over it"
-                   if stalled else "could not be reached")
-                + " — blacklisting it and resuming the search. "
-                  "(A blue object that is not a pad ends up here.)")
-            self.blacklist.add(self.target_id)
-            self.target_id = None
-            self._enter(self.SEARCH)
-
-    def _down_confirms(self) -> bool:
-        """Is there a fresh, confident down-camera look at THIS pad?"""
-        if self._last_down is None:
-            return False
-        if self._now() - self._last_down_t > self.fresh_s:
-            return False
-        if self._last_down.confidence < self.commit_conf:
-            return False
-        return math.hypot(self._last_down.position.x - self.target_xy[0],
-                          self._last_down.position.y - self.target_xy[1]) < 1.5
-
-    # ── ALIGN ────────────────────────────────────────────────────────────────
-
-    def _do_align(self):
-        """Hold station over the pad until the error is small AND stays small.
-
-        The hold matters: a single frame inside tolerance can be a swing through
-        the target. Descending on that would drift off the pad on the way down.
-        """
-        self._refresh_target()
-        self._goto(self.target_xy[0], self.target_xy[1], self.align_alt)
-
-        err = self._dist_xy(*self.target_xy)
-        near_alt = (self.pose is not None
-                    and abs(self.pose.pose.position.z - self.align_alt) < 0.4)
-
-        if err < self.align_tol and near_alt:
-            if self._align_ok_since is None:
-                self._align_ok_since = self._now()
-            elif self._now() - self._align_ok_since >= self.align_hold:
-                self._descend_target_z = self.align_alt
-                self.get_logger().info(
-                    f"centred over pad {self.target_id} "
-                    f"({err * 100:.0f} cm) — descending.")
-                self._enter(self.DESCEND)
-        else:
-            self._align_ok_since = None
-
-        if self._since_entered() > self.inspect_timeout:
-            self.get_logger().warn(
-                f"could not settle over pad {self.target_id} "
-                f"(error {err:.2f} m) — resuming the search.")
-            self.blacklist.add(self.target_id)
-            self.target_id = None
-            self._enter(self.SEARCH)
-
-    # ── DESCEND ──────────────────────────────────────────────────────────────
-
-    def _do_descend(self):
-        """Walk the setpoint down, re-centring on every fresh down-cam look.
-
-        A ramped setpoint rather than one big step: the FCU tracks a moving
-        target smoothly, and if the pad drifts out from under us the descent
-        stops with plenty of height in hand.
-        """
-        self._refresh_target()
-        floor = self.target_height + self.land_trigger_agl
-
-        if self.pose is not None:
-            # Only advance the ramp once the vehicle has caught up with it.
-            if self.pose.pose.position.z < self._descend_target_z + 0.2:
-                self._descend_target_z = max(
-                    floor, self._descend_target_z - self.descend_step)
-
-        self._goto(self.target_xy[0], self.target_xy[1], self._descend_target_z)
-
-        err = self._dist_xy(*self.target_xy)
-        if err > 3.0 * self.align_tol:
-            self.get_logger().warn(
-                f"drifted {err:.2f} m off pad {self.target_id} — climbing back "
-                "to re-align.")
-            self._align_ok_since = None
-            self._enter(self.ALIGN)
-            return
-
-        if (self.pose is not None
-                and self.pose.pose.position.z <= floor + 0.15
-                and self._descend_target_z <= floor + 1e-3):
+        if self._pad_below():
             self.get_logger().info(
-                f"handing the last {self.land_trigger_agl:.1f} m to the FCU: "
-                "LAND.")
+                f"pad below (conf {self._last_down.confidence:.2f}) after "
+                f"{self._flown():.1f} m — stopping and landing here.")
             self.stream_setpoint = False
             self._settle_since = None
             self._enter(self.LAND)
             self._set_mode("LAND")
+            return
+
+        if self.forward_limit > 0.0:
+            travelled = self.pose.pose.position.x - self.home[0]
+            if travelled >= self.forward_limit:
+                self.get_logger().info(
+                    f"{travelled:.1f} m covered (forward_limit_m) and "
+                    f"{self.landed_count} landing(s) made — landing to finish.")
+                self.stream_setpoint = False
+                self._enter(self.ABORTED)
+                self._set_mode("LAND")
+                return
+
+        self._goto(self.target_x, self.home[1], self.cruise_alt)
+        if self.pose.pose.position.x >= self.target_x - self.wp_tol:
+            self.target_x += self.forward_step
+            self._throttle(f"forward {self._flown():.1f} m on this leg.")
+
+    def _flown(self) -> float:
+        """Distance covered since the last takeoff."""
+        if self.pose is None:
+            return 0.0
+        return self.pose.pose.position.x - self.leg_start_x
+
+    def _pad_below(self) -> bool:
+        """Is the down camera looking at a pad we have not just taken off from?"""
+        if self._flown() < self.rearm_distance:
+            return False
+        if self._last_down is None:
+            return False
+        if self._now() - self._last_down_t > self.fresh_s:
+            return False
+        return self._last_down.confidence >= self.min_conf
 
     # ── LAND ─────────────────────────────────────────────────────────────────
 
     def _do_land(self):
         """Wait for touchdown. Two independent signals, whichever comes first."""
-        self._refresh_target()
-
         # Keep asking until /mavros/state agrees we are in LAND. An acked mode
         # command that ArduPilot then declined would otherwise leave us hovering
         # here until the timeout.
@@ -747,21 +518,19 @@ class PadMissionNode(Node):
             self._set_mode("LAND")
             return
 
+        # Landed = the FCU disarmed us, or we are sitting near the takeoff plane.
+        # A pad is low enough that its top surface is still well under 0.5 m.
         disarmed = not self.mav_state.armed
-        on_pad = False
-        if self.pose is not None:
-            on_pad = (self.pose.pose.position.z
-                      <= self.target_height + 0.25)
+        low = self.pose is not None and self.pose.pose.position.z <= 0.5
 
-        if disarmed or on_pad:
+        if disarmed or low:
             if self._settle_since is None:
                 self._settle_since = self._now()
             elif self._now() - self._settle_since >= self.land_settle:
-                z = self.pose.pose.position.z if self.pose else self.target_height
+                z = self.pose.pose.position.z if self.pose else 0.0
                 self.landed_count += 1
                 self.get_logger().info(
-                    f"LANDED on pad {self.target_id} "
-                    f"(#{self.landed_count}) — resting at z={z:.2f} m.")
+                    f"LANDED (#{self.landed_count}) — resting at z={z:.2f} m.")
                 self._mark_visited(z)
                 self._enter(self.DWELL)
         else:
@@ -769,28 +538,47 @@ class PadMissionNode(Node):
 
         if self._since_entered() > self.land_timeout:
             self.get_logger().warn(
-                f"no touchdown on pad {self.target_id} within "
-                f"{self.land_timeout:.0f} s — marking it visited anyway so the "
-                "mission moves on.")
-            self._mark_visited(None)
+                f"no touchdown within {self.land_timeout:.0f} s — carrying on "
+                "anyway so the mission does not stall here.")
             self._enter(self.DWELL)
 
-    def _mark_visited(self, height: float | None):
-        """Record the landing. The resting altitude IS the pad's top surface."""
-        req = MarkPadVisited.Request()
-        req.id = int(self.target_id if self.target_id is not None else 0)
-        req.height_valid = height is not None
-        req.height = float(height if height is not None else 0.0)
-        if self.cli_visited.service_is_ready():
-            self.cli_visited.call_async(req)
-        else:
+    def _mark_visited(self, height: float):
+        """Tell the pad map we landed, so it stops offering this pad.
+
+        The map is only read here, to put a name to the thing under us: whatever
+        pad entry is nearest is the one we are standing on. If the map has
+        nothing (it is optional to this mission), the landing simply goes
+        unrecorded — the forward run does not depend on it.
+        """
+        pad_id = self._pad_id_below()
+        if pad_id is None:
             self.get_logger().warn(
-                "/hydrone/pads/mark_visited unavailable — the pad map will not "
-                "know we landed, and the pad may be targeted again.")
-        # Local guard: even if the service call is lost, this run will not
-        # re-target the pad it is standing on.
-        if self.target_id is not None:
-            self.blacklist.add(self.target_id)
+                "landed, but no pad in /hydrone/pads/map is near enough to mark "
+                "visited — the map will not know about this landing.")
+            return
+        if not self.cli_visited.service_is_ready():
+            self.get_logger().warn(
+                "/hydrone/pads/mark_visited unavailable — the map will not know "
+                "about this landing.")
+            return
+        req = MarkPadVisited.Request()
+        req.id = int(pad_id)
+        req.height_valid = True
+        # The altitude we came to rest at IS the pad's top surface.
+        req.height = float(height)
+        self.cli_visited.call_async(req)
+        self.get_logger().info(f"pad {pad_id} marked visited.")
+
+    def _pad_id_below(self) -> int | None:
+        if self.pad_map is None or self.pose is None:
+            return None
+        best, best_d = None, 2.0     # nothing further than 2 m is "under us"
+        for pad in self.pad_map.pads:
+            d = math.hypot(self.pose.pose.position.x - pad.position.x,
+                           self.pose.pose.position.y - pad.position.y)
+            if d < best_d:
+                best, best_d = pad.id, d
+        return best
 
     # ── DWELL ────────────────────────────────────────────────────────────────
 
@@ -798,69 +586,13 @@ class PadMissionNode(Node):
         """Sit on the pad, then go again."""
         if self._since_entered() < self.dwell_s:
             return
-        self.target_id = None
         self._takeoff_tries = 0
-        self.get_logger().info("taking off again to continue the search.")
+        self.get_logger().info("taking off again to carry on forward.")
         self._enter(self.ARMING)
-
-    # ── RETURN_HOME / FINAL_LAND ─────────────────────────────────────────────
-
-    def _do_return_home(self):
-        # A pad discovered late is still worth taking, so keep looking on the
-        # way back — unless the landing quota is already met.
-        quota_met = bool(self.max_pads) and self.landed_count >= self.max_pads
-        target = None if quota_met else self._next_target()
-        if target is not None:
-            self.target_id = target.id
-            self.target_xy = (target.position.x, target.position.y)
-            self.target_height = target.height
-            self.get_logger().info(
-                f"pad {target.id} appeared on the way home — diverting.")
-            self._enter(self.INSPECT)
-            return
-
-        self._goto(self.home[0], self.home[1], self.cruise_alt)
-        if self._dist_xy(*self.home) < self.wp_tol:
-            self.get_logger().info("home reached — landing.")
-            self.stream_setpoint = False
-            self._enter(self.FINAL_LAND)
-            self._set_mode("LAND")
-
-    def _do_final_land(self):
-        landed = (not self.mav_state.armed
-                  or (self.pose is not None
-                      and self.pose.pose.position.z < 0.25))
-        if landed or self._since_entered() > self.land_timeout:
-            self.get_logger().info(
-                f"\n{'=' * 52}\n"
-                f"  MISSION COMPLETE\n"
-                f"  Pads landed on : {self.landed_count}\n"
-                f"  Pads in the map: "
-                f"{len(self.pad_map.pads) if self.pad_map else 0}\n"
-                f"  Rejected leads : {len(self.blacklist) - self.landed_count}\n"
-                f"  Elapsed        : "
-                f"{self._now() - (self._mission_start or self._now()):.0f} s\n"
-                f"{'=' * 52}")
-            self._enter(self.DONE)
 
     # ────────────────────────────────────────────────────────────────────────
     # Helpers
     # ────────────────────────────────────────────────────────────────────────
-
-    def _refresh_target(self):
-        """Re-read the target's fused position from the map.
-
-        The map keeps improving the estimate while we approach — especially once
-        the down camera starts contributing — so the setpoint should follow it
-        rather than freeze at whatever the first sighting said.
-        """
-        if self.pad_map is None or self.target_id is None:
-            return
-        for pad in self.pad_map.pads:
-            if pad.id == self.target_id:
-                self.target_xy = (pad.position.x, pad.position.y)
-                self.target_height = pad.height
-                return
 
     def _set_mode(self, mode: str):
         req = SetMode.Request()
@@ -900,9 +632,6 @@ class PadMissionNode(Node):
         # Let the new state issue its first command immediately rather than
         # waiting out the retry period of whatever the old state was doing.
         self._last_cmd_t = 0.0
-        # Arrival is per-target; leaking it forward would time out the next
-        # candidate the moment it is chosen.
-        self._arrived_since = None
 
     def _since_entered(self) -> float:
         return self._now() - self._state_since
@@ -910,27 +639,16 @@ class PadMissionNode(Node):
     def _now(self) -> float:
         return self.get_clock().now().nanoseconds * 1e-9
 
-    def _dist_xy(self, x: float, y: float) -> float:
-        if self.pose is None:
-            return float("inf")
-        return math.hypot(self.pose.pose.position.x - x,
-                          self.pose.pose.position.y - y)
-
-    def _yaw(self) -> float:
-        q = self.pose.pose.orientation
-        return math.atan2(2.0 * (q.w * q.z + q.x * q.y),
-                          1.0 - 2.0 * (q.y * q.y + q.z * q.z))
-
     def _throttle(self, text: str):
         self.get_logger().info(text, throttle_duration_sec=5.0)
 
     def _publish_status(self):
         z = self.pose.pose.position.z if self.pose else float("nan")
+        x = self.pose.pose.position.x if self.pose else float("nan")
         self.pub_status.publish(String(data=(
             f"state={self.state} mode={self.mav_state.mode} "
-            f"armed={self.mav_state.armed} z={z:.2f} "
-            f"wp={self.route_idx}/{len(self.route)} "
-            f"target={self.target_id} landed={self.landed_count}")))
+            f"armed={self.mav_state.armed} x={x:.2f} z={z:.2f} "
+            f"leg={self._flown():.1f}m landed={self.landed_count}")))
 
 
 def main(args=None):

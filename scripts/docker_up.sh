@@ -2,7 +2,8 @@
 # Bring up the full simulation stack in Docker.
 #
 # Usage: scripts/docker_up.sh [--dev] [--no-build] [--landing-sites]
-#                             [--no-odom-print] [docker compose up args...]
+#                             [--ground-truth] [--no-odom-print]
+#                             [docker compose up args...]
 #   --dev             mount the project packages from the host into the
 #                     container (docker-compose.dev.yml) and skip the image
 #                     build. Node code, launch files and config YAML are then
@@ -13,6 +14,11 @@
 #   --landing-sites   run the autonomous landing-site mission (pad detectors +
 #                     pad/feature maps + search-land-take-off state machine)
 #                     instead of the bare sim bring-up. See docs/LANDING-SITES.md.
+#   --ground-truth    fly the EKF on BiguaSim ground truth instead of the real
+#                     visual odometry (odom_source:=ground_truth). A DEBUGGING
+#                     AID for separating autonomy bugs from localization bugs —
+#                     a green run on ground truth proves nothing about the real
+#                     drone, which has none. See docs/LANDING-SITES.md §10.
 #   --no-odom-print   silence odom_error_node's 1 Hz VO-drift line (the CSV is
 #                     still written either way). On by default.
 # Anything else is forwarded untouched to `docker compose up` (-d, --force-recreate, ...).
@@ -23,6 +29,7 @@ cd "$(dirname "$0")/.."
 # intercepted, so compose's own flags are never swallowed by accident.
 ODOM_ERROR_PRINT=true
 HYDRONE_LAUNCH=hydrone_sim.launch.py
+ODOM_SOURCE=vo
 DEV_MODE=false
 DO_BUILD=true
 compose_args=()
@@ -30,6 +37,7 @@ for arg in "$@"; do
     case "$arg" in
         --no-odom-print) ODOM_ERROR_PRINT=false ;;
         --landing-sites) HYDRONE_LAUNCH=landing_sites_sim.launch.py ;;
+        --ground-truth)  ODOM_SOURCE=ground_truth ;;
         --dev)           DEV_MODE=true; DO_BUILD=false ;;
         --no-build)      DO_BUILD=false ;;
         *)               compose_args+=("$arg") ;;
@@ -37,6 +45,7 @@ for arg in "$@"; do
 done
 export ODOM_ERROR_PRINT   # interpolated into `command:` in docker-compose.yml
 export HYDRONE_LAUNCH     # ditto — selects which launch file the container runs
+export ODOM_SOURCE        # ditto — what the EKF navigates on (vo|ground_truth)
 
 # Let the containerized UE5 viewport open on the host X server
 xhost +local:docker
@@ -79,6 +88,7 @@ if [ "$DEV_MODE" = true ]; then
 fi
 
 echo "Launch file  : $HYDRONE_LAUNCH"
+echo "Odom source  : $ODOM_SOURCE$([ "$ODOM_SOURCE" = ground_truth ] && echo ' (DEBUGGING AID — proves nothing about the real drone)')"
 echo "VO drift print: $ODOM_ERROR_PRINT (CSV is written either way)"
 
 build_arg=(--build)

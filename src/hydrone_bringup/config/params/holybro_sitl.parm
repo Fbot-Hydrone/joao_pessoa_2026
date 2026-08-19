@@ -39,6 +39,13 @@ SCHED_LOOP_RATE 100
 FS_THR_ENABLE   1
 ARSPD_PIN 1
 ARSPD_BUS 2
+# BISECT STEP 1 (2026-08-19): the "fly slow" tuning block that lived here was
+# REMOVED, so roll/pitch angle+rate gains, ATC_INPUT_TC, PSC_ANGLE_MAX and the
+# WPNAV_* limits are back at firmware defaults. It stacked four softenings on one
+# loop (angle P 4.5->1.5, INPUT_TC 0.15->0.4, rate P/I/D -41%, lean cap 30->10 deg),
+# which made the attitude loop too slow for the position controller to track and
+# capped the authority to recover. The block is kept verbatim, with the re-apply
+# order, in docs/PARAMS-DIFF-SITL.md - it was never committed, so that is the only copy.
 ATC_RAT_YAW_P 0.3
 ATC_RAT_YAW_I 0.02
 BATT_MONITOR    4
@@ -85,19 +92,64 @@ FLTMODE4        3
 FLTMODE5        5
 FLTMODE6		0
 SIM_BARO_RND    0
-# we need small INS_ACC offsets so INS is recognised as being calibrated
+# "Arm: Accels inconsistent" blocks arming for minutes. NOT a real disagreement
+# and NOT a noise problem — zeroing SIM_*_RND (below) measurably did nothing.
+# It is a fixed hold-down timer. AP_Arming::ins_accels_consistent() requires the
+# check to pass continuously for AP_ARMING_IMU_CONSISTENCY_CHECK_TIME_MS (10000)
+# before arming is allowed, and it gates that wait on the number of REGISTERED
+# accels:
+#     if (ins.get_accel_count() > 1 && now - last_accel_pass_ms < 10000)
+#         return false;                          // AP_Arming.cpp:479
+# Under --synthetic-clock those 10s are SIM time, and with our camera render
+# load sim time runs far below real time — hence "minutes".
+#
+# INS_USE2/INS_USE3 do NOT fix this. They only make accels_consistent() skip
+# those instances in its comparison loop (AP_InertialSensor.cpp:1562); they do
+# not change get_accel_count(), so the 10s gate still applies. The fix is to
+# register only ONE IMU: SITL creates SIM_IMU_COUNT backends (default 2, see
+# SITL.cpp:533) at AP_InertialSensor.cpp:1215. With one, accels_consistent()
+# short-circuits at accel_count <= 1 AND the timing gate is skipped entirely,
+# so arming is allowed immediately. Same gate exists for gyros (AP_Arming.cpp
+# :506), so this covers "Gyros inconsistent" too.
+#
+# Read once at backend detection => changing it needs a sim RESTART, and since
+# we launch with --wipe a live `param set` will not survive.
+#
+# SIM_IMU_COUNT is a SITL-only parameter and this is a SIM-ONLY file: the real
+# Pixhawk keeps all its IMUs and its consistency check untouched. Trade-off is
+# that IMU failover / affinity bugs cannot be reproduced in sim.
+SIM_IMU_COUNT   1
+SIM_ACC1_RND    0
+SIM_ACC2_RND    0
+SIM_GYR1_RND    0
+SIM_GYR2_RND    0
+# redundant now that only one IMU is registered; kept to document the intent
+INS_USE2        0
+INS_USE3        0
+EK3_IMU_MASK    1
+# accel_calibrated_ok_all() has TWO halves, and SIM_IMU_COUNT decides which
+# half each instance falls into. Instances [0, get_accel_count()) must have
+# NON-ZERO offsets and scale, or you get "3D Accel calibration needed".
+# Instances [get_accel_count(), INS_MAX_INSTANCES) must have ZERO offsets and
+# scale of exactly 0 or 1, or you get the SAME message ("no unused accels
+# should have offsets or scaling", AP_InertialSensor.cpp).
+#
+# So with SIM_IMU_COUNT 1 only instance 0 carries the small fake calibration;
+# INS_ACC2_* and INS_ACC3_* must both look untouched. If you ever raise
+# SIM_IMU_COUNT back to 2, INS_ACC2OFFS/SCAL must go back to 0.001/1.001 or
+# arming breaks the other way.
 INS_ACCOFFS_X   0.001
 INS_ACCOFFS_Y   0.001
 INS_ACCOFFS_Z   0.001
 INS_ACCSCAL_X   1.001
 INS_ACCSCAL_Y   1.001
 INS_ACCSCAL_Z   1.001
-INS_ACC2OFFS_X   0.001
-INS_ACC2OFFS_Y   0.001
-INS_ACC2OFFS_Z   0.001
-INS_ACC2SCAL_X   1.001
-INS_ACC2SCAL_Y   1.001
-INS_ACC2SCAL_Z   1.001
+INS_ACC2OFFS_X   0.000
+INS_ACC2OFFS_Y   0.000
+INS_ACC2OFFS_Z   0.000
+INS_ACC2SCAL_X   1.000
+INS_ACC2SCAL_Y   1.000
+INS_ACC2SCAL_Z   1.000
 INS_ACC3OFFS_X   0.000
 INS_ACC3OFFS_Y   0.000
 INS_ACC3OFFS_Z   0.000

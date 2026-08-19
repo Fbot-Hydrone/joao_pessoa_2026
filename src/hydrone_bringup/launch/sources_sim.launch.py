@@ -169,7 +169,7 @@ def _down_cam_offset_xyz(agent, default=(0.0, 0.0, -0.12)):
     return [float(v) for v in loc]
 
 
-def _down_cam_rpy_deg(agent, default=(0.0, -90.0, 0.0)):
+def _down_cam_rpy_deg(agent, default=(0.0, 90.0, 0.0)):
     """Down camera mount rotation, straight out of config.yaml.
 
     Single source of truth: the SAME numbers aim the simulated camera and build

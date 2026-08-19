@@ -47,14 +47,23 @@
             # slow-motion wall-clock while the cameras are on (more so at higher Hz).
             # Hz must divide ticks_per_sec (200/20=10). For real-time flight w/o vision,
             # comment these out and the loop reaches ~260 Hz (real-time at ticks 200).
+            # Hz 20 -> 10 (2026-08-18): with the third (down) camera added, the
+            # total render load pushed the sim loop far enough below real time
+            # that the FDM loop picked up ~0.3-0.5 s of actuation lag — measured
+            # in the dataflash RATE stream as the actual rate trailing the
+            # demanded rate by that much, which made the attitude controller
+            # oscillate to a flip within seconds of the first real maneuver
+            # ("Crash: AngErr=170>30"). 2x640x480@20 was the proven-stable
+            # budget; 3 renders must fit in the same budget, so the ZED pair
+            # drops to 10 Hz. VO and detection both close fine at 10 Hz.
             - sensor_type: RGBCamera
               ros_publish: true
-              Hz: 20
-              location: [0.14, 0, -0.08]              
+              Hz: 10
+              location: [0.14, 0, -0.08]
               configuration: {CaptureWidth: 640, CaptureHeight: 480}
             - sensor_type: DepthCamera
               ros_publish: true
-              Hz: 20
+              Hz: 10
               location: [0.14, 0, -0.08
               ]
               configuration: {CaptureWidth: 640, CaptureHeight: 480, FOV: 90}
@@ -70,13 +79,14 @@
             # /biguasim/<agent>/DownCamera instead of colliding with the ZED's
             # /biguasim/<agent>/RGBCamera.
             #
-            # rotation is [roll, pitch, yaw] in DEGREES about the agent's body
-            # axes, positive pitch = nose up (BiguaSim's RangeFinderSensor uses
-            # the same sense: LaserAngle -90 is straight down). So pitch -90
-            # aims the lens at the ground. down_cam_mimic_node derives the ROS
-            # mount TF from this same value — see _down_cam_rpy_deg() in
-            # sources_sim.launch.py, and the one-time visual check in
-            # docs/LANDING-SITES.md.
+            # rotation is [roll, pitch, yaw] in DEGREES. VERIFIED IN UE
+            # 2026-08-18: pitch +90 aims the lens at the ground (checked by
+            # eye on /down_cam/image_raw — the camera sees the pad below, per
+            # docs/LANDING-SITES.md §8's one-time check). BiguaSim's docs read
+            # pitch as rotation about the RIGHT axis (right-handed), which is
+            # why the sign is opposite to the nose-up-positive guess.
+            # down_cam_mimic_node derives the ROS mount TF from this same
+            # value — see _down_cam_rpy_deg() in sources_sim.launch.py.
             #
             # Hz 10, half the ZED's: a third render is the single most expensive
             # thing on this list, and the landing loop closes fine at 10 Hz.
@@ -89,6 +99,13 @@
               # the ground. Check once in RViz on /down_cam/image_raw.
               location: [0.0, 0, -0.1]
               rotation: [0, 90, 0]
+              # 640x480 (2026-08-18, second pass): 320x240 was tried first to
+              # save render budget, but at cruise the pad shrinks to ~64 px
+              # and the thin ring/cross no longer survive thresholding —
+              # measured in flight: detected at 1.6 m on climb-out, silent by
+              # 2.25 m. At 640x480 the pad is ~128 px at 2.5 m and the
+              # structure resolves. The budget stays ~40% below the original
+              # 3-camera load because the ZED pair now runs at 10 Hz.
               configuration: {CaptureWidth: 640, CaptureHeight: 480, FOV: 90}
             # Down-facing rangefinder (nadir altimeter) — Phase 1&2 sensor config.
             # Holodeck's RangeFinderSensor is a LaserScan scanner; LaserCount:1 +
@@ -106,7 +123,7 @@
           dynamics:
             batch_size : 1
           control_abstraction : 'accel'
-          location: [0, -3, 3]
+          location: [0, -3, 0.27]
           rotation: [0, 0, 0]
 
           # 
