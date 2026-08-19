@@ -111,58 +111,27 @@ class ArduBridgeNode(Node):
         sim_time = 0.0
 
         self.get_logger().info("Bridge UDP iniciada, aguardando ArduPilot...")
-        # --- TEMPORARY PROFILING (remove after perf debug) ---
-        import time as _t
-        _acc = {'recv': 0.0, 'step': 0.0, 'json': 0.0, 'pub': 0.0}
-        _n = 0
-        _t_wall0 = _t.perf_counter()
-        # -----------------------------------------------------
         try:
             while True:
-                _a = _t.perf_counter()
                 frame, pwm = bridge.receive_pwm()
-                _b = _t.perf_counter()
                 if frame is None:
                     continue
 
                 motor_cmds = bridge.pwm_to_motor_cmds(pwm, frame)
                 raw = env.step(motor_cmds)
                 sim_time += dt
-                _c = _t.perf_counter()
 
                 # Manda estado pro ArduPilot
                 agent_state = raw[agent][0]
                 json_state = bridge.build_json_state(agent_state, sim_time)
                 if json_state:
                     bridge.send_state(json_state)
-                _d = _t.perf_counter()
 
                 # Publica no ROS2
                 try:
                     self.interface.publish_sensor_data(raw)
                 except Exception as e:
                     self.get_logger().warn(f"Erro publicando sensores: {e}")
-                _e = _t.perf_counter()
-
-                _acc['recv'] += _b - _a
-                _acc['step'] += _c - _b
-                _acc['json'] += _d - _c
-                _acc['pub']  += _e - _d
-                _n += 1
-                if _n >= 200:
-                    _el = _t.perf_counter() - _t_wall0
-                    _ms = {k: 1000.0 * v / _n for k, v in _acc.items()}
-                    print(
-                        f"[PROF] {_n/_el:6.1f} tick/s | "
-                        f"recv(wait ArduPilot) {_ms['recv']:6.2f} ms | "
-                        f"env.step(UE5) {_ms['step']:6.2f} ms | "
-                        f"json+send {_ms['json']:5.2f} ms | "
-                        f"ros_publish {_ms['pub']:6.2f} ms | "
-                        f"total {sum(_ms.values()):6.2f} ms",
-                        flush=True)
-                    _acc = {k: 0.0 for k in _acc}
-                    _n = 0
-                    _t_wall0 = _t.perf_counter()
 
         except KeyboardInterrupt:
             pass
