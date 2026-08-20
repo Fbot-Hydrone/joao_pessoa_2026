@@ -246,5 +246,5 @@ def generate_launch_description():
         pad_map,
         feature_map,
         map_odom_tf,
-        mission,
+        # mission,
     ])
