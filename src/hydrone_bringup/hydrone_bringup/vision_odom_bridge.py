@@ -28,7 +28,18 @@ from mavros_msgs.msg import HomePosition
 class VisionOdomBridge(Node):
     def __init__(self):
         super().__init__("vision_odom_bridge")
-        self.declare_parameter("in_odom", "/zed/zed_node/odom_GT")
+        # MUST be /zed/zed_node/odom, never /zed/zed_node/odom_GT.
+        #
+        # sources_sim.launch.py's odom_wiring() guarantees that whichever
+        # estimator was selected lands on THIS topic, in both modes:
+        #   odom_source:=vo            visual_odometry_node publishes here
+        #   odom_source:=ground_truth  zed_mimic publishes here
+        # Hardcoding the _GT topic pins it to vo-mode behaviour and silently
+        # breaks ground_truth mode, where nothing publishes _GT at all: the
+        # bridge then receives no odometry, sends no VISION_POSITION_ESTIMATE,
+        # and the FCU never gets a position — the vehicle simply will not arm,
+        # with no error pointing here. Observed exactly that 2026-08-20.
+        self.declare_parameter("in_odom", "/zed/zed_node/odom")
         self.declare_parameter("out_pose", "/mavros/vision_pose/pose")
         # GPS-denied flight needs a global origin, or ArduPilot never sets home
         # and GUIDED takeoff's altitude-frame conversion silently fails

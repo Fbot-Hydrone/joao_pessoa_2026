@@ -44,6 +44,7 @@ one single clock read, so RGB, depth and both CameraInfos always carry an
 IDENTICAL header.stamp — required by time-synchronized subscribers downstream.
 """
 
+import numpy as np
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
@@ -60,6 +61,15 @@ FRAME_ODOM = "odom"
 FRAME_BASE = "base_link"
 FRAME_CAMERA = "zed_camera_link"
 FRAME_OPTICAL = "zed_left_camera_optical_frame"
+# Ground truth is NOT the same frame as `odom`, even though both describe the
+# vehicle. `odom` belongs to whoever owns the odom->base_link TF (the VO, whose
+# origin is wherever the drone booted and which drifts from there); ground truth
+# is BiguaSim's fixed world frame. Publishing truth as frame_id "odom" makes
+# RViz render it THROUGH the VO's drift: MEASURED 2026-08-20, a perfectly
+# stationary ground-truth pose (0.000 m of real movement) was drawn 7.5 m from
+# the vehicle and creeping, which reads as "ground truth is jumping" when the
+# only thing moving is the frame it was borrowed from.
+FRAME_ODOM_GT = "odom_gt"
 FRAME_IMU = "zed_imu_link"
 
 # Rotation from a robot-convention frame (X fwd, Y left, Z up) to the optical
@@ -115,6 +125,8 @@ class ZedMimicNode(Node):
         # ── State: latest depth/info cached until the next RGB frame ───────
         self.last_depth: Image | None = None
         self.last_info: CameraInfo | None = None
+        # Whether last_depth has already been through _prepare_depth.
+        self._depth_converted = False
 
         # ── Publishers (real ZED topic names) ───────────────────────────────
         self.pub_rgb = self.create_publisher(
@@ -134,15 +146,26 @@ class ZedMimicNode(Node):
 
         # ── TF broadcasters ─────────────────────────────────────────────────
         self.publish_tf = self.get_parameter("publish_tf").value
+        # Own the odom frame only when we also own its TF. Otherwise this node
+        # is the ground-truth REFERENCE alongside a real estimator, and must say
+        # so in the frame_id — see FRAME_ODOM_GT.
+        self.odom_frame = FRAME_ODOM if self.publish_tf else FRAME_ODOM_GT
         self.tf_dynamic = TransformBroadcaster(self)
         self.tf_static = StaticTransformBroadcaster(self)
         self._send_static_tfs()
 
         # ── Subscribers (BiguaSim bridge topics) ────────────────────────────
         p = lambda name: self.get_parameter(name).value
-        self.create_subscription(Image, p("in_rgb"), self._cb_rgb, 10)
+        # Image queues are depth 1 ON PURPOSE. BiguaSim pushes frames faster
+        # than this node republishes them, and a deeper queue does not buy extra
+        # frames — it buys a BACKLOG, handing downstream a picture of where the
+        # drone used to be. Mapping back-projects that stale image against a
+        # fresh pose, so every queued frame is directly metres of error. Depth 1
+        # keeps only the newest frame and drops the rest, which is what a camera
+        # driver should do.
+        self.create_subscription(Image, p("in_rgb"), self._cb_rgb, 1)
         self.create_subscription(CameraInfo, p("in_rgb_info"), self._cb_info, 10)
-        self.create_subscription(Image, p("in_depth"), self._cb_depth, 10)
+        self.create_subscription(Image, p("in_depth"), self._cb_depth, 1)
         self.create_subscription(Odometry, p("in_odom"), self._cb_odom, 10)
         self.create_subscription(Imu, p("in_imu"), self._cb_imu, 10)
 
@@ -189,17 +212,33 @@ class ZedMimicNode(Node):
         self.last_info = msg
 
     def _cb_depth(self, msg: Image):
-        import numpy as np
+        # Cache the frame RAW and do no work here. BiguaSim publishes depth at
+        # ~34 Hz but this node only republishes on an RGB frame, so the vast
+        # majority of what arrives is overwritten before anyone sees it.
+        #
+        # This callback used to do the float32 NaN pass inline: a 1.2 MB
+        # np.frombuffer().copy(), a full-array compare, and a 1.2 MB tobytes()
+        # back into msg.data — ~2.4 MB of copying plus an rclpy conversion, 34
+        # times a second, to throw away 15 frames out of every 16. MEASURED
+        # 2026-08-20 that pinned this node at 101% CPU and throttled
+        # /zed/zed_node/depth/depth_registered from 34.4 Hz down to 1.0 Hz,
+        # which is where the mapper's ~1 s of camera latency came from.
+        self.last_depth = msg
+        self._depth_converted = False
+
+    def _prepare_depth(self, msg: Image):
+        """Scale to metres and turn the sim's far-plane sentinel into NaN.
+
+        Sky / no-geometry pixels saturate the GPU's float16 depth buffer at
+        655.04 m (65504 cm). The real ZED reports NaN there (REP 118); leaving
+        the sentinel poisons any mean-depth / obstacle / ground-height math and
+        crushes the RViz colour scale. Mimic the real sensor.
+        """
         depth = np.frombuffer(msg.data, dtype=np.float32).copy()
         if self.depth_scale != 1.0:
             depth *= self.depth_scale
-        # Sky / no-geometry pixels saturate the GPU's float16 depth buffer at
-        # 655.04 m (65504 cm). The real ZED reports NaN there (REP 118); leaving
-        # the sentinel poisons any mean-depth / obstacle / ground-height math and
-        # crushes the RViz colour scale. Mimic the real sensor.
         depth[depth >= 655.0] = np.nan
         msg.data = depth.tobytes()
-        self.last_depth = msg
 
     def _cb_rgb(self, msg: Image):
         # One clock read for the whole frame — this is what keeps RGB, depth
@@ -211,6 +250,11 @@ class ZedMimicNode(Node):
         self.pub_rgb.publish(msg)
 
         if self.last_depth is not None:
+            # Convert once per frame that is actually published, and only once
+            # even if RGB outruns depth and we republish the same cached frame.
+            if not self._depth_converted:
+                self._prepare_depth(self.last_depth)
+                self._depth_converted = True
             self.last_depth.header.stamp = stamp
             self.last_depth.header.frame_id = FRAME_OPTICAL
             self.pub_depth.publish(self.last_depth)
@@ -230,7 +274,7 @@ class ZedMimicNode(Node):
         # The bridge encoder leaves frame_id/child_frame_id swapped and
         # meaningless ('base_link'/'odom'); rewrite them properly.
         msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = FRAME_ODOM
+        msg.header.frame_id = self.odom_frame
         msg.child_frame_id = FRAME_BASE
         self.pub_odom.publish(msg)
 

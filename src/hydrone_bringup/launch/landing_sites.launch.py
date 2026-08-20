@@ -77,10 +77,10 @@ def generate_launch_description():
                         "turn it off to save CPU."),
         DeclareLaunchArgument(
             "map_odom_tf", default_value="true",
-            description="Publish the static identity map -> odom that joins "
-                        "TF's two trees. See the node below for why it is an "
-                        "approximation. Set false once something estimates the "
-                        "real map->odom offset."),
+            description="Publish the measured map -> odom that joins TF's two "
+                        "trees, computed as map_T_base . (odom_T_base)^-1. Set "
+                        "false if something else (loop closure, a fiducial) "
+                        "takes over that transform."),
         DeclareLaunchArgument(
             "range_topic", default_value="/mavros/rangefinder",
             description="Downward rangefinder Range topic, used to measure pad "
@@ -200,23 +200,36 @@ def generate_launch_description():
     # the map or the vehicle but never both, and `tf2_echo map base_link` fails
     # with "Tf has two or more unconnected trees".
     #
-    # Identity is the honest first approximation, not the right answer: `odom`
-    # is the VO's origin (wherever the drone booted) and `map` is the FCU's EKF
-    # origin, so the two coincide at takeoff and diverge afterwards by exactly
-    # the accumulated VO drift. That offset IS the localization error — this
-    # node does not correct it, it just declares it zero so the frames connect.
-    # When something finally estimates it (loop closure, a fiducial, anything),
-    # that estimator publishes map->odom and this node goes away: pass
-    # map_odom_tf:=false.
+    # This USED to be a static_transform_publisher broadcasting identity, on the
+    # theory that `map` and `odom` coincide at boot. They do not, and the error
+    # is not small: BiguaSim's odometry is NWU, vision_odom_bridge rotates it
+    # +90 deg to ENU before MAVROS sees it, so `map` is ENU while the
+    # odom->base_link TF stays NWU. MEASURED 2026-08-20 at two different
+    # headings, /mavros/local_position/pose was Rz(+90 deg) x ground truth to
+    # 0.012 m and 0.55 deg — RViz drew the vehicle 90 deg away from its own
+    # point cloud, origin rotated to match.
+    #
+    # Identity is not even right in principle: visual_odometry_node fixes its
+    # odom origin to identity at the FIRST FRAME, so `odom` is aligned to
+    # whatever attitude the drone booted at. The real ZED wrapper does the same,
+    # so identity would only ever hold if the vehicle happened to boot facing
+    # map-east.
+    #
+    # map_odom_node computes the transform instead of assuming it:
+    #   map_T_odom = map_T_base . (odom_T_base)^-1
+    # which is how AMCL and robot_localization do it, is correct for any boot
+    # heading, and needs no per-setup constant. The residual it publishes is the
+    # drift between the FCU's estimate and the odometry origin — the thing
+    # identity was silently declaring to be zero.
     #
     # NOT done by turning on MAVROS local_position.tf.send, which would
     # broadcast map->base_link while the VO already broadcasts odom->base_link.
     # Two parents for one frame is not a tree, and TF rejects it.
     map_odom_tf = Node(
-        package="tf2_ros",
-        executable="static_transform_publisher",
-        name="map_odom_tf",
-        arguments=["--frame-id", "map", "--child-frame-id", "odom"],
+        package="hydrone_bringup",
+        executable="map_odom_node",
+        name="map_odom",
+        output="screen",
         condition=IfCondition(LaunchConfiguration("map_odom_tf")),
     )
 
