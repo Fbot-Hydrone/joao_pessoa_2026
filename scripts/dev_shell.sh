@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# Turn this terminal into a shell inside the hydrone container, with rviz2 and
+# rqt_image_view running alongside it in the same container.
+#
+#   ./scripts/dev_shell.sh                    # attach + both GUIs
+#   ./scripts/dev_shell.sh -d my_view.rviz    # ... with an rviz config
+#
+# The rviz config lives on the host (nothing useful is bind-mounted into the
+# container), so it is streamed into the container at launch and removed on
+# exit. Edits made through rviz "Save Config" land on that throwaway copy and
+# are NOT written back to the host file.
+#
+# Leaving the shell (exit / Ctrl-D) kills both GUIs.
+# Overridable: CONTAINER, IMAGE_TOPIC, LOG_DIR, RVIZ_CONFIG.
+
+set -uo pipefail
+
+CONTAINER="${CONTAINER:-joao_pessoa_2026-hydrone-1}"
+IMAGE_TOPIC="${IMAGE_TOPIC:-/hydrone/pads/down/debug_image}"
+LOG_DIR="${LOG_DIR:-/tmp/hydrone-dev-shell}"
+RVIZ_CONFIG="${RVIZ_CONFIG:-}"
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -d|--rviz-config) RVIZ_CONFIG="${2:-}"; shift 2 ;;
+        -h|--help) sed -n '2,15p' "$0" | sed 's/^# \?//'; exit 0 ;;
+        *) echo "dev_shell: unknown argument '$1'" >&2; exit 2 ;;
+    esac
+done
+
+# No config asked for: fall back to the usual one if it is lying around.
+if [ -z "$RVIZ_CONFIG" ]; then
+    here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    for candidate in \
+        "$PWD/rviz_pointc_map.rviz" \
+        "$here/../rviz_pointc_map.rviz" \
+        "$here/../../rviz_pointc_map.rviz"
+    do
+        [ -r "$candidate" ] && { RVIZ_CONFIG="$candidate"; break; }
+    done
+fi
+
+if [ -n "$RVIZ_CONFIG" ] && [ ! -r "$RVIZ_CONFIG" ]; then
+    echo "dev_shell: cannot read rviz config '$RVIZ_CONFIG'" >&2
+    exit 1
+fi
+
+if ! docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
+    echo "dev_shell: container '$CONTAINER' is not running" >&2
+    exit 1
+fi
+
+mkdir -p "$LOG_DIR"
+tag="$$"
+pidfiles=()
+container_cfg=""
+
+# start_gui <name> <command...>
+# Runs the command in the container with ROS sourced, in its own session so the
+# whole process group can be torn down later (ros2 run forks a child, so killing
+# just the launcher would orphan it). The session leader writes its own PID
+# before doing anything slow, then exec's the command, so the pidfile holds the
+# PID that is also the process-group id.
+start_gui() {
+    local name="$1"; shift
+    local pidfile="/tmp/hydrone-dev-shell.$tag.$name.pid"
+    local log="$LOG_DIR/$name.$tag.log"
+
+    docker exec -u hydrone "$CONTAINER" setsid bash -c \
+        "echo \$\$ > $pidfile; . /opt/ros/humble/setup.sh && . /ws/install/setup.sh && exec $*" \
+        >"$log" 2>&1 &
+
+    pidfiles+=("$pidfile")
+    printf '  %-16s log: %s\n' "$name" "$log"
+}
+
+cleanup() {
+    trap - EXIT INT TERM
+    [ ${#pidfiles[@]} -eq 0 ] && return
+    echo
+    echo "dev_shell: stopping GUIs..."
+    # One pass inside the container: TERM each GUI's whole process group, then
+    # KILL whatever ignored it (rqt_image_view does), then drop the config copy.
+    docker exec -i -u hydrone -e CFG="$container_cfg" "$CONTAINER" \
+        bash -s -- "${pidfiles[@]}" <<'CLEAN' >/dev/null 2>&1
+pids=()
+for pidfile in "$@"; do
+    # the pidfile is written first thing, but a very short session can outrun it
+    for _ in $(seq 20); do [ -s "$pidfile" ] && break; sleep 0.1; done
+    pid=$(cat "$pidfile" 2>/dev/null)
+    if [ -n "$pid" ]; then
+        kill -TERM -- "-$pid" 2>/dev/null
+        pids+=("$pid")
+    fi
+    rm -f "$pidfile"
+done
+sleep 2
+for pid in "${pids[@]}"; do
+    kill -KILL -- "-$pid" 2>/dev/null
+done
+[ -n "$CFG" ] && rm -f "$CFG"
+CLEAN
+}
+trap cleanup EXIT INT TERM
+
+echo "dev_shell: starting GUIs in $CONTAINER"
+
+rviz_args=()
+if [ -n "$RVIZ_CONFIG" ]; then
+    container_cfg="/tmp/hydrone-dev-shell.$tag.rviz"
+    # Written by hydrone itself, so no ownership surprises (docker cp would land
+    # it as root).
+    if ! docker exec -i -u hydrone "$CONTAINER" bash -c "cat > $container_cfg" \
+            < "$RVIZ_CONFIG"; then
+        echo "dev_shell: failed to copy rviz config into the container" >&2
+        container_cfg=""
+        exit 1
+    fi
+    rviz_args=(-d "$container_cfg")
+    echo "  rviz config      $RVIZ_CONFIG -> $container_cfg"
+fi
+
+start_gui rviz2 rviz2 "${rviz_args[@]}"
+start_gui rqt_image_view ros2 run rqt_image_view rqt_image_view "$IMAGE_TOPIC"
+echo
+
+# Foreground, so this terminal *is* the container shell. When it exits, the trap
+# above tears the GUIs down.
+docker exec -u hydrone -it "$CONTAINER" bash -c 'source /ws/install/setup.bash && exec bash'

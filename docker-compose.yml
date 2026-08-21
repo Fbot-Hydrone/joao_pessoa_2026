@@ -9,7 +9,8 @@ services:
       - DISPLAY=${DISPLAY}
       # Private DDS domain so other ROS 2 apps on this host (default domain 0)
       # can't reach the micro-ROS agent. Match this on the host via env.sh.
-      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-63}
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-42}
+      - ROS_LOCALHOST_ONLY=1
       # Asset backend used by `biguasim.install(...)`; set on the host if used.
       - BS_WORLDS_URL=${BS_WORLDS_URL:-}
     volumes:
