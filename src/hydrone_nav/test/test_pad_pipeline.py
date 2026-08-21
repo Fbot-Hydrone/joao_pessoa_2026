@@ -75,8 +75,10 @@ class FakeSim(Node):
                                 history=HistoryPolicy.KEEP_LAST, depth=1)
         self.pub_pose = self.create_publisher(
             PoseStamped, "/mavros/local_position/pose", sensor_qos)
+        # Where MAVROS publishes the rangefinder on the drone, and where
+        # rangefinder_bridge mimics it in sim — pad_map_node's one default.
         self.pub_range = self.create_publisher(
-            Range, "/mavros/rangefinder", sensor_qos)
+            Range, "/mavros/distance_sensor/rangefinder", sensor_qos)
 
         du, dv = pad_offset_px
         scene = paste_pad(ground(WIDTH, HEIGHT), render_pad(),

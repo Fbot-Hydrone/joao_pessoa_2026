@@ -49,8 +49,8 @@ Useful launch arguments:
 | `max_pads` | `0` | return home after N landings; 0 = until the pattern is exhausted |
 | `auto_start` | `true` | `false` holds until `/hydrone/mission/start` is called |
 | `debug_images` | `true` | annotated detector views |
-| `feature_map` | `true` | the ZED feature/coverage mapper |
-| `range_topic` | `/mavros/rangefinder` | **differs on real hardware** — see §7 |
+| `feature_map` | `true` | the world/coverage mapper over the ZED's cloud |
+| `range_topic` | `/mavros/distance_sensor/rangefinder` | the same in sim and on the drone — see §7 |
 | `odom_source` | `vo` | what the EKF navigates on. `ground_truth` swaps in BiguaSim dynamics as a debugging aid — read §10 first. |
 
 Watching it:
@@ -63,7 +63,8 @@ ros2 run rqt_image_view rqt_image_view /hydrone/pads/forward/debug_image
 ```
 
 In RViz (fixed frame `map`): `/hydrone/pads/markers` (grey = candidate, cyan =
-confirmed, **green = landed on**), `/hydrone/map/features`, `/hydrone/map/coverage`.
+confirmed, **green = landed on**), `/hydrone/map/cloud`, `/hydrone/map/coverage`.
+The camera's own per-frame cloud is `/zed/zed_node/point_cloud/cloud_registered`.
 
 Stop it early: `ros2 service call /hydrone/mission/abort std_srvs/srv/Trigger`
 — it lands where it is.
@@ -88,14 +89,15 @@ Stop it early: `ros2 service call /hydrone/mission/abort std_srvs/srv/Trigger`
                                    ──► set_mode / arming / takeoff
 
    (in parallel, observing only)
-   ZED RGB-D ──► feature_map_node ──► /hydrone/map/features + /coverage
+   /zed/zed_node/point_cloud/cloud_registered
+             ──► feature_map_node ──► /hydrone/map/cloud + /coverage
 ```
 
 | node | package | role |
 |---|---|---|
 | `pad_detector_node` | `hydrone_vision` | one per camera: detect pads, place them in the world |
 | `pad_map_node` | `hydrone_nav` | fuse detections into a persistent map; track `visited` |
-| `feature_map_node` | `hydrone_nav` | sparse ZED-feature cloud + observation-coverage grid — see [`ZED-FEATURE-MAP.md`](ZED-FEATURE-MAP.md) |
+| `feature_map_node` | `hydrone_nav` | accumulates the ZED's point cloud into a world map + observation-coverage grid — see [`ZED-FEATURE-MAP.md`](ZED-FEATURE-MAP.md) |
 | `pad_mission_node` | `hydrone_mission` | the flight: search, land, take off, repeat |
 | `down_cam_mimic_node` | `hydrone_bringup` | **sim only**: BiguaSim's belly camera → `/down_cam/*` + TF |
 
@@ -340,19 +342,30 @@ both. What changes is underneath it:
 
 | | sim | real |
 |---|---|---|
-| ZED | `zed_mimic_node` + `visual_odometry_node` | `zed_wrapper` (ZED SDK) |
+| ZED (images, depth, **point cloud**, odom) | `zed_mimic_node` + `visual_odometry_node` | `zed_wrapper` (ZED SDK) |
 | belly camera | `down_cam_mimic_node` | a USB/CSI camera driver + a static TF |
-| rangefinder | `rangefinder_bridge` **feeds** MAVROS on `/mavros/rangefinder` | MAVROS **publishes** `/mavros/distance_sensor/rangefinder` |
+| rangefinder | `rangefinder_bridge` feeds MAVROS on `/mavros/rangefinder` **and mimics** MAVROS's `/mavros/distance_sensor/rangefinder` | MAVROS **publishes** `/mavros/distance_sensor/rangefinder` |
 
-**The rangefinder topic is the one thing the autonomy layer must be told:**
+**Nothing above the sources is told which world it is in.** `landing_sites_sim`
+passes the autonomy layer no topic overrides at all — every topic it reads is the
+one the real hardware publishes, and the sim's job is to publish those topics.
 
-```bash
-ros2 launch hydrone_bringup landing_sites.launch.py \
-    range_topic:=/mavros/distance_sensor/rangefinder
-```
+That used to be untrue in one place: the rangefinder. In sim the Range has to
+reach MAVROS on `/mavros/rangefinder` (that is where this MAVROS build's
+`distance_sensor` plugin *subscribes*), while on the drone MAVROS *publishes* the
+natively-read VL53L1X on `/mavros/distance_sensor/rangefinder` — so the autonomy
+had to be launched with `range_topic:=...` on real hardware, and a forgotten flag
+meant pad heights were never measured, `height_measured` stayed false, and the
+drone would try to land on the elevated base as if it were on the floor.
+`rangefinder_bridge` now publishes both: the first topic is plumbing INTO the
+FCU, the second mimics MAVROS's real output. The autonomy reads the second, in
+both worlds, with no argument.
 
-Without it, pad heights are never measured, `height_measured` stays false, and the
-drone will try to land on the elevated base as if it were on the floor.
+On the drone, two `zed_wrapper` settings matter to this stack: the point cloud
+must be ON (`feature_map_node` has no other input), and
+`pos_tracking.publish_map_tf` must be **false** — the wrapper broadcasts
+`map → odom` by default and `map_odom_node` owns that edge here. See
+`sources_real.launch.py`.
 
 `sources_real.launch.py` carries the belly-camera driver and its static TF as a
 commented, ready-to-fill stub. Its rotation is checked against the simulated

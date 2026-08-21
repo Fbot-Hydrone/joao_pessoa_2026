@@ -10,10 +10,12 @@ unchanged when the flag flips:
   OUTPUT CONTRACT (must match sources_sim.launch.py 1:1):
     /zed/zed_node/rgb/image_rect_color, /zed/zed_node/rgb/camera_info,
     /zed/zed_node/depth/depth_registered, /zed/zed_node/depth/camera_info,
+    /zed/zed_node/point_cloud/cloud_registered,
     /zed/zed_node/imu/data, /zed/zed_node/odom,
     /down_cam/image_raw, /down_cam/camera_info,
     /mavros/*  (incl. /mavros/vision_pose/pose, /mavros/distance_sensor/rangefinder)
-    TF: base_link -> zed_camera_link -> zed_left_camera_optical_frame
+    TF: base_link -> zed_camera_link -> zed_left_camera_frame
+                                     -> zed_left_camera_optical_frame
         base_link -> down_cam_link   -> down_cam_optical_frame
 
 Difference vs sim (only the SOURCES change, never the autonomy):
@@ -21,7 +23,9 @@ Difference vs sim (only the SOURCES change, never the autonomy):
     NO visual_odometry_node, NO rangefinder_bridge.
   - zed_wrapper (ZED SDK on the Jetson) publishes /zed/zed_node/* INCLUDING
     /zed/zed_node/odom natively (its own VIO) — that is why visual_odometry_node
-    is sim-only.
+    is sim-only — AND /zed/zed_node/point_cloud/cloud_registered, which is why
+    zed_mimic_node grew a point cloud: feature_map_node consumes the camera's
+    cloud in both worlds instead of back-projecting depth itself.
   - The VL53L1X rangefinder is wired over I2C into the Pixhawk; ArduPilot reads
     it natively and MAVROS PUBLISHES /mavros/distance_sensor/* (publisher mode) —
     that is why rangefinder_bridge is sim-only.
@@ -31,11 +35,25 @@ Difference vs sim (only the SOURCES change, never the autonomy):
     which the mimic was providing in sim.
   - vision_odom_bridge is AGNOSTIC and runs here too (same node as sim).
 
-ONE THING THE AUTONOMY LAYER DOES NEED TOLD APART (the only sim/real difference
-above the sources): the downward rangefinder's topic. In sim, rangefinder_bridge
-FEEDS MAVROS on /mavros/rangefinder; on real, MAVROS PUBLISHES the natively-read
-VL53L1X on /mavros/distance_sensor/rangefinder. Launch the landing-site stack
-with range_topic:=/mavros/distance_sensor/rangefinder here.
+NOTHING ABOVE THE SOURCES IS TOLD APART. The autonomy layer takes no sim/real
+argument at all — landing_sites.launch.py runs with identical defaults in both
+worlds. The rangefinder used to be the exception (MAVROS PUBLISHES the
+natively-read VL53L1X on /mavros/distance_sensor/rangefinder here, while in sim
+rangefinder_bridge FEEDS MAVROS on /mavros/rangefinder); the bridge now mimics
+MAVROS's real publication on the real topic name too, so both worlds read
+/mavros/distance_sensor/rangefinder and the override is gone.
+
+TWO THINGS TO SET ON zed_wrapper HERE, both of which it gets wrong for us by
+default:
+  - point cloud ON (`point_cloud_freq` > 0, `depth.depth_mode` not NONE) —
+    feature_map_node has no other source of geometry now.
+  - `pos_tracking.publish_map_tf:=false`. The wrapper broadcasts map->odom by
+    default, where `map` means the ZED's loop-closed frame. In this stack `map`
+    is the FCU's frame and map_odom_node owns that edge (it computes
+    map_T_base . (odom_T_base)^-1). Two broadcasters of one edge, meaning two
+    different things, is a corrupt TF tree. Alternatively launch the autonomy
+    with map_odom_tf:=false and let the ZED own it — but then `map` is no longer
+    where the pad map lives, so prefer disabling it on the wrapper.
 
 The nodes below are intentionally left COMMENTED (stub) until the ZED SDK / FCU
 are integrated: a launch pointing at drivers that don't exist yet would fail and
@@ -62,7 +80,11 @@ def generate_launch_description():
     # zed_wrapper = Node(
     #     package="zed_wrapper", executable="zed_wrapper", output="screen",
     #     parameters=[{"general.camera_model": "zed2i",
-    #                  "pos_tracking.pos_tracking_enabled": True}],
+    #                  "pos_tracking.pos_tracking_enabled": True,
+    #                  # map->odom is map_odom_node's edge here; see above.
+    #                  "pos_tracking.publish_map_tf": False,
+    #                  # feature_map_node's only input.
+    #                  "point_cloud_freq": 10.0}],
     #     # Ensure it publishes under /zed/zed_node/* (namespace/remap as needed).
     # )
     #
@@ -118,6 +140,7 @@ def generate_launch_description():
         LogInfo(msg=("[sources_real] STUB — real drivers not integrated. "
                      "Uncomment zed_wrapper + mavros(FCU) + down_cam + its "
                      "static TF + vision_odom_bridge; they must publish "
-                     "/zed/zed_node/*, /down_cam/* and /mavros/* exactly as "
-                     "sources_sim does. No autonomy changes.")),
+                     "/zed/zed_node/* (incl. point_cloud/cloud_registered), "
+                     "/down_cam/* and /mavros/* exactly as sources_sim does. "
+                     "No autonomy changes, and no autonomy arguments.")),
     ])

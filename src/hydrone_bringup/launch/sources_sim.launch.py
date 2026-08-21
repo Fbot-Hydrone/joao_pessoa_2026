@@ -12,7 +12,8 @@ sources_real.launch.py — it MUST publish the same output topics listed below.
 Nodes (all sim-only or agnostic plumbing):
   - ardubridge_node   : BiguaSim <-> ArduPilot SITL (PWM in / state out, JSON FDM)   [SIM-ONLY]
   - ArduPilot SITL + micro-ROS agent + MAVProxy (sitl_dds_udp.launch.py)             [SIM-ONLY]
-  - zed_mimic_node    : /biguasim/* -> /zed/zed_node/* (stand-in for zed_wrapper)     [SIM-ONLY]
+  - zed_mimic_node    : /biguasim/* -> /zed/zed_node/* (stand-in for zed_wrapper,      [SIM-ONLY]
+                        including the ZED's own point cloud)
   - down_cam_mimic_node : /biguasim/*/DownCamera -> /down_cam/* (stand-in for the     [SIM-ONLY]
                           belly camera's driver). Only launched if config.yaml
                           declares the DownCamera sensor.
@@ -22,7 +23,8 @@ Nodes (all sim-only or agnostic plumbing):
                            the odom_source argument — see below.
   - mavros_node       : SITL MAVLink <-> /mavros/* (fcu_url = SITL via MAVProxy)      [agnostic role, sim fcu_url]
   - vision_odom_bridge: /zed/zed_node/odom -> /mavros/vision_pose/pose                [AGNOSTIC — also on real]
-  - rangefinder_bridge: BiguaSim RangeFinderSensor -> /mavros/distance_sensor/*       [SIM-ONLY shim]
+  - rangefinder_bridge: BiguaSim RangeFinderSensor -> MAVROS, and a mimic of          [SIM-ONLY shim]
+                        MAVROS's own /mavros/distance_sensor/rangefinder
   - odom_error_node   : /zed/zed_node/odom vs odom_GT -> VO drift CSV at the repo     [SIM-ONLY debug]
                         root. Measurement only — publishes nothing, so it cannot
                         affect flight. Disable with odom_error:=false.
@@ -49,17 +51,24 @@ Launch arguments:
 OUTPUT CONTRACT (must match sources_real.launch.py 1:1):
   /zed/zed_node/rgb/image_rect_color, /zed/zed_node/rgb/camera_info,
   /zed/zed_node/depth/depth_registered, /zed/zed_node/depth/camera_info,
+  /zed/zed_node/point_cloud/cloud_registered,
   /zed/zed_node/imu/data, /zed/zed_node/odom,
   /down_cam/image_raw, /down_cam/camera_info,
   /mavros/*  (incl. /mavros/vision_pose/pose, /mavros/distance_sensor/rangefinder)
-  TF: base_link -> zed_camera_link -> zed_left_camera_optical_frame
+  TF: base_link -> zed_camera_link -> zed_left_camera_frame
+                                   -> zed_left_camera_optical_frame
       base_link -> down_cam_link   -> down_cam_optical_frame
+
   ( SIM-ONLY debug extras, NOT part of the contract the autonomy stack consumes:
     /zed/zed_node/odom_GT and /zed/zed_node/odom_VO — whichever of ground truth
     and the real VO is not currently flying the vehicle — plus
     /zed/zed_node/pose_GT, the ground-truth position AND quaternion as a plain
     PoseStamped, for answering "is the estimate wrong, or did the airframe
     actually flip?" )
+
+  The autonomy layer above is launched with NO overrides — see
+  landing_sites_sim.launch.py. Anything it would otherwise need told apart
+  belongs HERE, as a mimic of what the hardware publishes.
 
 Notes:
   - No `refs:=dds_xrce_profile.xml`: this ArduPilot creates DDS entities client-side.
@@ -261,7 +270,9 @@ def generate_launch_description():
     )
 
     # Fake ZED: republishes BiguaSim sensors under the real ZED wrapper's
-    # topic names and frames. On the real drone, launch zed_wrapper instead.
+    # topic names and frames, and back-projects its depth into the ZED's own
+    # point_cloud/cloud_registered — the camera's product, produced where the
+    # camera is. On the real drone, launch zed_wrapper instead.
     # Input topics AND the camera mount offset are derived from biguasim's
     # config.yaml, so editing the agent name or the sensor position there
     # propagates to the bridge and to every node below — one source of truth.

@@ -103,11 +103,13 @@ class PadMapNode(Node):
         # ── Parameters ──────────────────────────────────────────────────────
         self.declare_parameter("detections_topic", "/hydrone/pads/detections")
         self.declare_parameter("pose_topic", "/mavros/local_position/pose")
-        # SIM: rangefinder_bridge publishes the Range here, because that is where
-        # this MAVROS build's distance_sensor plugin SUBSCRIBES.
-        # REAL: ArduPilot reads the VL53L1X natively and MAVROS PUBLISHES it on
-        # /mavros/distance_sensor/rangefinder — override this parameter there.
-        self.declare_parameter("range_topic", "/mavros/rangefinder")
+        # ONE topic in both worlds. REAL: ArduPilot reads the VL53L1X natively
+        # over I2C and MAVROS publishes it here. SIM: rangefinder_bridge mimics
+        # that publication (it also feeds MAVROS on /mavros/rangefinder, which
+        # is where this MAVROS build's distance_sensor plugin SUBSCRIBES — that
+        # topic is plumbing INTO the FCU, not a sensor bus to read).
+        self.declare_parameter("range_topic",
+                               "/mavros/distance_sensor/rangefinder")
         self.declare_parameter("map_topic", "/hydrone/pads/map")
         self.declare_parameter("marker_topic", "/hydrone/pads/markers")
 

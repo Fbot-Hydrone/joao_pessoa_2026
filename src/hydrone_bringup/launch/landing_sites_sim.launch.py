@@ -13,6 +13,18 @@ It is the landing-site counterpart of hydrone_mission_sim.launch.py, and it
 deliberately does NOT include hydrone.launch.py: the two mission stacks both
 publish position setpoints and must not run at once.
 
+A PURE WRAPPER, on purpose: it passes the autonomy layer nothing but the
+mission's own tuning arguments — no topic is remapped, no parameter is set
+differently because this is a simulator. landing_sites.launch.py cannot tell
+which world it is in, which is the only way a green sim run says anything about
+the drone. Everything simulated is a SOURCE: sources_sim.launch.py stands in for
+hardware that is not plugged in (BiguaSim's cameras in place of the ZED, its
+rangefinder in place of the VL53L1X, SITL in place of the Pixhawk) and publishes
+the exact topics that hardware publishes.
+
+If you ever find yourself wanting to add an override here, the fix belongs on
+the sources side: make the sim produce what the real drone produces.
+
 Give it ~30 s after start before expecting movement. With GPS disabled the EKF
 needs the vision pose and a global origin before it will accept a takeoff — see
 docs/DEVELOP-PIPELINES.md. pad_mission waits for exactly that on its own and
@@ -78,9 +90,6 @@ def generate_launch_description():
             "debug_images": LaunchConfiguration("debug_images"),
             "feature_map": LaunchConfiguration("feature_map"),
             "map_odom_tf": LaunchConfiguration("map_odom_tf"),
-            # SIM: the Range lives where rangefinder_bridge puts it, which is
-            # what this MAVROS build's distance_sensor plugin subscribes to.
-            "range_topic": "/mavros/rangefinder",
         }.items(),
     )
 

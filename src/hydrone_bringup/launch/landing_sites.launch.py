@@ -16,15 +16,20 @@ Nodes
   pad_detector (forward)  ZED RGB+depth  -> /hydrone/pads/detections
   pad_detector (down)     belly RGB      -> /hydrone/pads/detections
   pad_map                 detections     -> /hydrone/pads/map + RViz markers
-  feature_map             ZED RGB-D      -> /hydrone/map/features + coverage
+  feature_map             ZED point cloud-> /hydrone/map/cloud + coverage
   map_odom_tf             static identity map -> odom (joins TF's two trees)
   pad_mission             down cam + MAVROS -> the flight itself
 
 Like the rest of the autonomy layer this consumes ONLY the agnostic contract
 buses (/zed/zed_node/*, /down_cam/*, /mavros/*), so it is identical in sim and
-on the real drone. The one thing that differs is `range_topic`, because MAVROS
-publishes the rangefinder on the real drone and subscribes to it in sim — see
-the argument below.
+on the real drone — every topic below is the one the real hardware publishes,
+and NOTHING here is configured differently for the simulator. landing_sites_sim
+adds the sources that produce those buses from BiguaSim and passes no overrides.
+
+It also PRODUCES only what no sensor does: pad detections and the maps built out
+of them. It does not back-project depth into a point cloud any more — the ZED
+publishes `/zed/zed_node/point_cloud/cloud_registered` itself, so feature_map
+consumes that and spends its time on the part that is ours, the accumulation.
 """
 
 from launch import LaunchDescription
@@ -73,8 +78,8 @@ def generate_launch_description():
                         "/hydrone/pads/<camera>/debug_image."),
         DeclareLaunchArgument(
             "feature_map", default_value="true",
-            description="Run the ZED feature/coverage mapper. Pure observer — "
-                        "turn it off to save CPU."),
+            description="Run the world/coverage mapper over the ZED's point "
+                        "cloud. Pure observer — turn it off to save CPU."),
         DeclareLaunchArgument(
             "map_odom_tf", default_value="true",
             description="Publish the measured map -> odom that joins TF's two "
@@ -82,12 +87,13 @@ def generate_launch_description():
                         "false if something else (loop closure, a fiducial) "
                         "takes over that transform."),
         DeclareLaunchArgument(
-            "range_topic", default_value="/mavros/rangefinder",
+            "range_topic", default_value="/mavros/distance_sensor/rangefinder",
             description="Downward rangefinder Range topic, used to measure pad "
-                        "heights. SIM: /mavros/rangefinder (what "
-                        "rangefinder_bridge feeds MAVROS). REAL: "
-                        "/mavros/distance_sensor/rangefinder (what MAVROS "
-                        "publishes from the VL53L1X)."),
+                        "heights. The SAME topic in sim and on the drone: MAVROS "
+                        "publishes it from the VL53L1X on real, and "
+                        "rangefinder_bridge mimics that publication in sim. An "
+                        "argument only so a bench setup with a different driver "
+                        "can point it elsewhere."),
     ]
 
     cruise_alt = LaunchConfiguration("cruise_alt")
@@ -177,6 +183,11 @@ def generate_launch_description():
         }],
     )
 
+    # Accumulates the ZED's own point cloud into a persistent voxel map plus a
+    # coverage grid. It does NOT create the cloud: cloud_registered comes from
+    # the camera (zed_wrapper on the drone, zed_mimic_node in sim), which is
+    # where back-projection belongs. Coverage has no counterpart on the ZED, so
+    # it lives here.
     feature_map = Node(
         package="hydrone_nav",
         executable="feature_map_node",
@@ -225,6 +236,12 @@ def generate_launch_description():
     # NOT done by turning on MAVROS local_position.tf.send, which would
     # broadcast map->base_link while the VO already broadcasts odom->base_link.
     # Two parents for one frame is not a tree, and TF rejects it.
+    #
+    # ON THE REAL DRONE: zed_wrapper publishes map->odom ITSELF when
+    # pos_tracking.publish_map_tf is true (its default), and its `map` is the
+    # ZED's loop-closed frame, not the FCU's. Two broadcasters, one edge, two
+    # different meanings — set publish_map_tf:=false there, or set this argument
+    # false and let the ZED own it. See sources_real.launch.py.
     map_odom_tf = Node(
         package="hydrone_bringup",
         executable="map_odom_node",
