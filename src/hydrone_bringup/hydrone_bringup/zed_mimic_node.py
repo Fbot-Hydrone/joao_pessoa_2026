@@ -24,6 +24,8 @@ Outputs (real ZED wrapper names):
   /zed/zed_node/rgb/camera_info          sensor_msgs/CameraInfo
   /zed/zed_node/depth/depth_registered   sensor_msgs/Image (32FC1, meters, NaN=invalid)
   /zed/zed_node/depth/camera_info        sensor_msgs/CameraInfo
+  /zed/zed_node/point_cloud/cloud_registered  sensor_msgs/PointCloud2 (organized
+                                         XYZRGB, NaN where depth is invalid)
   /zed/zed_node/odom                     nav_msgs/Odometry (odom -> base_link)
   /zed/zed_node/imu/data                 sensor_msgs/Imu
   /zed/zed_node/pose_GT                  geometry_msgs/PoseStamped  (SIM-ONLY:
@@ -34,8 +36,21 @@ Outputs (real ZED wrapper names):
 TF:
   odom -> base_link                      dynamic, from the odometry
   base_link -> zed_camera_link           static (camera mounting position)
-  zed_camera_link -> zed_left_camera_optical_frame   static (optical convention)
+  zed_camera_link -> zed_left_camera_frame           static (identity)
+  zed_left_camera_frame -> zed_left_camera_optical_frame   static (optical convention)
   zed_camera_link -> zed_imu_link        static
+
+Why the point cloud is published HERE and not by a mapping node: the real ZED
+publishes `point_cloud/cloud_registered` itself, straight out of the SDK. A node
+above the sources layer that back-projects depth into 3-D points is doing the
+camera's job, and on the drone it would be doing it a second time, differently.
+So the cloud is a SOURCE product in both worlds: zed_mimic here, zed_wrapper
+there — and feature_map_node consumes it identically in both.
+
+The cloud is ORGANIZED (height x width, NaN where depth is invalid), like the
+real one, because consumers need pixel neighbours to reject flying pixels — the
+points on a silhouette whose depth is a foreground/background blend. Flattening
+it here would throw that away for everyone downstream. See feature_map_node.
 
 Timestamp rule: BiguaSim messages arrive with stamp = 0, and RGB/depth/info
 come in as separate messages of the same sim frame. We cache the latest depth
@@ -49,7 +64,7 @@ import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 
-from sensor_msgs.msg import Image, CameraInfo, Imu
+from sensor_msgs.msg import Image, CameraInfo, Imu, PointCloud2, PointField
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseStamped, TransformStamped
 from tf2_ros import TransformBroadcaster, StaticTransformBroadcaster
@@ -60,6 +75,13 @@ from tf2_ros import TransformBroadcaster, StaticTransformBroadcaster
 FRAME_ODOM = "odom"
 FRAME_BASE = "base_link"
 FRAME_CAMERA = "zed_camera_link"
+# The real wrapper stamps the POINT CLOUD with the left camera's robot-convention
+# frame (X forward, Y left, Z up) and the IMAGES with its optical child (Z forward
+# out of the lens). Both frames exist on the drone; only the optical one existed
+# here, so the cloud had nowhere honest to live. Consumers are written to read
+# whatever frame_id arrives and look it up in TF, so neither this choice nor the
+# real wrapper's is load-bearing — but mimicking it costs one static transform.
+FRAME_LEFT_CAM = "zed_left_camera_frame"
 FRAME_OPTICAL = "zed_left_camera_optical_frame"
 # Ground truth is NOT the same frame as `odom`, even though both describe the
 # vehicle. `odom` belongs to whoever owns the odom->base_link TF (the VO, whose
@@ -119,6 +141,16 @@ class ZedMimicNode(Node):
         # the real drone, set it to the measured ZED mount. Default mirrors the
         # current config.yaml so a standalone run is not silently off.
         self.declare_parameter("camera_offset_xyz", [0.14, 0.0, -0.08])
+        # The ZED's own point cloud. Same topic name the real wrapper uses, so
+        # feature_map_node subscribes to one string in sim and on the drone.
+        self.declare_parameter("out_cloud",
+                               "/zed/zed_node/point_cloud/cloud_registered")
+        # Ceiling on cloud publication, Hz. Named after the real wrapper's
+        # `point_cloud_freq` and defaulted to the same 10 Hz, which in practice
+        # caps nothing: BiguaSim's RGB arrives at ~2.5 Hz and the cloud is built
+        # per RGB frame. It is the knob to turn if a 640x480 organized cloud
+        # (~4.9 MB/message) starts costing more than the sim can spare.
+        self.declare_parameter("point_cloud_freq", 10.0)
 
         self.depth_scale = self.get_parameter("depth_scale").value
 
@@ -143,6 +175,18 @@ class ZedMimicNode(Node):
             Imu, "/zed/zed_node/imu/data", 10)
         self.pub_pose_gt = self.create_publisher(
             PoseStamped, self.get_parameter("out_pose").value, 10)
+        # Depth 1, like the images: a cloud is a snapshot of NOW, and a queued
+        # one is a picture of where the drone used to be.
+        self.pub_cloud = self.create_publisher(
+            PointCloud2, self.get_parameter("out_cloud").value, 1)
+
+        # Cloud rate limiting + cached pixel grids (rebuilt only on a resize).
+        freq = float(self.get_parameter("point_cloud_freq").value)
+        self._cloud_period_ns = int(1e9 / freq) if freq > 0.0 else 0
+        self._cloud_last_ns = 0
+        self._cloud_shape: tuple[int, int] | None = None
+        self._u: np.ndarray | None = None
+        self._v: np.ndarray | None = None
 
         # ── TF broadcasters ─────────────────────────────────────────────────
         self.publish_tf = self.get_parameter("publish_tf").value
@@ -169,7 +213,9 @@ class ZedMimicNode(Node):
         self.create_subscription(Odometry, p("in_odom"), self._cb_odom, 10)
         self.create_subscription(Imu, p("in_imu"), self._cb_imu, 10)
 
-        self.get_logger().info("ZED mimic ready — publishing /zed/zed_node/*")
+        self.get_logger().info(
+            "ZED mimic ready — publishing /zed/zed_node/* "
+            "(rgb, depth, camera_info, point cloud, odom, imu)")
 
     # ────────────────────────────────────────────────────────────────────────
     # Static TF tree (sent once; latched for late subscribers)
@@ -187,9 +233,18 @@ class ZedMimicNode(Node):
         mount.transform.translation.z = float(oz)
         mount.transform.rotation.w = 1.0  # camera looks straight forward
 
+        # zed_camera_link -> zed_left_camera_frame. Identity: the sim has a
+        # single virtual lens, so there is no left/right baseline to offset. It
+        # exists to give the point cloud the same parent it has on the drone.
+        left_cam = TransformStamped()
+        left_cam.header.stamp = mount.header.stamp
+        left_cam.header.frame_id = FRAME_CAMERA
+        left_cam.child_frame_id = FRAME_LEFT_CAM
+        left_cam.transform.rotation.w = 1.0
+
         optical = TransformStamped()
         optical.header.stamp = mount.header.stamp
-        optical.header.frame_id = FRAME_CAMERA
+        optical.header.frame_id = FRAME_LEFT_CAM
         optical.child_frame_id = FRAME_OPTICAL
         (optical.transform.rotation.x,
          optical.transform.rotation.y,
@@ -202,7 +257,7 @@ class ZedMimicNode(Node):
         imu.child_frame_id = FRAME_IMU
         imu.transform.rotation.w = 1.0  # IMU sits inside the camera housing
 
-        self.tf_static.sendTransform([mount, optical, imu])
+        self.tf_static.sendTransform([mount, left_cam, optical, imu])
 
     # ────────────────────────────────────────────────────────────────────────
     # Camera bundle: cache depth/info, publish everything on each RGB frame
@@ -240,6 +295,112 @@ class ZedMimicNode(Node):
         depth[depth >= 655.0] = np.nan
         msg.data = depth.tobytes()
 
+    # ────────────────────────────────────────────────────────────────────────
+    # Point cloud — what the ZED SDK produces natively on the drone
+    # ────────────────────────────────────────────────────────────────────────
+
+    def _cloud(self, depth_msg: Image, info: CameraInfo, rgb_msg: Image,
+               stamp) -> PointCloud2 | None:
+        """Back-project the registered depth into an organized XYZRGB cloud.
+
+        Organized (height x width, one point per pixel, NaN where depth is
+        invalid) and is_dense=False, exactly like the real wrapper's. The layout
+        is the ZED's too: x, y, z, rgb as four FLOAT32s, point_step 16, with the
+        colour packed into the rgb float as 0x00RRGGBB.
+
+        Published in FRAME_LEFT_CAM, so the axes are the robot convention
+        (X forward, Y left, Z up) rather than the optical one the depth image
+        uses. That single swap is the only difference between this and the depth
+        image it is built from.
+        """
+        h, w = depth_msg.height, depth_msg.width
+        if h == 0 or w == 0:
+            return None
+        depth = np.frombuffer(depth_msg.data, dtype=np.float32)
+        if depth.size != h * w:
+            # A row-padded or non-32FC1 depth image is not something to guess at.
+            self.get_logger().warn(
+                f"depth {depth_msg.encoding} {w}x{h} has {depth.size} floats; "
+                "not publishing a cloud from it", throttle_duration_sec=10.0)
+            return None
+        depth = depth.reshape(h, w)
+
+        fx, fy = info.k[0], info.k[4]
+        cx, cy = info.k[2], info.k[5]
+        if fx <= 0.0 or fy <= 0.0:
+            return None
+
+        if self._cloud_shape != (h, w):
+            vv, uu = np.mgrid[0:h, 0:w]
+            self._u = uu.astype(np.float32)
+            self._v = vv.astype(np.float32)
+            self._cloud_shape = (h, w)
+
+        # Optical axes (Z out of the lens) -> robot axes (X out of the lens).
+        # NaN depth propagates through the multiplies, which is exactly the
+        # "no return here" the real cloud carries.
+        x_opt = (self._u - np.float32(cx)) / np.float32(fx) * depth
+        y_opt = (self._v - np.float32(cy)) / np.float32(fy) * depth
+        cloud = np.empty((h, w, 4), dtype=np.float32)
+        cloud[:, :, 0] = depth
+        cloud[:, :, 1] = -x_opt
+        cloud[:, :, 2] = -y_opt
+        cloud[:, :, 3] = self._packed_rgb(rgb_msg, h, w)
+
+        msg = PointCloud2()
+        msg.header.stamp = stamp
+        msg.header.frame_id = FRAME_LEFT_CAM
+        msg.height = h
+        msg.width = w
+        msg.fields = [
+            PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
+            PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
+            PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
+            PointField(name="rgb", offset=12, datatype=PointField.FLOAT32,
+                       count=1),
+        ]
+        msg.is_bigendian = False
+        msg.point_step = 16
+        msg.row_step = msg.point_step * w
+        # NaNs are in there on purpose (invalid depth), so the cloud is NOT dense.
+        msg.is_dense = False
+        msg.data = cloud.tobytes()
+        return msg
+
+    def _cloud_due(self) -> bool:
+        """Rate limit, on the same steady clock the rest of the node stamps with."""
+        if not self._cloud_period_ns:
+            return True
+        now = self.get_clock().now().nanoseconds
+        if now - self._cloud_last_ns < self._cloud_period_ns:
+            return False
+        self._cloud_last_ns = now
+        return True
+
+    def _packed_rgb(self, rgb_msg: Image, h: int, w: int) -> np.ndarray:
+        """Colour channel as 0x00RRGGBB reinterpreted as float32, or zeros.
+
+        Zeros (black) rather than a refusal when the colour image cannot be
+        matched to the depth: the geometry is what every consumer in this stack
+        actually uses, and losing the whole cloud over its colour would be the
+        wrong trade.
+        """
+        blank = np.zeros((h, w), dtype=np.float32)
+        if rgb_msg.height != h or rgb_msg.width != w:
+            return blank
+        if rgb_msg.encoding not in ("bgr8", "rgb8"):
+            return blank
+        buf = np.frombuffer(rgb_msg.data, dtype=np.uint8)
+        if buf.size != h * w * 3:
+            return blank
+        px = buf.reshape(h, w, 3).astype(np.uint32)
+        b, g, r = (px[:, :, 0], px[:, :, 1], px[:, :, 2]) \
+            if rgb_msg.encoding == "bgr8" else \
+            (px[:, :, 2], px[:, :, 1], px[:, :, 0])
+        packed = (r << 16) | (g << 8) | b
+        return packed.view(np.float32) if packed.dtype == np.uint32 \
+            else packed.astype(np.uint32).view(np.float32)
+
     def _cb_rgb(self, msg: Image):
         # One clock read for the whole frame — this is what keeps RGB, depth
         # and CameraInfo stamps identical.
@@ -265,6 +426,15 @@ class ZedMimicNode(Node):
             self.pub_rgb_info.publish(self.last_info)
             # Depth is registered onto the RGB image -> same intrinsics.
             self.pub_depth_info.publish(self.last_info)
+
+        # The cloud is built from the depth frame that was JUST published and
+        # carries the same stamp, so a consumer pairing it with the odometry
+        # gets the same identity pairing the depth image had.
+        if self.last_depth is not None and self.last_info is not None \
+                and self._cloud_due():
+            cloud = self._cloud(self.last_depth, self.last_info, msg, stamp)
+            if cloud is not None:
+                self.pub_cloud.publish(cloud)
 
     # ────────────────────────────────────────────────────────────────────────
     # Odometry: fix frames, republish, and broadcast odom -> base_link TF

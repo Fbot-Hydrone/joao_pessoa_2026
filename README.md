@@ -221,7 +221,7 @@ Landing-site mission (`landing_sites_sim.launch.py`):
 ros2 topic echo /hydrone/mission/status          # state machine, 1 Hz
 ros2 topic echo /hydrone/pads/map                # the pad map (incl. `visited`)
 ros2 run rqt_image_view rqt_image_view /hydrone/pads/down/debug_image
-# RViz, fixed frame `map`: /hydrone/pads/markers, /hydrone/map/features
+# RViz, fixed frame `map`: /hydrone/pads/markers, /hydrone/map/cloud
 ```
 
 ## Configuration

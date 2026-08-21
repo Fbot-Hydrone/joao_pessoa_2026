@@ -8,7 +8,7 @@ vehicle and neither knows about the other:
     odom -> base_link -> {zed_camera_link, down_cam_link, ...}   (VO / zed_mimic)
     map  -> map_ned                                              (MAVROS static)
 
-Everything this stack MAPS (`/hydrone/map/features`, `/hydrone/pads/map`) is
+Everything this stack MAPS (`/hydrone/map/cloud`, `/hydrone/pads/map`) is
 built from /mavros/local_position/pose and therefore lives in `map`. Everything
 it SENSES hangs off `base_link`. Without an edge between the trees, RViz can
 render the map or the vehicle but never both in the same place.

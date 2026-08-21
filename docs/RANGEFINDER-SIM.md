@@ -97,6 +97,15 @@ o bridge publicava em `/mavros/distance_sensor/rangefinder`. `Subscription count
 **`/mavros/rangefinder`** (via param `out_range` no `sources_sim.launch.py`, com o
 default do bridge também corrigido). Sem tocar no plugin nem na yaml de config.
 
+> **Atualização (2026-08-21).** O bridge voltou a publicar em
+> `/mavros/distance_sensor/rangefinder` — mas **além** de `/mavros/rangefinder`,
+> não no lugar dele. O elo com o FCU continua sendo `/mavros/rangefinder` (nada
+> aqui mudou); a segunda publicação é um **mimic** do que o MAVROS publica no
+> drone real, para que a camada de autonomia (`pad_map_node`) leia o mesmo nome
+> de tópico na simulação e no hardware, sem `range_topic:=...`. Se o
+> `Subscription count` de `/mavros/rangefinder` voltar a zero, o problema é o
+> plugin — não é este mimic.
+
 > Lição: `topic echo` no lado ROS **não** prova o elo — o que quebrava era
 > ROS→MAVLink→FCU. O teste real é o `No Data` sumir no QGround e o
 > `Subscription count` do tópico do bridge virar 1.

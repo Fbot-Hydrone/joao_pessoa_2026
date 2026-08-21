@@ -85,6 +85,12 @@ ZED VIO:   zed_mimic RGB/depth ─> visual_odometry_node ─> /zed/zed_node/odom
 Rangefinder: BiguaSim RangeFinderSensor (LaserScan, nadir)
                  ─> rangefinder_bridge ─> /mavros/rangefinder (Range)
                  ─> MAVROS distance_sensor plugin ─> DISTANCE_SENSOR ─> ArduPilot RNGFND1
+                 └─> /mavros/distance_sensor/rangefinder (Range) — the same
+                     reading on the topic MAVROS publishes on the real drone, so
+                     the autonomy layer reads ONE name in both worlds.
+ZED cloud: zed_mimic depth ─> /zed/zed_node/point_cloud/cloud_registered
+                 ─> feature_map_node (accumulation only; the ZED SDK publishes
+                    this natively on the drone)
 ```
 
 **Files touched:**
@@ -107,7 +113,9 @@ stack (`hydrone.launch.py`) is unchanged and agnostic.
    looks horizontal**, Holodeck's RangeFinderSensor scanned sideways — adjust the
    `rotation` (or use a socket) in `config.yaml`; it is natively a horizontal scanner.
 2. Adapter: `ros2 topic echo /mavros/rangefinder` — a `Range` (the topic the
-   MAVROS distance_sensor subscriber listens on in this build).
+   MAVROS distance_sensor subscriber listens on in this build). The mimic copy on
+   `/mavros/distance_sensor/rangefinder` must carry the same value — that is the
+   one `pad_map_node` reads, in sim and on the drone.
 3. ArduPilot sees it: in QGC/MAVProxy check `RANGEFINDER` distance updates, or
    `ros2 topic echo /mavros/rangefinder/rangefinder`.
 4. Confirm it is **not** driving height: EKF altitude should still track baro, and

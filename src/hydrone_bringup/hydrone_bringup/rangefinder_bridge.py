@@ -15,6 +15,16 @@ node is the small adapter in between:
   (This MAVROS build's distance_sensor subscriber listens on ~/<name> from the
   /mavros namespace, i.e. /mavros/rangefinder — not /mavros/distance_sensor/*.)
 
+The SAME Range also goes out on /mavros/distance_sensor/rangefinder, which is
+where MAVROS PUBLISHES it on the real drone (the VL53L1X, read natively over
+I2C). Nothing in the sim needs that copy — MAVROS is fed by the topic above —
+but the autonomy layer does: without it, pad_map_node has to be told a different
+topic in sim than on the drone, and that was the last thing separating
+landing_sites.launch.py's two worlds. So this node mimics MAVROS's real output
+the way zed_mimic_node mimics the ZED's, and the autonomy reads ONE name
+everywhere. On the real drone this node does not run at all and MAVROS itself
+publishes that topic.
+
 The rangefinder is a nadir altimeter for landing/flare only (see holybro_sitl.parm:
 it is NOT a global EKF height source). We publish the single downward beam; if the
 sim sensor is configured with LaserCount>1 we take the nearest finite return.
@@ -38,7 +48,13 @@ class RangefinderBridge(Node):
         # sources_sim.launch.py (agent name and LaserMaxDistance); the defaults
         # here mirror it and only apply to a standalone `ros2 run`.
         self.declare_parameter("in_scan", "/biguasim/uav0_id0/RangeFinderSensor")
+        # Into MAVROS (sim plumbing): the topic its distance_sensor subscriber
+        # listens on, so the reading reaches ArduPilot.
         self.declare_parameter("out_range", "/mavros/rangefinder")
+        # The contract copy: what MAVROS publishes on the drone. Consumers read
+        # this one, in both worlds. Empty disables it.
+        self.declare_parameter("out_range_mimic",
+                               "/mavros/distance_sensor/rangefinder")
         self.declare_parameter("min_range", 0.20)   # m; matches RNGFND1_MIN_CM
         self.declare_parameter("max_range", 40.0)    # m; = LaserMaxDistance / RNGFND1_MAX_CM
         self.declare_parameter("field_of_view", 0.1) # rad; narrow single beam
@@ -51,10 +67,15 @@ class RangefinderBridge(Node):
         self.frame_id = p("frame_id")
 
         self.pub = self.create_publisher(Range, p("out_range"), 10)
+        mimic_topic = p("out_range_mimic")
+        self.pub_mimic = self.create_publisher(Range, mimic_topic, 10) \
+            if mimic_topic else None
         self.create_subscription(LaserScan, p("in_scan"), self._cb, 10)
 
         self.get_logger().info(
-            f"Rangefinder bridge ready — {p('in_scan')} -> {p('out_range')}")
+            f"Rangefinder bridge ready — {p('in_scan')} -> {p('out_range')}"
+            + (f" (+ {mimic_topic}, mimicking real MAVROS)" if mimic_topic
+               else ""))
 
     def _cb(self, scan: LaserScan):
         # Nearest finite return within the valid band (single beam for LaserCount=1).
@@ -71,6 +92,8 @@ class RangefinderBridge(Node):
         msg.max_range = self.max_range
         msg.range = min(vals)
         self.pub.publish(msg)
+        if self.pub_mimic is not None:
+            self.pub_mimic.publish(msg)
 
 
 def main(args=None):

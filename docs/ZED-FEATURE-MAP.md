@@ -1,7 +1,15 @@
-# ZED feature map — how the point cloud and the coverage grid are built
+# ZED feature map — how the world map and the coverage grid are built
 
-What `feature_map_node` does with the ZED's RGB-D stream, why the map lands in
-the `map` frame, and what to set in RViz to actually see it.
+What `feature_map_node` does with the ZED's point cloud, where the map lands, and
+what to set in RViz to actually see it.
+
+> **2026-08-21.** This node no longer back-projects depth itself. The ZED
+> publishes `point_cloud/cloud_registered` natively, so the camera's own product
+> is what this node consumes — `zed_mimic_node` produces it in sim, `zed_wrapper`
+> on the drone. What stays here is what no camera provides: the accumulation into
+> a persistent map, and the coverage grid. Sections marked *(historic)* below
+> describe the ORB-keypoint version this replaced and are kept for the reasoning,
+> not as a description of the code.
 
 > Sibling documents: [`ZED-VISUAL-ODOMETRY.md`](ZED-VISUAL-ODOMETRY.md) covers the
 > node that estimates *where the drone is*. This one covers the node that records
@@ -16,8 +24,13 @@ Source: `src/hydrone_nav/hydrone_nav/feature_map_node.py`.
 
 | Topic | Type | Rate | Frame | Contents |
 |---|---|---|---|---|
-| `/hydrone/map/features` | `sensor_msgs/PointCloud2` | `publish_hz` = 1 Hz | `map` | one point per occupied voxel centre |
-| `/hydrone/map/coverage` | `nav_msgs/OccupancyGrid` | `publish_hz` = 1 Hz | `map` | how thoroughly each 0.5 m patch of floor has been observed |
+| `/hydrone/map/cloud` | `sensor_msgs/PointCloud2` | `publish_hz` = 1 Hz | `odom` | one point per occupied voxel, at the centroid of what landed in it |
+| `/hydrone/map/coverage` | `nav_msgs/OccupancyGrid` | `publish_hz` = 1 Hz | `odom` | how thoroughly each 0.5 m patch of floor has been observed |
+
+Neither is under `/zed/...`, and that is the rule: `/zed/zed_node/*` is what the
+CAMERA publishes (and what the sim mimics), `/hydrone/*` is what this stack
+computes. The per-frame cloud belongs to the ZED and keeps its name; the
+accumulated map is ours.
 
 Both are **whole-map snapshots**, republished in full on every tick — not
 incremental updates. Both QoS profiles are RELIABLE + **VOLATILE**, depth 1.
@@ -32,13 +45,19 @@ Nothing in the stack plans around either of them today.
 ## 2. Inputs
 
 ```
-/zed/zed_node/rgb/image_rect_color    ─┐  bgr8
-/zed/zed_node/depth/depth_registered  ─┤  32FC1, metres, NaN = invalid
-/zed/zed_node/rgb/camera_info         ─┤  K = fx, fy, cx, cy
-/mavros/local_position/pose           ─┘  where the drone was
+/zed/zed_node/point_cloud/cloud_registered ─┐  organized XYZRGB, NaN = no return
+/zed/zed_node/odom                         ─┘  where the drone was, per frame
         +
-TF base_link -> zed_left_camera_optical_frame   (constant mount, read once)
+TF base_link -> <the cloud's own frame_id>     (constant mount, read once)
 ```
+
+Two topics, both the camera's. The intrinsics are gone from this node entirely —
+they were only ever needed to turn pixels into points, which is now the camera's
+job on both sides. The mount TF is looked up against **whatever frame the cloud
+arrives stamped with** rather than a configured frame name: the real wrapper
+stamps its cloud with the left camera's robot-convention frame and its images
+with that frame's optical child, and reading the header means this node is right
+either way with nothing to configure.
 
 All four are subscribed with a **BEST_EFFORT, KEEP_LAST(1)** sensor profile, and
 each callback does nothing but stash the latest message. Only the RGB callback
@@ -58,8 +77,11 @@ the difference and needs no configuration change between the two.
 
 ### Decoding
 
-Images are converted by `hydrone_vision/image_convert.py` — `np.frombuffer` plus
-a reshape, no `cv_bridge`. That is not a micro-optimisation: cv_bridge's compiled
+The cloud is read with `np.frombuffer` plus a reshape — no `point_cloud2.read_points`,
+no `cv_bridge`. Only FLOAT32 `x`/`y`/`z` on a 4-byte grid is accepted (what the
+ZED and the mimic both publish); anything else is logged and dropped rather than
+guessed at, because a misread cloud is silently wrong geometry in the map. The
+same reasoning applied to images when this node still read them: That is not a micro-optimisation: cv_bridge's compiled
 extension is linked against the numpy ROS was built with, this container installs
 numpy 2.x over it, and the mismatch **segfaults on the first conversion** rather
 than failing at import. `depth_image_to_numpy` also normalises the two depth
@@ -70,7 +92,9 @@ the rest of the node only ever sees float32 metres with NaN holes.
 
 ## 3. The per-frame pipeline
 
-Every RGB frame that survives the rate gate runs these five steps.
+Every cloud that survives the rate gate runs these steps. Steps 1–3 used to live
+here and now happen inside the camera; they are kept *(historic)* because the
+measurements in them are why the map looks the way it does.
 
 ### Step 0 — throttle
 
@@ -79,7 +103,7 @@ frames arriving early return immediately. The ZED stream is shared with
 `visual_odometry_node`, which is in the flight-critical loop, and mapping does not
 need the full camera rate to build a usable map.
 
-### Step 1 — detect features
+### Step 1 — detect features *(historic — the ZED's cloud replaced this)*
 
 ```python
 self.orb = cv2.ORB_create(nfeatures=max_features)   # default 400
@@ -101,7 +125,7 @@ accumulation is done by voxel hashing rather than by tracking landmarks
 `max_features` is 400 here versus 1000 in the VO node. The VO needs a large pool
 so enough survive ratio-test matching; the map keeps every keypoint it finds.
 
-### Step 2 — read depth at each keypoint
+### Step 2 — read depth at each keypoint *(historic)*
 
 Keypoint pixel coordinates are rounded to integers and used to index the cached
 depth image. Two masks are applied, both vectorised:
@@ -114,10 +138,10 @@ depth image. Two masks are applied, both vectorised:
 
 If nothing survives either mask the frame is abandoned.
 
-### Step 3 — back-project to the camera optical frame
+### Step 3 — back-project to the camera frame *(now the camera's job)*
 
-Standard pinhole inverse projection, one vectorised expression over all surviving
-keypoints:
+Standard pinhole inverse projection. `zed_mimic_node` does exactly this now, once,
+for every pixel, and publishes the result as the ZED's cloud:
 
 ```
 x = (u - cx) / fx · d
@@ -125,10 +149,20 @@ y = (v - cy) / fy · d
 z = d
 ```
 
-The result is in the **optical convention**: Z forward along the lens axis, X
-right, Y down. Note the asymmetry with the VO node — that one back-projects the
-*previous* frame's matches to feed PnP, whereas this one back-projects the
-*current* frame's keypoints because it is placing them, not tracking them.
+The mimic then swaps those optical axes (Z forward, X right, Y down) for the
+robot convention the real wrapper's cloud uses (X forward, Y left, Z up) and
+stamps it `zed_left_camera_frame`. What arrives here is already 3-D points, so
+this node's remaining geometry is two gates and one transform:
+
+- **valid range** — `min_depth <= |p| <= max_depth` (**0.4 – 20.0 m**). The
+  point's *distance from the camera*, not one axis of it, so the gate means the
+  same thing whichever convention the cloud's frame uses. NaN (no return) fails
+  it, which is the answer.
+- **not a flying pixel** — a 3×3 min/max bracket on that range, rejecting any
+  point whose neighbourhood spreads by more than `max_edge_step` (**0.30 m**).
+  This is why the cloud arriving **organized** matters: flatten it and there are
+  no pixel neighbours left to compare against. The node still runs on a flat
+  cloud, says so once, and accepts the noise.
 
 ### Step 4 — transform to the world
 
@@ -140,14 +174,14 @@ p_cam       = p_base + R_world_base @ t_base_opt
 world       = local @ R_world_opt.T + p_cam
 ```
 
-- **`R_base_opt` / `t_base_opt`** — the camera mount, `base_link →
-  zed_left_camera_optical_frame`. Looked up from TF **once** and cached forever
-  (`_ensure_mount_tf`); it is a bolted-on camera, so re-reading it every frame
-  would buy nothing. Until that lookup succeeds the node logs
-  `waiting for TF base_link -> zed_left_camera_optical_frame` every 5 s and
+- **the camera mount** — `base_link → <the cloud's frame_id>`. Looked up from TF
+  **once per frame name** and cached (`_mount_tf`); it is a bolted-on camera, so
+  re-reading it every frame would buy nothing. Until that lookup succeeds the
+  node logs `waiting for TF base_link -> zed_left_camera_frame` every 5 s and
   processes nothing — **this is the usual reason the map stays empty**.
-- **`R_world_base` / `p_base`** — the drone's pose, straight from
-  `/mavros/local_position/pose`, converted by a local `quat_to_matrix`.
+- **`R_world_base` / `p_base`** — the drone's pose, from `/zed/zed_node/odom`
+  (the camera's own, one per frame, carrying that frame's stamp), converted by a
+  local `quat_to_matrix`.
 
 Note `local @ R.T` rather than `R @ local`: the points are stored row-wise
 (N×3), so the transpose applies the rotation to each row without a transpose of
@@ -342,13 +376,13 @@ Two parents for one frame is not a tree, and TF rejects it.
 
 **Fixed Frame** → `map`.
 
-**PointCloud2** on `/hydrone/map/features`:
+**PointCloud2** on `/hydrone/map/cloud`:
 
 | Setting | Value | Why |
 |---|---|---|
 | Style | `Boxes` | shows the voxel structure |
 | Size (m) | `0.15` | match `voxel_size`; the default 0.01 m renders a few hundred points as almost nothing, which looks exactly like an empty topic |
-| Color Transformer | `AxisColor` (Z) or `FlatColor` | the cloud has only x/y/z — there is no intensity field to colour by |
+| Color Transformer | `AxisColor` (Z) or `FlatColor` | the accumulated map carries only x/y/z. (The ZED's own `point_cloud/cloud_registered` does have an `rgb` field, if you want the camera view in 3-D — point a second PointCloud2 display at it with Fixed Frame `odom`.) |
 
 **Map** on `/hydrone/map/coverage`:
 
@@ -369,11 +403,14 @@ In order of likelihood:
    delivers nothing, silently. Check with `ros2 topic hz` **as each user**: if one
    sees data and the other does not, this is it. In the container the stack runs
    as `hydrone`, so run RViz as `hydrone` too.
-2. **The mount TF never arrived** — `_ensure_mount_tf` is still failing, so
-   nothing was ever accumulated and nothing is ever published. Look for
-   `waiting for TF base_link -> zed_left_camera_optical_frame` in the log.
-3. **No pose** — `/mavros/local_position/pose` is silent (MAVROS down, or the EKF
-   has no position), so every frame returns early.
+2. **The mount TF never arrived** — `_mount_tf` is still failing, so nothing was
+   ever accumulated and nothing is ever published. Look for
+   `waiting for TF base_link -> zed_left_camera_frame` in the log.
+3. **No cloud, or no pose.** `ros2 topic hz /zed/zed_node/point_cloud/cloud_registered`
+   — if that is silent, the problem is in the sources layer, not here (in sim,
+   zed_mimic; on the drone, a `zed_wrapper` with the point cloud turned off).
+   Then `/zed/zed_node/odom`: no pose within `max_pose_dt` of a cloud's stamp and
+   the frame is dropped, with a throttled warning saying how many.
 4. **Fixed Frame is not `map`**, or the `map → odom` link is missing and you are
    viewing from `odom`.
 5. **Point size left at the default**, so the cloud is drawn but invisible.
@@ -383,9 +420,9 @@ sit on the drone instead of spread across the arena — that is the `p_base`
 question, not a frame or transform question. See
 [Is the placement actually global?](#is-the-placement-actually-global).
 
-Once it is up, the health check is `ros2 topic hz /hydrone/map/features` — it
+Once it is up, the health check is `ros2 topic hz /hydrone/map/cloud` — it
 should read 1.0 Hz — and `ros2 topic echo --once --field width
-/hydrone/map/features`, which is the live voxel count.
+/hydrone/map/cloud`, which is the live voxel count.
 
 ---
 
@@ -393,22 +430,26 @@ should read 1.0 Hz — and `ros2 topic echo --once --field width
 
 | Param | Default | Meaning |
 |---|---|---|
-| `max_features` | 400 | ORB keypoint budget per frame |
+| `stride` | 4 | sample every Nth pixel in each axis |
 | `voxel_size` | 0.15 | cloud quantisation, metres |
 | `coverage_res` | 0.5 | coverage cell size, metres |
-| `min_depth` / `max_depth` | 0.4 / 20.0 | valid depth band, metres |
-| `max_voxels` | 200000 | hard cap; new cells dropped past it |
+| `min_depth` / `max_depth` | 0.4 / 20.0 | valid **range** band, metres |
+| `max_edge_step` | 0.30 | flying-pixel rejection threshold, metres |
+| `max_voxels` | 400000 | hard cap; new cells dropped past it |
 | `max_coverage_cells` | 100000 | same, for the coverage grid |
 | `publish_hz` | 1.0 | snapshot rate for both outputs |
-| `process_hz` | 4.0 | frames per second actually processed |
-| `in_rgb` / `in_depth` / `in_info` | ZED wrapper names | input topics |
-| `pose_topic` | `/mavros/local_position/pose` | where the drone's pose comes from |
-| `optical_frame` / `base_frame` | `zed_left_camera_optical_frame` / `base_link` | mount TF lookup |
-| `cloud_topic` / `coverage_topic` | `/hydrone/map/features` / `/hydrone/map/coverage` | outputs |
+| `process_hz` | 4.0 | clouds per second actually processed |
+| `max_pose_dt` | 0.15 | how stale a pose may be for a cloud, seconds |
+| `in_cloud` | `/zed/zed_node/point_cloud/cloud_registered` | the camera's cloud |
+| `odom_topic` | `/zed/zed_node/odom` | where the drone's pose comes from |
+| `base_frame` | `base_link` | mount TF lookup (the other end comes from the cloud) |
+| `cloud_topic` / `coverage_topic` | `/hydrone/map/cloud` / `/hydrone/map/coverage` | outputs |
 
-The world frame is **not** a parameter — `self.world_frame = "map"` is hardcoded.
-`pad_map_node` exposes the same thing as a `world_frame` parameter; the
-inconsistency is real but harmless while both are `map`.
+The world frame is **not** a parameter: it is adopted from the odometry's own
+`frame_id`, because the map belongs in the frame of the pose that placed it. That
+is `odom` — continuous, whereas `map` steps at every EKF correction and would
+tear the cloud each time. `map_odom_node` publishes `map → odom` so RViz can
+still display it in `map`.
 
 ---
 
