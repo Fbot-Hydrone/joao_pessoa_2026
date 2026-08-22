@@ -133,6 +133,68 @@ def _solve(all_corners, all_ids, board, size):
     return err, K, D
 
 
+def _sanity_check(fx, fy, cx, cy, size, expect_hfov):
+    """Is this answer physically possible for this camera?
+
+    REPROJECTION ERROR CANNOT ANSWER THIS. With views clustered at one distance
+    and one part of the frame, focal length trades off against depth: the
+    solver finds a combination that fits the corners to a fraction of a pixel
+    while being wildly wrong about the lens. Measured on a real 13-view set
+    from a C270 -- 0.4866 px, "good" by that metric, and fx = 108.8 implying a
+    142-degree lens with the optical centre 28 px from the top edge.
+
+    So the answer is checked against what a camera can actually be.
+    """
+    W, H = size
+    problems = []
+
+    hfov = 2.0 * np.degrees(np.arctan(W / (2.0 * fx)))
+    vfov = 2.0 * np.degrees(np.arctan(H / (2.0 * fy)))
+    if expect_hfov > 0 and not (0.5 * expect_hfov < hfov < 1.6 * expect_hfov):
+        # Quote the fx a camera of this FOV would actually have. The ratio of
+        # the ANGLES is not the ratio of the focal lengths -- fx goes as
+        # cot(hfov/2) -- and reporting the angle ratio understates the error.
+        fx_expect = W / (2.0 * np.tan(np.radians(expect_hfov) / 2.0))
+        problems.append(
+            f"implied horizontal FOV is {hfov:.1f} deg, but this camera is "
+            f"about {expect_hfov:.0f} deg. fx should be near {fx_expect:.0f}, "
+            f"not {fx:.1f} -- out by {fx_expect / max(fx, 1e-6):.1f}x.")
+
+    # The principal point is near the sensor centre on any normal camera; a
+    # long way off means the solve wandered, not that the sensor is exotic.
+    if abs(cx - W / 2.0) > 0.25 * W:
+        problems.append(f"cx = {cx:.1f} is far from the image centre "
+                        f"{W / 2.0:.0f}.")
+    if abs(cy - H / 2.0) > 0.25 * H:
+        problems.append(f"cy = {cy:.1f} is far from the image centre "
+                        f"{H / 2.0:.0f}.")
+
+    ratio = fx / fy if fy else float("inf")
+    if not 0.8 < ratio < 1.25:
+        problems.append(f"fx/fy = {ratio:.3f}; pixels should be nearly square.")
+
+    print(f"\nimplied FOV: {hfov:.1f} deg horizontal, {vfov:.1f} deg vertical")
+    if not problems:
+        print("sanity     : plausible for this camera")
+        return True
+
+    print("\n" + "=" * 68)
+    print("REJECT -- this calibration is not physically plausible.")
+    for p in problems:
+        print(f"  * {p}")
+    print()
+    print("  The low reprojection error above does NOT contradict this. It")
+    print("  only says the model fits the views you gave it, and views that")
+    print("  are all alike can be fitted by the wrong lens at the wrong")
+    print("  distance. The cure is coverage, not more frames of the same:")
+    print("    - the board at all four CORNERS of the frame (fixes cx, cy)")
+    print("    - the board CLOSE and FAR (separates focal length from depth)")
+    print("    - the board TILTED 30-45 deg (constrains distortion)")
+    print("  Do not put these numbers in the launch file.")
+    print("=" * 68)
+    return False
+
+
 def _coverage_report(all_corners, size):
     """Say what the images actually cover, before believing the answer.
 
@@ -172,6 +234,10 @@ def main():
     ap.add_argument("--dict", default="4x4_250")
     ap.add_argument("--try-sizes", default="9x11,11x9")
     ap.add_argument("--min-corners", type=int, default=12)
+    ap.add_argument("--expect-hfov", type=float, default=60.0,
+                    help="nominal horizontal FOV of the camera, degrees, used "
+                         "only to sanity-check the answer. 0 disables. The "
+                         "C270's is about 60.")
     args = ap.parse_args()
 
     paths = sorted(sum([glob.glob(os.path.join(args.images, e))
@@ -246,6 +312,7 @@ def main():
     err, K, D = _solve(all_corners, all_ids, board, size)
 
     fx, fy, cx, cy = K[0, 0], K[1, 1], K[0, 2], K[1, 2]
+    plausible = _sanity_check(fx, fy, cx, cy, size, args.expect_hfov)
     if err < 0.5:
         verdict = "good"
     elif err < 1.0:
@@ -259,6 +326,9 @@ def main():
           " ".join(f"{v:.6f}" for v in D.flatten()[:5]))
 
     d = D.flatten()
+    if not plausible:
+        print("\nNot printing launch arguments for a rejected calibration.")
+        sys.exit(2)
     print("\nLaunch arguments:\n")
     print(f"  ./scripts/jetson_up.sh \\")
     print(f"      down_cam_calibrated:=true \\")
