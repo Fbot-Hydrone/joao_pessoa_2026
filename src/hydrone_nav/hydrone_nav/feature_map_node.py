@@ -597,7 +597,11 @@ class FeatureMapNode(Node):
         msg.point_step = 12
         msg.row_step = msg.point_step * msg.width
         msg.is_dense = True
-        msg.data = xyz.astype(np.float32).tobytes()
+        # array.array, NOT bytes. rclpy's uint8[] field converts a bytes
+        # object element by element in Python: measured on the Jetson at
+        # 361 ms for a 672x376x3 frame against 0.2 ms for an array.array,
+        # which is the difference between 1.2 Hz and the camera's 15.
+        msg.data = array.array("B", xyz.astype(np.float32).tobytes())
         return msg
 
     def _grid(self, stamp) -> OccupancyGrid:

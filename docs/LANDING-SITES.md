@@ -540,7 +540,14 @@ Two changes:
        python3 -c "from cv_bridge import CvBridge; CvBridge(); print(\"ok\")"'
    ```
 2. The landing-pad nodes do not use `cv_bridge` at all —
-   `hydrone_vision/image_convert.py` does the conversion in numpy. An Image
+   `hydrone_vision/image_convert.py` does the conversion in numpy.
+
+   **That file also carries a performance trap worth knowing about.** It used to
+   assign `msg.data = <bytes>`, and rclpy converts a `bytes` object into a
+   `uint8[]` field element by element in Python — 361 ms for one 672x376x3 frame
+   on the Jetson, against 0.2 ms for `array.array("B", ...)`. Since this
+   function publishes every simulated image too, the simulator was paying it on
+   every frame. See [`JETSON-REAL-STACK.md`](JETSON-REAL-STACK.md) §7. An Image
    message is a header, a byte buffer and an encoding string; reshaping that
    needs no C extension, and the one it was using could take a node down
    mid-flight. (It also handles row padding and `16UC1` millimetre depth, which

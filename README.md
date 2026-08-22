@@ -118,6 +118,29 @@ before flying anything for real, so the image and the source agree.
 > `COPY src/`, so a source edit can't invalidate it. If you add a pip or apt
 > dependency, add it above the marked line in the `Dockerfile`, not below it.
 
+### On the drone's Jetson
+
+Same idea, different script — the board has no `docker compose`, so
+`scripts/jetson_up.sh` is a plain `docker run` with the same dev bind mounts:
+
+```bash
+./scripts/jetson_up.sh                  # the phase 1 mission
+./scripts/jetson_up.sh --sources        # cameras + MAVROS only, no flight
+./scripts/jetson_up.sh --rebuild        # after a .msg / setup.py / new-file change
+./scripts/jetson_up.sh --build          # rebuild the image
+./scripts/jetson_up.sh --no-dev         # image only — what should actually fly
+```
+
+Building that image needs one file that is **not** in the repo: the ZED SDK
+installer, `docker/ZED_SDK_Tegra_L4T32.7_v4.0.8.zstd.run` (84 MB, download
+*ZED SDK for JetPack 4.6.X (L4T 32.7) 4.0.8* from stereolabs.com). The pyzed
+wheel beside it **is** committed, because unlike the installer it cannot be
+re-fetched from a URL — it is a from-source build against that exact SDK patch
+and numpy 1.21. Details in [`docs/JETSON-REAL-STACK.md`](docs/JETSON-REAL-STACK.md) §3.
+
+Nothing is needed to *run* an image that already exists: both files are build
+inputs only.
+
 **GPU:** by default the container renders on the integrated GPU (`/dev/dri`
 via mesa). To use an NVIDIA dGPU, install the container toolkit once on the
 host — `scripts/docker_up.sh` then detects it and enables
