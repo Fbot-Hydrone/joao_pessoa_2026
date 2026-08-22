@@ -59,14 +59,19 @@ from launch_ros.parameter_descriptions import ParameterValue
 def generate_launch_description():
     args = [
         DeclareLaunchArgument(
-            "takeoff_alt", default_value="2.5",
+            "takeoff_alt", default_value="1.0",
             description="Altitude for everything: takeoff, turning, travelling "
                         "and the confirmation hover, m above the top of the "
                         "base the drone starts on. Low on purpose — this is "
                         "test code and a fall from 1 m is cheap. At 1 m the "
-                        "320x240/90deg belly camera covers a ~2 m square of "
-                        "floor, so a 1 m base stays in frame while the "
-                        "position error is under ~0.5 m. There is NO obstacle "
+                        "REAL belly camera (640x480, measured fx 814.6, so "
+                        "about 43 deg horizontal) covers roughly 0.8 x 0.6 m "
+                        "of floor — NARROWER than the 90 deg simulated one "
+                        "this text used to describe, and narrower than a 1 m "
+                        "base. The base will overfill the frame at this "
+                        "height; the detector needs the whole ring to score "
+                        "well, so if confirmation fails at 1 m that is the "
+                        "first thing to raise. There is NO obstacle "
                         "avoidance: raise this only for an arena you know is "
                         "clear at the new height."),
         DeclareLaunchArgument(
