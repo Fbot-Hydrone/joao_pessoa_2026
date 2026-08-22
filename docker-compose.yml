@@ -10,7 +10,7 @@ services:
       # Private DDS domain so other ROS 2 apps on this host (default domain 0)
       # can't reach the micro-ROS agent. Match this on the host via env.sh.
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-42}
-      - ROS_LOCALHOST_ONLY=1
+      # - ROS_LOCALHOST_ONLY=1
       # Asset backend used by `biguasim.install(...)`; set on the host if used.
       - BS_WORLDS_URL=${BS_WORLDS_URL:-}
     volumes:
@@ -29,9 +29,16 @@ services:
       - /dev/dri:/dev/dri
     # HYDRONE_LAUNCH picks what runs. Default is the bare sim bring-up (sensors
     # + SITL + MAVROS, no autonomy) so `docker_up.sh` still gives a vehicle you
-    # fly yourself from QGC. `docker_up.sh --landing-sites` sets it to
-    # landing_sites_sim.launch.py, which adds the pad detectors, the maps and
-    # the autonomous land/take-off mission on top.
+    # fly yourself from QGC. `docker_up.sh --phase1` sets it to
+    # phase1_sim.launch.py (docs/PHASE1-MISSION.md) and `--landing-sites` to
+    # landing_sites_sim.launch.py (docs/LANDING-SITES.md); both add the pad
+    # detectors, the maps and a mission on top.
+    #
+    # HYDRONE_LAUNCH_ARGS is whatever `name:=value` pairs were passed to
+    # docker_up.sh, joined with spaces, and is normally empty. It is
+    # deliberately UNQUOTED below: compose interpolates it into this string and
+    # then splits shell-style, which is how several pairs become several
+    # arguments — and how an empty value adds nothing at all.
     #
     # odom_error_print defaults ON here (the sim is where you want to see VO
     # drift), unlike the launch file's own default. scripts/docker_up.sh flips
@@ -40,4 +47,4 @@ services:
     # ODOM_SOURCE selects what the EKF navigates on (docker_up.sh --ground-truth
     # sets it to ground_truth). Default vo — the estimator the real drone will
     # fly on; ground_truth is a debugging aid only. See sources_sim.launch.py.
-    command: ros2 launch hydrone_bringup ${HYDRONE_LAUNCH:-hydrone_sim.launch.py} odom_error_print:=${ODOM_ERROR_PRINT:-true} odom_source:=${ODOM_SOURCE:-vo}
+    command: ros2 launch hydrone_bringup ${HYDRONE_LAUNCH:-hydrone_sim.launch.py} odom_error_print:=${ODOM_ERROR_PRINT:-true} odom_source:=${ODOM_SOURCE:-vo} ${HYDRONE_LAUNCH_ARGS:-}

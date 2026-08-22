@@ -38,6 +38,8 @@ from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import CameraInfo, Image, Range
 
+from mavros_msgs.msg import State
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..",
                                 "hydrone_vision", "test"))
 
@@ -79,6 +81,11 @@ class FakeSim(Node):
         # rangefinder_bridge mimics it in sim — pad_map_node's one default.
         self.pub_range = self.create_publisher(
             Range, "/mavros/distance_sensor/rangefinder", sensor_qos)
+        # pad_map_node maps nothing until the vehicle has armed (require_armed,
+        # see test_takeoff_base.py). A stack that never arms therefore maps
+        # nothing at all, so standing in for MAVROS means publishing this too —
+        # the drone in this test is notionally airborne over the pad.
+        self.pub_state = self.create_publisher(State, "/mavros/state", 10)
 
         du, dv = pad_offset_px
         scene = paste_pad(ground(WIDTH, HEIGHT), render_pad(),
@@ -122,6 +129,13 @@ class FakeSim(Node):
         rng.min_range, rng.max_range = 0.05, 40.0
         rng.range = float(self.range_m)
         self.pub_range.publish(rng)
+
+        state = State()
+        state.header.stamp = now
+        state.connected = True
+        state.armed = True
+        state.mode = "GUIDED"
+        self.pub_state.publish(state)
 
 
 class MapSink(Node):

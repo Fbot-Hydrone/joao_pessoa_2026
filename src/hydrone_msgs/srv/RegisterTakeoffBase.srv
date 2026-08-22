@@ -1,0 +1,21 @@
+# Declare the pad the drone is standing on, at the moment it first arms.
+#
+# The drone always starts on a base, and that base is NOT one of the sites it is
+# meant to land on. Left to the detector it would eventually be seen from the
+# air, land in the map as an ordinary candidate, and cost a full travel +
+# confirmation hover to rule out — pure position-estimate drift spent proving
+# something already known. Registering it instead is free and certain.
+#
+# Called once, by hydrone_mission/phase1_mission_node, immediately after the
+# first successful arm. pad_map_node claims any existing entry within
+# takeoff_base_radius of `position` (a base sighted on the ground before arming
+# is the same physical thing) and creates one otherwise.
+
+# Where the drone is standing, in the map frame. Normally straight from
+# /mavros/local_position/pose.
+geometry_msgs/Point position
+---
+bool success
+string message
+# Id of the entry that now carries is_takeoff_base, claimed or newly created.
+uint16 id

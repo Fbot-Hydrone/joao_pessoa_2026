@@ -56,11 +56,43 @@ Untouched by the edit (still at firmware default): all `ATC_RAT_*_FLTD/FLTT`
 
 ### 1a. Things that check out
 
-- The renamed, unit-aware `WPNAV_*` names in the added comment are **correct for
-  this build**: `AC_WPNav.cpp` defines `SPD` (m/s), `SPD_UP`, `SPD_DN`, `ACC`
-  (m/s²), `JERK`. The old `WPNAV_SPEED` (cm/s) does **not** exist here —
-  `grep '"SPEED"'` in `AC_WPNav.cpp` returns nothing. So the claim that
-  old-name lines were being silently dropped is right.
+- The **units and suffixes** are right for this build: `AC_WPNav.cpp` defines
+  `SPD` (m/s), `SPD_UP`, `SPD_DN`, `ACC` (m/s²), `JERK`. The old `WPNAV_SPEED`
+  (cm/s) does **not** exist here — `grep '"SPEED"'` in `AC_WPNav.cpp` returns
+  nothing. So the claim that old-name lines were being silently dropped is
+  right.
+
+> ### CORRECTION (2026-08-21): the **prefix** is wrong too
+>
+> `WPNAV_SPD` and `WPNAV_ACC`, used in the table above and in the verbatim block
+> in §5, are **not parameter names in this build either**. The group prefix is
+> `WP_`, not `WPNAV_`:
+>
+> ```
+> ArduCopter/Parameters.cpp:369:    GOBJECTPTR(wp_nav, "WP_", AC_WPNav),
+> ```
+>
+> and `grep -rn '"WPNAV_"' ArduCopter/` returns nothing. The real names are
+> **`WP_SPD`, `WP_ACC`, `WP_SPD_UP`, `WP_SPD_DN`, `WP_JERK`**. `PSC_ANGLE_MAX`
+> and every `ATC_*` above are correct as written.
+>
+> This is the *same* failure the 2026-08-18 note describes catching — a defaults
+> line with an unknown name is silently ignored — caught once, fixed to a second
+> name that is also unknown, and not re-verified. Two consequences:
+>
+> 1. **Anyone re-applying the §5 block verbatim gets the attitude softening and
+>    `PSC_ANGLE_MAX` but none of the five speed/accel caps.** Fix the names
+>    first.
+> 2. **The bisect's conclusion is narrower than it reads.** §1b argues that four
+>    stacked softenings caused the bad handling. If the speed and acceleration
+>    caps never loaded, then what was actually flown was the *attitude* softening
+>    plus a 10° lean cap at firmware-default speeds — which is a worse
+>    combination than the block was meant to be, and it makes the case against
+>    the attitude half stronger, not weaker. **The speed caps have never actually
+>    been flown.** Check a dataflash `PARM` dump against the `WP_*` names before
+>    drawing any conclusion about them.
+>
+> `docs/PHASE1-MISSION.md` §8 uses the corrected names.
 - `PSC_ANGLE_MAX` really is degrees, and `0` means "use `ATC_ANGLE_MAX`".
 - No duplicate keys in the file (checked: `uniq -d` over all keys is empty), so
   nothing later in the file quietly overrides these.
@@ -229,3 +261,38 @@ ATC_RAT_PIT_P   0.08
 ATC_RAT_PIT_I   0.08
 ATC_RAT_PIT_D   0.002
 ```
+
+
+---
+
+## 7. ADDED 2026-08-21: the Phase 1 speed limits
+
+Appended at the end of `holybro_sitl.parm` for `phase1_mission_node`
+(`docs/PHASE1-MISSION.md` §8). Three lines, using the **corrected** names:
+
+```
+WP_SPD          0.5
+WP_ACC          0.5
+ATC_RATE_WPY_MAX 25
+```
+
+| parameter | firmware default | set to | source |
+|---|---|---|---|
+| `WP_SPD` | 10.0 m/s | 0.5 m/s | `AC_WPNav.cpp:8`, `WP_SPD_DEFAULT` |
+| `WP_ACC` | 2.5 m/s² | 0.5 m/s² | `AC_WPNav.h:15`, `WPNAV_ACCELERATION_MS` |
+| `ATC_RATE_WPY_MAX` | 60 °/s | 25 °/s | `AC_AttitudeControl.h:21`; the parameter is `RATE_WPY_MAX` under the `ATC_` group, and its documented scope is "Auto, Guided, Circle, Follow, RTL, SmartRTL, Throw and ZigZag" |
+
+**These do not re-open the bisect.** They are limits on what the position
+controller *asks for*; the removed block softened the attitude loop's ability to
+*deliver*. No gain, no `ATC_INPUT_TC`, no `PSC_ANGLE_MAX` is touched. GUIDED
+takes its horizontal limits from exactly these two — `ModeGuided::pos_control_run`
+calls `NE_set_max_speed_accel_m(wp_nav->get_default_speed_NE_ms(),
+wp_nav->get_wp_acceleration_mss())` (`ArduCopter/mode_guided.cpp:255`).
+
+Per §1a's correction, the speed caps in the removed block were probably never
+loaded, so 0.5 m/s at default attitude gains is genuinely untested. If the
+vehicle oscillates on a horizontal leg under Phase 1, `WP_SPD` and `WP_ACC` are
+the parameters to move — not the attitude gains.
+
+**Deliberately not touched:** `WP_SPD_UP`, `WP_SPD_DN`, `PILOT_SPEED_UP`. The
+climb behaves and GUIDED takeoff takes its rate from those.

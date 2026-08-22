@@ -13,9 +13,10 @@ It is the landing-site counterpart of hydrone_mission_sim.launch.py, and it
 deliberately does NOT include hydrone.launch.py: the two mission stacks both
 publish position setpoints and must not run at once.
 
-A PURE WRAPPER, on purpose: it passes the autonomy layer nothing but the
-mission's own tuning arguments — no topic is remapped, no parameter is set
-differently because this is a simulator. landing_sites.launch.py cannot tell
+A PURE WRAPPER, on purpose: it passes the autonomy layer NOTHING — no topic is
+remapped, no parameter is set differently because this is a simulator, and it
+does not even restate the mission's own arguments (see the note by `args`:
+doing so shadowed them). landing_sites.launch.py cannot tell
 which world it is in, which is the only way a green sim run says anything about
 the drone. Everything simulated is a SOURCE: sources_sim.launch.py stands in for
 hardware that is not plugged in (BiguaSim's cameras in place of the ZED, its
@@ -44,18 +45,24 @@ def generate_launch_description():
     launch_dir = os.path.join(
         get_package_share_directory("hydrone_bringup"), "launch")
 
-    # Re-declared so they are settable from THIS file's command line; an
-    # argument declared only inside an included file is silently ignored here.
+    # ONLY the arguments this file owns — the ones it forwards to sources_sim.
+    # The mission's arguments are deliberately NOT declared here.
+    #
+    # They used to be, mirrored from landing_sites.launch.py and passed straight
+    # down, and that silently broke tuning: a re-declared argument carries THIS
+    # file's default, and forwarding it overwrote whatever the inner file
+    # declared, so editing a default there did nothing whenever the sim wrapper
+    # was the entry point. Found on the phase1 pair 2026-08-22 (a takeoff
+    # altitude edited to 4 m flew at the wrapper's 1.0 m) and fixed here too —
+    # the two files' defaults happened to be identical, so this changes nothing
+    # today and unbreaks every edit from now on.
+    #
+    # Not declaring them is enough: launch configurations are INHERITED by an
+    # included description, so landing_sites.launch.py's own defaults apply, and
+    # `cruise_alt:=3.0` on the command line still reaches it. The one cost is
+    # that `ros2 launch -s` on THIS file lists only the arguments below.
+    # test_launch_arguments.py keeps the duplication from coming back.
     args = [
-        DeclareLaunchArgument("cruise_alt", default_value="2.5"),
-        DeclareLaunchArgument("forward_step", default_value="1.0"),
-        DeclareLaunchArgument("forward_limit_m", default_value="0.0"),
-        DeclareLaunchArgument("rearm_distance_m", default_value="3.0"),
-        DeclareLaunchArgument("min_confidence", default_value="0.60"),
-        DeclareLaunchArgument("auto_start", default_value="true"),
-        DeclareLaunchArgument("debug_images", default_value="true"),
-        DeclareLaunchArgument("feature_map", default_value="true"),
-        DeclareLaunchArgument("map_odom_tf", default_value="true"),
         # The real visual odometry flies the vehicle, as it will on the
         # drone. odom_source:=ground_truth swaps in BiguaSim dynamics, but
         # only as a debugging tool — see sources_sim.launch.py.
@@ -77,20 +84,12 @@ def generate_launch_description():
         }.items(),
     )
 
+    # No launch_arguments: every mission argument reaches
+    # landing_sites.launch.py by inheritance, keeping its defaults in one file.
+    # See the note above `args`.
     autonomy = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(launch_dir, "landing_sites.launch.py")),
-        launch_arguments={
-            "cruise_alt": LaunchConfiguration("cruise_alt"),
-            "forward_step": LaunchConfiguration("forward_step"),
-            "forward_limit_m": LaunchConfiguration("forward_limit_m"),
-            "rearm_distance_m": LaunchConfiguration("rearm_distance_m"),
-            "min_confidence": LaunchConfiguration("min_confidence"),
-            "auto_start": LaunchConfiguration("auto_start"),
-            "debug_images": LaunchConfiguration("debug_images"),
-            "feature_map": LaunchConfiguration("feature_map"),
-            "map_odom_tf": LaunchConfiguration("map_odom_tf"),
-        }.items(),
     )
 
     return LaunchDescription(args + [sources, autonomy])

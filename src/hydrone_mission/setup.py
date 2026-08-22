@@ -23,6 +23,7 @@ setup(
         'console_scripts': [
             'mission_node = hydrone_mission.mission_node:main',
             'pad_mission_node = hydrone_mission.pad_mission_node:main',
+            'phase1_mission_node = hydrone_mission.phase1_mission_node:main',
         ],
     },
 )
