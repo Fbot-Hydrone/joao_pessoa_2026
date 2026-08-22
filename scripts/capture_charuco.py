@@ -129,6 +129,96 @@ def _topic_source(args):
             rclpy.shutdown()
 
 
+def _tilt_degrees(gray, corners, ids, args, _cache={}):
+    """Angle between the board's normal and the camera's optical axis.
+
+    Recovered with solvePnP through a NOMINAL camera. That is circular-looking
+    -- using an assumed camera to judge views for calibrating that camera --
+    but it is not: tilt is an angle, and it is insensitive to getting the focal
+    length wrong. A 30 deg board reads as roughly 30 deg whether fx is 550 or
+    700, which is all the binning needs.
+    """
+    board = _cache.get("board")
+    if board is None:
+        if hasattr(cv2.aruco, "CharucoBoard_create"):
+            board = cv2.aruco.CharucoBoard_create(
+                args.cols, args.rows, 0.022, 0.016, get_dictionary(args.dict))
+        else:
+            board = cv2.aruco.CharucoBoard(
+                (args.cols, args.rows), 0.022, 0.016, get_dictionary(args.dict))
+        _cache["board"] = board
+        f = args.width / (2.0 * np.tan(np.radians(args.nominal_hfov) / 2.0))
+        _cache["K"] = np.array([[f, 0, args.width / 2.0],
+                                [0, f, args.height / 2.0], [0, 0, 1]])
+    try:
+        if hasattr(cv2.aruco, "interpolateCornersCharuco"):
+            _, cc, ci = cv2.aruco.interpolateCornersCharuco(
+                corners, ids, gray, board, minMarkers=1)
+        else:
+            det = cv2.aruco.CharucoDetector(board)
+            cc, ci, _, _ = det.detectBoard(gray)
+        if cc is None or len(cc) < 6:
+            return None
+        obj, img = board.matchImagePoints(cc, ci)
+        ok, rvec, _ = cv2.solvePnP(obj, img, _cache["K"], None)
+        if not ok:
+            return None
+        R, _ = cv2.Rodrigues(rvec)
+        return float(np.degrees(np.arccos(min(1.0, abs(float(R[2, 2]))))))
+    except (cv2.error, AttributeError, TypeError, ValueError):
+        return None
+
+
+def _hud(frame, corners, ids, tilt, bins, kept, args, novel):
+    """Live view: what the camera sees, plus what is still MISSING.
+
+    The ROS GUI's four bars say how full each axis is. They do not say what to
+    do next, and they do not show tilt as an angle -- which was the axis that
+    silently stayed thin here. This names the gap.
+    """
+    view = frame.copy()
+    if ids is not None and len(ids):
+        cv2.aruco.drawDetectedMarkers(view, corners, ids)
+
+    pos = len({(k[0], k[1]) for k in bins})
+    size = len({k[2] for k in bins})
+    steep = sum(v for k, v in bins.items() if k[3] == 2)
+
+    # Green while this pose is being banked, grey once its bin is full.
+    accent = (80, 230, 80) if novel else (170, 170, 170)
+    cv2.rectangle(view, (0, 0), (view.shape[1], 74), (0, 0, 0), -1)
+    cv2.putText(view, f"kept {kept}/{args.target}   tilt {tilt:4.0f} deg",
+                (8, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.62, accent, 2)
+
+    need = []
+    if pos < 6:
+        need.append("EDGES")
+    if size < 3:
+        need.append("CLOSE+FAR")
+    if steep < 8:
+        need.append(f"TILT>30 ({steep}/8)")
+    msg = "need: " + ", ".join(need) if need else "coverage OK - solve it"
+    cv2.putText(view, msg, (8, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.52,
+                (60, 200, 255) if need else (80, 230, 80), 2)
+    cv2.putText(view, f"pos {pos}/9  size {size}/3  steep {steep}",
+                (8, 68), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
+
+    # A horizon-style tilt gauge: the bar fills as the board leans over.
+    x0, y0, w = 8, view.shape[0] - 20, 200
+    cv2.rectangle(view, (x0, y0), (x0 + w, y0 + 12), (60, 60, 60), -1)
+    frac = max(0.0, min(1.0, tilt / 45.0))
+    cv2.rectangle(view, (x0, y0), (x0 + int(w * frac), y0 + 12),
+                  (80, 230, 80) if tilt >= 30 else (60, 200, 255), -1)
+    cv2.line(view, (x0 + int(w * 30 / 45.0), y0 - 3),
+             (x0 + int(w * 30 / 45.0), y0 + 15), (255, 255, 255), 1)
+    cv2.putText(view, "30", (x0 + int(w * 30 / 45.0) - 8, y0 - 6),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1)
+
+    cv2.imshow("charuco capture  --  q or Esc to finish", view)
+    if cv2.waitKey(1) & 0xFF in (ord("q"), 27):
+        raise KeyboardInterrupt
+
+
 def _chown_to_dir_owner(out):
     """Hand the output back to whoever owns the tree it was written into.
 
@@ -169,12 +259,22 @@ def main():
     ap.add_argument("--width", type=int, default=640)
     ap.add_argument("--height", type=int, default=480)
     ap.add_argument("--dict", default="4x4_250")
+    ap.add_argument("--cols", type=int, default=9,
+                    help="board squares across (see docs/CALIBRATION.md)")
+    ap.add_argument("--rows", type=int, default=11)
+    ap.add_argument("--nominal-hfov", type=float, default=60.0,
+                    help="rough horizontal FOV, used ONLY to judge board tilt")
     ap.add_argument("--min-markers", type=int, default=12,
                     help="reject a view with fewer than this many markers")
     ap.add_argument("--per-bin", type=int, default=2,
                     help="frames to keep per coverage bin")
     ap.add_argument("--target", type=int, default=45,
                     help="stop once this many frames are kept")
+    ap.add_argument("--show", action="store_true",
+                    help="live window with the detections and a coverage HUD. "
+                         "Being able to see what the camera sees is most of "
+                         "what the ROS calibration GUI was giving you; this "
+                         "adds the tilt angle, which that GUI does not show.")
     ap.add_argument("--from-topic", default="",
                     help="subscribe to a ROS image topic instead of opening "
                          "the V4L2 device, e.g. /down_cam/image_raw. V4L2 "
@@ -193,6 +293,7 @@ def main():
     bins = {}
     kept = 0
     received = 0
+    tilt_now = 0.0
     last_report = 0.0
     print(f"Saving to {args.out}/  --  Ctrl-C when the table stops filling.",
           flush=True)
@@ -216,17 +317,20 @@ def main():
             # output whatsoever and was indistinguishable from a hang. The
             # number that matters when nothing is being kept is how many
             # markers are actually visible.
+            if args.show:
+                _hud(frame, corners, ids, tilt, bins, kept, args, novel)
+
             now = time.time()
             if now - last_report > 0.5:
                 last_report = now
                 pos = len({(k[0], k[1]) for k in bins})
                 size = len({k[2] for k in bins})
-                tilt = len({k[3] for k in bins})
+                tiltb = len({k[3] for k in bins})
                 note = "" if n >= args.min_markers else \
                        f"  <- need {args.min_markers}+, board not in view?"
                 print(f"\rseen {received:5d}  kept {kept:3d}/{args.target}  "
-                      f"markers now {n:2d}{note}  "
-                      f"[pos {pos}/9 size {size}/3 tilt {tilt}/2]   ",
+                      f"markers {n:2d} tilt {tilt_now:4.0f}deg{note}  "
+                      f"[pos {pos}/9 size {size}/3 tilt {tiltb}/3]   ",
                       end="", flush=True)
             # `not corners` as well as the threshold: with --min-markers 0 a
             # frame containing no markers passes the test and then reaches
@@ -241,40 +345,61 @@ def main():
             span = ((pts[:, 0].max() - pts[:, 0].min()) *
                     (pts[:, 1].max() - pts[:, 1].min()))
             fill = span / float(args.width * args.height)
-            # Tilt, as the departure of the board's bounding quad from a
-            # rectangle: the ratio of its two diagonals. Square-on is 1.0.
-            w = pts[:, 0].max() - pts[:, 0].min()
-            h = pts[:, 1].max() - pts[:, 1].min()
-            aspect = max(w, h) / max(1.0, min(w, h))
+
+            # Tilt, from the board's actual POSE. The first version inferred it
+            # from the bounding box aspect ratio, which is not tilt at all: a
+            # board held square-on but off to one side has a skewed bounding
+            # box, and a board tilted about the axis pointing at the camera has
+            # none. Measured on a real set that this metric rated "tilt 2/2",
+            # the true spread was median 8.8 deg and max 26.4 -- NOT ONE view
+            # past 30 -- and the calibration was consequently degenerate, with
+            # cx wandering to -49 between halves of the same data.
+            tilt = _tilt_degrees(gray, corners, ids, args)
+            if tilt is None:
+                continue
+            tilt_now = tilt
 
             key = (int(cx / (args.width / 3.0)),
                    int(cy / (args.height / 3.0)),
                    0 if fill < 0.25 else (1 if fill < 0.55 else 2),
-                   0 if aspect < 1.25 else 1)
-            if bins.get(key, 0) >= args.per_bin:
-                continue
-            bins[key] = bins.get(key, 0) + 1
-            kept += 1
-            cv2.imwrite(os.path.join(args.out, f"view_{kept:03d}.png"), frame)
+                   0 if tilt < 15.0 else (1 if tilt < 30.0 else 2))
+            novel = bins.get(key, 0) < args.per_bin
+            if novel:
+                bins[key] = bins.get(key, 0) + 1
+                kept += 1
+                cv2.imwrite(os.path.join(args.out, f"view_{kept:03d}.png"),
+                            frame)
 
 
     except KeyboardInterrupt:
         print()
+    finally:
+        if args.show:
+            cv2.destroyAllWindows()
 
     _chown_to_dir_owner(args.out)
 
     pos = len({(k[0], k[1]) for k in bins})
     size = len({k[2] for k in bins})
-    tilt = len({k[3] for k in bins})
+    tiltb = len({k[3] for k in bins})
+    steep = sum(1 for k, v in bins.items() if k[3] == 2 for _ in range(v))
     print(f"\n\n{kept} frames kept, {received} frames seen, "
           f"in {args.out}/")
     if received == 0:
         print("  NO FRAMES ARRIVED AT ALL -- this is a plumbing problem, not")
         print("  a coverage one. Check the publisher and ROS_DOMAIN_ID.")
-    print(f"  position bins {pos}/9   size bins {size}/3   tilt bins {tilt}/2")
-    if pos < 5 or size < 2 or tilt < 2:
-        print("  THIN COVERAGE. size<2 leaves fx/fy poorly separated from")
-        print("  distance; tilt<2 leaves distortion poorly constrained.")
+    print(f"  position {pos}/9   size {size}/3   tilt {tiltb}/3  "
+          f"({steep} views past 30 deg)")
+    if pos < 6 or size < 3 or steep < 8:
+        print("  THIN COVERAGE -- expect an unstable solve:")
+        if pos < 6:
+            print("    position: get the board to the frame EDGES (fixes cx, cy)")
+        if size < 3:
+            print("    size: needs close AND far (separates fx from depth)")
+        if steep < 8:
+            print(f"    tilt: only {steep} views past 30 deg, want 8+. This is")
+            print("      the one people skip, and the one that decouples focal")
+            print("      length from the principal point.")
     print("\nNow solve it somewhere fast:")
     print(f"  python3 scripts/calibrate_offline.py --images {args.out}")
 

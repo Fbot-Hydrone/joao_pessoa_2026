@@ -200,6 +200,32 @@ homography residual rather than trusting either. It was checked against ground
 truth by rendering ChArUco views through a known camera: `fx` 560 → 558.91,
 `cx` 322.0 → 322.10.
 
+### The live view, and the axis that stays thin
+
+```bash
+python3 scripts/capture_charuco.py --show --out cal_imgs
+```
+
+`--show` opens a window with the detections drawn, the current **tilt in
+degrees**, a gauge marked at 30, and a line naming what is still missing
+(`need: EDGES, CLOSE+FAR, TILT>30 (0/8)`). Seeing what the camera sees is most
+of what the ROS GUI was providing; the tilt angle is the part that GUI does not
+show, and tilt was the axis that silently stayed thin here.
+
+The C270 is a USB webcam, so the easiest way to do all this is to **unplug it
+from the drone and plug it into a real computer**: a display, a fast solve, and
+a camera you can hold. Intrinsics belong to the camera, not the host, so the
+result transfers back to the Jetson unchanged — provided the **resolution and
+pixel format match** what the drone runs (640x480 MJPG). Verify that rather
+than assume it; some UVC cameras crop rather than scale at lower resolutions,
+which changes the focal length in pixels.
+
+**Tilt cannot be obtained by moving around a board lying on a table.** With the
+target flat and the camera above it, every view is fronto-parallel however much
+the camera translates. Measured on a real 41-view set captured that way: median
+tilt 7 degrees, maximum 22.7, and **not one view past 30**. Either hold the
+board at an angle or hold the camera at one.
+
 ### The legacy pattern, and when it matters
 
 OpenCV 4.6 changed which squares of a ChArUco board carry markers. A board
