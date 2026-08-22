@@ -240,8 +240,46 @@ and once you are happy, edit the defaults in
 being retyped. The once-a-second warning stops when `calibrated` is true, which
 is the confirmation that the node took them.
 
-**A good result** has reprojection error below ~0.5 px at 640×480. Above ~1.0
-px, something is wrong — usually §5.
+### Reprojection error does not tell you the calibration is right
+
+This is the trap that cost the most time here, so it is worth stating plainly.
+
+A real 13-view set from this C270 solved to **0.4866 px** — comfortably "good"
+by that measure — and returned
+
+```
+fx 108.848  fy 111.468  cx 312.822  cy 27.950
+```
+
+`fx = 108.8` at 640 px wide implies a **142 degree** lens. The C270 is about
+60°, which needs `fx` near 554. And `cy = 28` puts the optical centre 28 px from
+the top edge instead of near 240. The numbers were wrong by 5x and the error
+metric was happy.
+
+Reprojection error measures how well the model fits *the views you gave it*.
+When those views share one distance and one part of the frame, focal length and
+depth trade off against each other: a lens 5x too short, at a distance 5x too
+near, lands the corners on almost the same pixels. The fit is excellent and the
+lens is fiction. No amount of staring at that number reveals it.
+
+`calibrate_offline.py` therefore checks the answer against what a camera can
+physically be — implied FOV against the nominal, principal point against the
+image centre, `fx/fy` against square pixels — and **refuses to print launch
+arguments** for an implausible result, exiting 2 instead. Printing them was the
+real hazard: they are copy-pasteable and nothing downstream would question them.
+`--expect-hfov` sets the nominal for a different camera; `0` disables the check.
+
+The cure is coverage, not more frames of the same:
+
+* the board at all four **corners** of the frame — fixes `cx`, `cy`
+* the board **close and far** — separates focal length from depth
+* the board **tilted 30–45°** — constrains distortion
+
+`coverage: position n/9  size n/3  tilt n/2`, printed before the solve, is the
+thing to watch. The rejected calibration above had `position 4/9`.
+
+A good result has reprojection error below ~0.5 px at 640×480 **and** passes
+the sanity check. Above ~1.0 px, something else is wrong — usually §5.
 
 ---
 
