@@ -101,6 +101,69 @@ def homography_residual(corners, ids, board):
     return float(np.mean(np.linalg.norm(proj - pts_img, axis=1)))
 
 
+def _solve(all_corners, all_ids, board, size):
+    """Calibrate, across the OpenCV API break.
+
+    `cv2.aruco.calibrateCameraCharuco` is a contrib-era wrapper. It exists in
+    4.5.4 (the Jetson) and in some 4.11 builds, and is GONE from newer
+    opencv-python -- "module 'cv2.aruco' has no attribute
+    'calibrateCameraCharuco'". The portable replacement is
+    `board.matchImagePoints`, which turns charuco corners plus their IDs into
+    ordinary 3D/2D correspondences for `cv2.calibrateCamera`. Preferred where
+    available, because it is the API that is not going away.
+    """
+    if hasattr(board, "matchImagePoints"):
+        obj_pts, img_pts = [], []
+        for corners, ids in zip(all_corners, all_ids):
+            o, p = board.matchImagePoints(corners, ids)
+            if o is None or len(o) < 6:
+                continue
+            obj_pts.append(o.astype(np.float32))
+            img_pts.append(p.astype(np.float32))
+        if len(obj_pts) < 6:
+            sys.exit("too few usable views after matching")
+        print(f"  (matchImagePoints + calibrateCamera, {len(obj_pts)} views)")
+        err, K, D, _, _ = cv2.calibrateCamera(obj_pts, img_pts, size,
+                                              None, None)
+        return err, K, D
+
+    print(f"  (legacy calibrateCameraCharuco, {len(all_corners)} views)")
+    err, K, D, _, _ = cv2.aruco.calibrateCameraCharuco(
+        all_corners, all_ids, board, size, None, None)
+    return err, K, D
+
+
+def _coverage_report(all_corners, size):
+    """Say what the images actually cover, before believing the answer.
+
+    A calibration is only as good as the spread of views behind it, and a
+    tight cluster still solves -- returning confident numbers with no support.
+    Same three axes the capture script bins on.
+    """
+    W, H = size
+    pos, fill_bins, tilt_bins = set(), set(), set()
+    for c in all_corners:
+        pts = c.reshape(-1, 2)
+        cx, cy = pts[:, 0].mean(), pts[:, 1].mean()
+        w = pts[:, 0].max() - pts[:, 0].min()
+        h = pts[:, 1].max() - pts[:, 1].min()
+        fill = (w * h) / float(W * H)
+        aspect = max(w, h) / max(1.0, min(w, h))
+        pos.add((int(cx / (W / 3.0)), int(cy / (H / 3.0))))
+        fill_bins.add(0 if fill < 0.25 else (1 if fill < 0.55 else 2))
+        tilt_bins.add(0 if aspect < 1.25 else 1)
+    print(f"\ncoverage: position {len(pos)}/9   size {len(fill_bins)}/3   "
+          f"tilt {len(tilt_bins)}/2")
+    if len(pos) < 5:
+        print("  position < 5/9: cx and cy are weakly determined -- the board")
+        print("  needs to reach all four corners of the frame.")
+    if len(fill_bins) < 2:
+        print("  size < 2/3: fx and fy cannot be separated from distance.")
+        print("  Capture the board both close AND far.")
+    if len(tilt_bins) < 2:
+        print("  tilt < 2/2: distortion is weakly constrained. Tilt 30-45 deg.")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--images", required=True)
@@ -177,9 +240,10 @@ def main():
     if len(used) < 6:
         sys.exit("too few usable views -- capture more")
 
+    _coverage_report(all_corners, size)
+
     print("solving...")
-    err, K, D, _, _ = cv2.aruco.calibrateCameraCharuco(
-        all_corners, all_ids, board, size, None, None)
+    err, K, D = _solve(all_corners, all_ids, board, size)
 
     fx, fy, cx, cy = K[0, 0], K[1, 1], K[0, 2], K[1, 2]
     if err < 0.5:
