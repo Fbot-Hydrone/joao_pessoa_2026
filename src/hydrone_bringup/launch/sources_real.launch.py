@@ -123,7 +123,20 @@ def generate_launch_description():
                         "base_link."),
 
         # ── Belly camera ────────────────────────────────────────────────────
-        DeclareLaunchArgument("down_cam_device", default_value="/dev/video0"),
+        DeclareLaunchArgument(
+            "down_cam_device",
+            default_value="/dev/v4l/by-path/"
+                          "platform-70090000.xusb-usb-0:2.2:1.0-video-index0",
+            description="The belly camera, addressed BY USB PORT rather than "
+                        "as /dev/videoN. Enumeration order is not stable: the "
+                        "C270 and the ZED both register V4L2 nodes, and after "
+                        "a reboot or a replug the ZED can take video0 — which "
+                        "would feed stereo side-by-side frames to the pad "
+                        "detector with nothing reporting an error. This path "
+                        "is the port on the airframe, so it survives swapping "
+                        "the camera for another C270. It does NOT survive "
+                        "moving it to a different USB socket: re-read "
+                        "`ls -l /dev/v4l/by-path/` if you do."),
         DeclareLaunchArgument("down_cam_width", default_value="640"),
         DeclareLaunchArgument("down_cam_height", default_value="480"),
         DeclareLaunchArgument("down_cam_fps", default_value="15"),

@@ -110,6 +110,26 @@ RUN python3 -m pip install --no-cache-dir "numpy<2" \
     && rm -rf /tmp/wheels \
     && python3 -c "import numpy, sys; v = numpy.__version__; print('numpy', v); sys.exit(0 if int(v.split('.')[0]) < 2 else 1)"
 
+# ── Calibration tooling ─────────────────────────────────────────────────────
+# camera_calibration is not needed to FLY, but it is needed to make the belly
+# camera's intrinsics mean anything, and the belly camera has no depth: its
+# camera_info is the only thing turning a pad's pixel position into a place to
+# land. See docs/CALIBRATION.md.
+#
+# It is a GUI program (cv2.imshow, GTK3 — already compiled into the image's
+# apt opencv). Run it either on the Jetson's own display or over `ssh -X`; the
+# node reads the camera locally either way, so the images never cross the
+# network. That matters here: the board is on wifi and 640x480 raw at 15 Hz is
+# ~110 Mbit/s.
+#
+# Deliberately the LAST apt layer, immediately above `COPY src/`. Adding it
+# higher up would invalidate the MAVROS, ZED SDK and pyzed layers below it and
+# turn a two-minute rebuild into a twenty-minute one.
+RUN apt-get update && apt-get install --no-install-recommends -y \
+        ros-humble-camera-calibration \
+        libgtk-3-0 x11-apps \
+    && rm -rf /var/lib/apt/lists/*
+
 # ── The workspace ───────────────────────────────────────────────────────────
 # --symlink-install so the dev bind mount can put the host's working tree at the
 # end of the install/ -> build/ -> src/ chain, exactly as the x86 image does.
