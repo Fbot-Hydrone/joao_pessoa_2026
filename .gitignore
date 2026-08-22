@@ -36,3 +36,13 @@ venv/
 .vscode/
 .idea/
 *.swp
+# ─── Jetson image build inputs ───────────────────────────────────
+# The ZED SDK installer (84 MB) is NOT committed: it is re-downloadable from
+# stereolabs.com and too big for git. See docs/JETSON-REAL-STACK.md §3.
+docker/ZED_SDK_*.run
+# The pyzed wheel IS committed (3.7 MB). It is the one build input that is NOT
+# reproducible from a URL — a from-source Cython build against SDK 4.0.8 and
+# numpy 1.21, and rebuilding it means re-walking the tag hunt and the two
+# setup.py/libusb patches in scripts/build_pyzed.sh. Losing it costs an hour;
+# storing it costs 3.7 MB.
+!docker/pyzed-*.whl

@@ -20,6 +20,7 @@ raises rather than guessing — a silently mis-decoded image is far worse than a
 loud one.
 """
 
+import array as pyarray
 import numpy as np
 
 from sensor_msgs.msg import Image
@@ -114,5 +115,10 @@ def numpy_to_image(array: np.ndarray, encoding: str = "bgr8") -> Image:
     msg.encoding = encoding
     msg.is_bigendian = 0
     msg.step = msg.width * 3
-    msg.data = np.ascontiguousarray(array).tobytes()
+    # array.array, NOT bytes. rclpy's uint8[] field converts a bytes object
+    # element by element in Python: measured on the Jetson at 361 ms for a
+    # 672x376x3 frame against 0.2 ms this way. Every image the SIMULATOR
+    # publishes goes through here too, so the cost was being paid on both
+    # sides of the contract.
+    msg.data = pyarray.array("B", np.ascontiguousarray(array).tobytes())
     return msg

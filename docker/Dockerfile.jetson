@@ -1,0 +1,142 @@
+# The drone's image: ROS 2 Humble + the ZED SDK + MAVROS, on a Tegra X1.
+#
+#   docker build -f docker/Dockerfile.jetson -t hydrone-jetson:humble .
+#
+# Build context must contain the ZED SDK installer at the path given by
+# ZED_SDK_RUN (default docker/ZED_SDK_Tegra_L4T32.7_v4.0.8.zstd.run). It is not
+# downloaded here on purpose: download.stereolabs.com no longer serves the L4T
+# 32.7 installer to a plain GET — the URL returns an HTML page — so it has to be
+# fetched from the website by a human and dropped in.
+#
+# WHY 4.0.8 AND NOT THE 4.0.1 ON THE HOST
+# Stereolabs' generic pyzed-4.0-cp310 wheel is built against the LAST 4.0 patch.
+# Against 4.0.1 it fails to load with
+#   undefined symbol: _ZN2sl6Camera19getRegionOfInterestERNS_3MatENS_10ResolutionE
+# 4.0.8 is that last patch, so the stock wheel matches and no binding has to be
+# compiled. (scripts/build_pyzed.sh on the Jetson builds the binding from source
+# against whatever SDK is installed — keep it as the fallback if this image ever
+# has to run against a different patch level.)
+#
+# WHY THE SDK GOES IN THE IMAGE BUT CUDA DOES NOT
+# CUDA 10.2 and libcuda come from the HOST at runtime: nvidia-container-runtime
+# injects them per /etc/nvidia-container-runtime/host-files-for-container.d/
+# cuda.csv. That is why the SDK is installed with `skip_cuda`, and why this
+# image must be RUN with `--runtime nvidia` or it will not find libcuda.so.1.
+#
+# WHY UBUNTU 22.04 AT ALL ON L4T 32.7
+# ROS 2 Humble needs jammy; the board's L4T is 20.04-era. The two are reconciled
+# by the host injection above — measured working: libsl_zed.so resolves inside
+# jammy with only libEGL/libGLESv2/libturbojpeg missing, all of which are plain
+# apt packages here.
+
+ARG BASE_IMAGE=ros2-jetson:humble
+FROM ${BASE_IMAGE}
+
+ARG ZED_SDK_RUN=docker/ZED_SDK_Tegra_L4T32.7_v4.0.8.zstd.run
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ── System dependencies ─────────────────────────────────────────────────────
+#   libegl1/libgles2/libturbojpeg : the three libsl_zed.so needs and jammy
+#                                   lacks — measured with ldd, not guessed.
+#   libusb-1.0-0                  : the SDK talks to the camera over USB.
+#   zstd, lsb-release, udev, less : the .zstd.run installer wants them.
+#   libgomp1, libpng16-16         : SDK runtime.
+RUN apt-get update && apt-get install --no-install-recommends -y \
+        libegl1 libgles2 libturbojpeg libusb-1.0-0 \
+        libgomp1 libpng16-16 \
+        zstd lsb-release udev less sudo wget curl \
+        python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── MAVROS ──────────────────────────────────────────────────────────────────
+# The stack does not merely talk to MAVROS, it imports mavros_msgs:
+# phase1_mission_node for /mavros/state and the arm/mode/takeoff services, and
+# pad_map_node for the pre-arm mapping gate. Without this the two nodes fail at
+# import, which is what the base image did.
+#
+# install_geographiclib_datasets.sh is NOT optional for ArduPilot: MAVROS
+# converts AMSL to ellipsoid height using GeographicLib's geoid grid and throws
+# at startup if the dataset is absent.
+RUN apt-get update && apt-get install --no-install-recommends -y \
+        ros-humble-mavros ros-humble-mavros-msgs ros-humble-mavros-extras \
+        geographiclib-tools \
+    && /opt/ros/humble/lib/mavros/install_geographiclib_datasets.sh \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── ZED SDK ─────────────────────────────────────────────────────────────────
+# The installer probes /etc/nv_tegra_release to decide it is on a Jetson. That
+# file belongs to the host and is not present during a build, so it is stubbed
+# with this board's actual release line. skip_cuda because CUDA is injected at
+# runtime; skip_tools because ZED_Explorer and friends are GUI programs nothing
+# here runs; skip_python because the wheel is installed explicitly below (the
+# installer's own python step targets whatever it finds and is harder to pin).
+# skip_od_module and skip_hub drop the object-detection models and the cloud
+# client, neither of which this stack touches, and both of which are large.
+# (The installer's valid flags are exactly: --silent --runtime_only
+# --skip_tools --skip_cuda --skip_od_module --skip_python --skip_hub. It
+# WARNS and ignores anything else rather than failing, so a typo here is
+# silent — check the build log for "unknown parameter".)
+COPY ${ZED_SDK_RUN} /tmp/zed_sdk.run
+RUN echo "# R32 (release), REVISION: 6.1" > /etc/nv_tegra_release \
+    && chmod +x /tmp/zed_sdk.run \
+    && /tmp/zed_sdk.run -- silent skip_tools skip_cuda skip_python \
+        skip_od_module skip_hub \
+    && rm -f /tmp/zed_sdk.run
+
+# ── The Python binding ──────────────────────────────────────────────────────
+# A LOCALLY BUILT wheel, not Stereolabs'. Produce it with build_pyzed.sh on the
+# Jetson (it builds against THIS image) and drop the result in docker/. It is a
+# 3.6 MB binary and is deliberately not committed.
+#
+# Stereolabs' own pyzed-4.0-cp310 — the only cp310 build they publish — is
+# compiled against **numpy 2**, and against numpy 1 it dies with
+#     ValueError: numpy.ndarray size changed ... Expected 96, got 88
+# while numpy 1 is not negotiable here: the image's cv2 (4.5.4, apt) is built
+# against it, and the numpy-2 mismatch is silent at import and SEGFAULTS at the
+# first array conversion (docs/LANDING-SITES.md §9). Measured on an earlier
+# build of this very file, `--ignore-installed` quietly pulled numpy-2.2.6.
+#
+# Building the binding against the numpy and the SDK actually installed removes
+# both skews at once. --no-deps keeps pip from re-introducing numpy 2 to satisfy
+# the wheel's `numpy>=1.13`, and the assertion afterwards is the point: this
+# failure is invisible until something converts an array in flight.
+ARG PYZED_WHEEL=docker/pyzed-4.0-cp310-cp310-linux_aarch64.whl
+# Trailing slash: the basename has to survive. pip parses the wheel's FILENAME
+# for its name/version/tags and rejects anything that is not PEP 427 —
+# "pyzed.whl is not a valid wheel filename".
+COPY ${PYZED_WHEEL} /tmp/wheels/
+RUN python3 -m pip install --no-cache-dir "numpy<2" \
+    && python3 -m pip install --no-cache-dir --no-deps /tmp/wheels/*.whl \
+    && rm -rf /tmp/wheels \
+    && python3 -c "import numpy, sys; v = numpy.__version__; print('numpy', v); sys.exit(0 if int(v.split('.')[0]) < 2 else 1)"
+
+# ── The workspace ───────────────────────────────────────────────────────────
+# --symlink-install so the dev bind mount can put the host's working tree at the
+# end of the install/ -> build/ -> src/ chain, exactly as the x86 image does.
+WORKDIR /ws
+COPY src/hydrone_msgs      src/hydrone_msgs
+COPY src/hydrone_bringup   src/hydrone_bringup
+COPY src/hydrone_vision    src/hydrone_vision
+COPY src/hydrone_nav       src/hydrone_nav
+COPY src/hydrone_mission   src/hydrone_mission
+COPY src/hydrone_controller src/hydrone_controller
+# hydrone_controller is in the list because hydrone_bringup DEPENDS on it:
+# colcon refuses to build a package whose declared dependency has no
+# install/<pkg>/share/<pkg>/package.sh, and fails in 0.01 s with a message
+# about a missing file rather than about a missing package.
+RUN . /opt/ros/humble/setup.sh \
+    && colcon build --symlink-install \
+        --packages-select hydrone_msgs hydrone_controller hydrone_bringup \
+                          hydrone_vision hydrone_nav hydrone_mission
+
+# libsl_zed.so lives outside the default search path; `tegra` is where the host's
+# libcuda is injected and `tegra-egl` where its EGL vendor driver is. The
+# entrypoint also writes these into /etc/ld.so.conf.d and runs ldconfig, because
+# glvnd dlopens libEGL_nvidia.so.0 by SONAME and consults the linker CACHE,
+# which cannot be built until the runtime has mounted the directories.
+ENV LD_LIBRARY_PATH=/usr/local/zed/lib:/usr/local/cuda-10.2/lib64:/usr/lib/aarch64-linux-gnu/tegra:/usr/lib/aarch64-linux-gnu/tegra-egl:${LD_LIBRARY_PATH}
+
+COPY docker/entrypoint_jetson.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["bash"]

@@ -63,12 +63,28 @@ LAUNCH_DIR = os.path.join(
 WRAPPER_PAIRS = [
     ("phase1_sim.launch.py", "phase1.launch.py"),
     ("landing_sites_sim.launch.py", "landing_sites.launch.py"),
+    # The real-hardware wrapper includes TWO files and must not shadow either.
+    ("phase1_real.launch.py", "phase1.launch.py"),
+    ("phase1_real.launch.py", "sources_real.launch.py"),
 ]
 
 
 def load(name: str) -> LaunchDescription:
-    """Import an installed launch file and build its description."""
+    """Import an installed launch file and build its description.
+
+    Reads from the INSTALL tree, not from src/, because that is what
+    `ros2 launch` reads. The difference is load-bearing with a dev bind mount:
+    --symlink-install creates one symlink per file AT BUILD TIME, so a launch
+    file added since the image was built is simply absent here. Skipping says
+    that out loud — an unhelpful FileNotFoundError deep in importlib was the
+    alternative, and it reads like a broken test rather than a stale image.
+    """
     path = os.path.join(LAUNCH_DIR, name)
+    if not os.path.exists(path):
+        pytest.skip(
+            f"{name} is not in the install tree. It is newer than this image: "
+            "rebuild (scripts/dev_rebuild.sh, or jetson_up.sh --rebuild) to "
+            "cover it.")
     spec = importlib.util.spec_from_file_location(name.replace(".", "_"), path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -129,3 +145,112 @@ def test_the_wrapper_forwards_nothing_to_the_autonomy_layer(wrapper_name,
             "a configuration the wrapper declared overrides the inner file's "
             "default; forwarding one it did not declare is redundant, because "
             "inheritance already carries it.")
+
+
+# ── Every launch file's parameters must actually evaluate ───────────────────
+#
+# A second bug, same day, same shape: invisible until something ran it.
+# `sources_real.launch.py` declared its list-valued parameters as
+#
+#     ParameterValue(LaunchConfiguration("down_cam_mount_xyz"),
+#                    value_type=list([float]))          # WRONG
+#
+# `list([float])` is `[float]` — a list holding the *type* float — where launch
+# wants the typing generic `List[float]`. `generate_launch_description()` builds
+# fine, the file imports fine, and the existing tests above all passed, because
+# the type is not looked at until launch EVALUATES the parameter. Only then:
+#
+#     [ERROR] [launch]: Caught exception in launch (...):
+#             Unrecognized data type: [<class 'float'>]
+#
+# and no node starts at all. It survived every unit test and was found by
+# running `sources_real.launch.py` on the drone for the first time — the bench
+# validation before it had started the nodes individually, never the launch.
+#
+# So: walk every launch file, find every Node, and force its parameters through
+# the same evaluation launch would do.
+
+LAUNCH_FILES = [
+    "phase1.launch.py",
+    "phase1_sim.launch.py",
+    "phase1_real.launch.py",
+    "sources_real.launch.py",
+    "sources_sim.launch.py",
+    "landing_sites.launch.py",
+    "landing_sites_sim.launch.py",
+    "hydrone_sim.launch.py",
+    "hydrone_bringup.launch.py",
+]
+
+
+def _nodes_of(description: LaunchDescription):
+    """Every Node in a description, including inside group/conditional actions."""
+    from launch_ros.actions import Node
+
+    seen = []
+
+    def walk(entities):
+        for entity in entities:
+            if isinstance(entity, Node):
+                seen.append(entity)
+            # GroupAction and friends hold their children in different
+            # attributes; try the two that matter and ignore the rest.
+            for attr in ("entities", "_GroupAction__actions"):
+                child = getattr(entity, attr, None)
+                if child:
+                    walk(child)
+
+    walk(description.entities)
+    return seen
+
+
+@pytest.mark.parametrize("launch_file", LAUNCH_FILES)
+def test_every_node_parameter_evaluates(launch_file):
+    """Force each Node's parameters through launch's own type machinery.
+
+    This is the check that `value_type=list([float])` fails and
+    `value_type=List[float]` passes. It does not assert the VALUES — those come
+    from arguments and are the subject of the tests above — only that every
+    declared type is one launch recognises.
+    """
+    from launch.utilities import type_utils
+
+    # Some launch files reach for packages that exist only in the simulator
+    # image (ardupilot_sitl, biguasim_*). On the drone's image that is correct
+    # rather than broken, so skip instead of failing — the sim container runs
+    # the same test and covers them there.
+    from ament_index_python.packages import PackageNotFoundError
+
+    context = LaunchContext()
+    # Give every declared argument its default, so substitutions resolve.
+    try:
+        description = load(launch_file)
+    except PackageNotFoundError as exc:
+        pytest.skip(f"{launch_file} needs a package absent from this image: {exc}")
+    for name, default in declared(description).items():
+        if default is not None:
+            context.launch_configurations[name] = default
+
+    for node in _nodes_of(description):
+        for entry in (node._Node__parameters or []):
+            if not isinstance(entry, dict):
+                continue          # a YAML path; nothing to type-check
+            for key, value in entry.items():
+                # Node normalises parameter names into tuples of
+                # substitutions, so a raw key reprs as
+                # "(<TextSubstitution object at 0x...>,)" and names nothing.
+                try:
+                    key = perform_substitutions(context, list(key))
+                except (TypeError, AttributeError):
+                    key = str(key)
+                value_type = getattr(value, "_ParameterValue__value_type", None)
+                if value_type is None:
+                    continue      # a plain literal or substitution
+                try:
+                    type_utils.extract_type(value_type)
+                except ValueError as exc:
+                    pytest.fail(
+                        f"{launch_file}: parameter '{key}' declares "
+                        f"value_type={value_type!r}, which launch rejects at "
+                        f"RUN time ({exc}). Use the typing generic — "
+                        f"List[float], not list([float]) or [float].")
