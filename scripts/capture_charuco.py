@@ -293,7 +293,6 @@ def main():
     bins = {}
     kept = 0
     received = 0
-    tilt_now = 0.0
     last_report = 0.0
     print(f"Saving to {args.out}/  --  Ctrl-C when the table stops filling.",
           flush=True)
@@ -312,64 +311,66 @@ def main():
             n = 0 if ids is None else len(ids)
             received += 1
 
-            # Report unconditionally. The first version only printed when a
-            # frame was KEPT, so a run that detected nothing produced no
-            # output whatsoever and was indistinguishable from a hang. The
-            # number that matters when nothing is being kept is how many
-            # markers are actually visible.
+            # Defaults so that EVERY path below can draw the HUD and print the
+            # status line. The live view has to keep updating while you are
+            # still hunting for the board -- a window that only repaints once
+            # the board is already detected is useless for aiming.
+            tilt = 0.0
+            novel = False
+
+            # `not len(corners)` as well as the threshold: with --min-markers 0
+            # a frame containing no markers passes the test and then reaches
+            # np.concatenate([]), which raises "need at least one array to
+            # concatenate" and takes the capture loop down with it.
+            if n >= args.min_markers and len(corners):
+                pts = np.concatenate([c.reshape(-1, 2) for c in corners])
+                cx, cy = pts[:, 0].mean(), pts[:, 1].mean()
+                # Fraction of the frame the board spans -- the "Size" axis.
+                span = (pts[:, 0].max() - pts[:, 0].min()) * \
+                       (pts[:, 1].max() - pts[:, 1].min())
+                fill = span / float(args.width * args.height)
+
+                # Tilt, from the board's actual POSE. The first version
+                # inferred it from the bounding box aspect ratio, which is not
+                # tilt at all: a board held square-on but off to one side has a
+                # skewed bounding box, and one rotated about the axis pointing
+                # at the camera has none. On a real set this metric rated
+                # "tilt 2/2", the true spread was median 7 deg and max 22.7 --
+                # NOT ONE view past 30 -- and the calibration was degenerate,
+                # cx wandering to -49 between halves of the same data.
+                measured = _tilt_degrees(gray, corners, ids, args)
+                if measured is not None:
+                    tilt = measured
+                    key = (int(cx / (args.width / 3.0)),
+                           int(cy / (args.height / 3.0)),
+                           0 if fill < 0.25 else (1 if fill < 0.55 else 2),
+                           0 if tilt < 15.0 else (1 if tilt < 30.0 else 2))
+                    novel = bins.get(key, 0) < args.per_bin
+                    if novel:
+                        bins[key] = bins.get(key, 0) + 1
+                        kept += 1
+                        cv2.imwrite(
+                            os.path.join(args.out, f"view_{kept:03d}.png"),
+                            frame)
+
             if args.show:
                 _hud(frame, corners, ids, tilt, bins, kept, args, novel)
 
+            # Report unconditionally. The first version only printed when a
+            # frame was KEPT, so a run that detected nothing produced no output
+            # whatsoever and was indistinguishable from a hang.
             now = time.time()
             if now - last_report > 0.5:
                 last_report = now
                 pos = len({(k[0], k[1]) for k in bins})
                 size = len({k[2] for k in bins})
-                tiltb = len({k[3] for k in bins})
+                steep = sum(v for k, v in bins.items() if k[3] == 2)
                 note = "" if n >= args.min_markers else \
                        f"  <- need {args.min_markers}+, board not in view?"
                 print(f"\rseen {received:5d}  kept {kept:3d}/{args.target}  "
-                      f"markers {n:2d} tilt {tilt_now:4.0f}deg{note}  "
-                      f"[pos {pos}/9 size {size}/3 tilt {tiltb}/3]   ",
+                      f"markers {n:2d} tilt {tilt:4.0f}deg{note}  "
+                      f"[pos {pos}/9 size {size}/3 steep {steep}]   ",
                       end="", flush=True)
-            # `not corners` as well as the threshold: with --min-markers 0 a
-            # frame containing no markers passes the test and then reaches
-            # np.concatenate([]), which raises "need at least one array to
-            # concatenate" and takes the capture loop down with it.
-            if n < args.min_markers or not len(corners):
-                continue
-
-            pts = np.concatenate([c.reshape(-1, 2) for c in corners])
-            cx, cy = pts[:, 0].mean(), pts[:, 1].mean()
-            # Fraction of the frame the board spans -- the "Size" axis.
-            span = ((pts[:, 0].max() - pts[:, 0].min()) *
-                    (pts[:, 1].max() - pts[:, 1].min()))
-            fill = span / float(args.width * args.height)
-
-            # Tilt, from the board's actual POSE. The first version inferred it
-            # from the bounding box aspect ratio, which is not tilt at all: a
-            # board held square-on but off to one side has a skewed bounding
-            # box, and a board tilted about the axis pointing at the camera has
-            # none. Measured on a real set that this metric rated "tilt 2/2",
-            # the true spread was median 8.8 deg and max 26.4 -- NOT ONE view
-            # past 30 -- and the calibration was consequently degenerate, with
-            # cx wandering to -49 between halves of the same data.
-            tilt = _tilt_degrees(gray, corners, ids, args)
-            if tilt is None:
-                continue
-            tilt_now = tilt
-
-            key = (int(cx / (args.width / 3.0)),
-                   int(cy / (args.height / 3.0)),
-                   0 if fill < 0.25 else (1 if fill < 0.55 else 2),
-                   0 if tilt < 15.0 else (1 if tilt < 30.0 else 2))
-            novel = bins.get(key, 0) < args.per_bin
-            if novel:
-                bins[key] = bins.get(key, 0) + 1
-                kept += 1
-                cv2.imwrite(os.path.join(args.out, f"view_{kept:03d}.png"),
-                            frame)
-
 
     except KeyboardInterrupt:
         print()
