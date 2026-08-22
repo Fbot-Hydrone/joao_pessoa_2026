@@ -1,0 +1,517 @@
+#!/usr/bin/env python3
+"""
+Tests for phase1_mission_node: the turn-and-look search, and the decisions that
+decide where the vehicle goes.
+
+The flight states themselves (arming, takeoff, landing) are NOT covered here —
+they are conversations with ArduPilot, and mocking one proves nothing about the
+real vehicle. They are exercised by flying the sim; see docs/PHASE1-MISSION.md.
+
+What IS worth pinning is the handful of decisions whose failure is silent and
+expensive:
+
+  * the takeoff base must never be a landing candidate. If it becomes one the
+    drone flies out, hovers over the thing it started on, fails to confirm it,
+    and burns a search cycle plus the drift that goes with it — every run.
+  * a candidate must be CONFIRMED in the map before the vehicle translates. One
+    frame of noise must not move the drone.
+  * the map must not be read while the drone is turning. A detection taken
+    mid-slew is projected through a moving yaw estimate and lands metres out;
+    the settle window is the only thing standing between that and a flight to a
+    pad that is not there.
+  * the search must terminate. Eight turns and a fallback, or the vehicle
+    hovers until the battery decides.
+  * one belly-camera frame must not satisfy the whole confirmation quota. The
+    camera runs at 10 Hz and the tick at 10 Hz, so a detection left in place
+    would be counted three times in 0.3 s.
+
+Run inside the stack container, with the workspace built:
+
+    docker run --rm -v $PWD:/repo -w /repo joao_pessoa_2026-hydrone:latest bash -c \
+      '. /ws/install/setup.sh && python3 -m pytest \
+       src/hydrone_mission/test/test_phase1_mission.py -q'
+"""
+
+import math
+
+import pytest
+import rclpy
+
+from geometry_msgs.msg import PoseStamped
+
+from hydrone_msgs.msg import Pad, PadDetection, PadMap
+from hydrone_mission.phase1_mission_node import (
+    Phase1MissionNode, wrap_pi, yaw_of)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _ros():
+    rclpy.init()
+    yield
+    rclpy.shutdown()
+
+
+@pytest.fixture
+def node():
+    n = Phase1MissionNode(parameter_overrides=[
+        rclpy.parameter.Parameter("auto_start", value=False),
+        rclpy.parameter.Parameter("takeoff_alt", value=1.0),
+        rclpy.parameter.Parameter("target_bases", value=2),
+        rclpy.parameter.Parameter("settle_s", value=2.0),
+        rclpy.parameter.Parameter("max_rotations", value=8),
+        rclpy.parameter.Parameter("confirm_detections", value=3),
+        rclpy.parameter.Parameter("confirm_confidence", value=0.60),
+    ])
+    n.home = (0.0, 0.0)
+    set_pose(n, 0.0, 0.0, 1.0)
+    n.setpoint = [0.0, 0.0, 1.0, 0.0]
+    yield n
+    n.destroy_node()
+
+
+# ── Fakes ────────────────────────────────────────────────────────────────────
+
+def set_pose(node, x, y=0.0, z=1.0, yaw=0.0):
+    pose = PoseStamped()
+    pose.header.frame_id = "map"
+    pose.pose.position.x = float(x)
+    pose.pose.position.y = float(y)
+    pose.pose.position.z = float(z)
+    pose.pose.orientation.z = math.sin(yaw / 2.0)
+    pose.pose.orientation.w = math.cos(yaw / 2.0)
+    node.pose = pose
+
+
+def pad(pad_id, x, y, observations=5, visited=False, takeoff_base=False,
+        confidence=0.9):
+    p = Pad()
+    p.id = int(pad_id)
+    p.position.x = float(x)
+    p.position.y = float(y)
+    p.observations = int(observations)
+    p.visited = bool(visited)
+    p.is_takeoff_base = bool(takeoff_base)
+    p.confidence = float(confidence)
+    return p
+
+
+def set_map(node, *pads):
+    m = PadMap()
+    m.header.frame_id = "map"
+    m.pads = list(pads)
+    node.pad_map = m
+
+
+def see_pad(node, confidence=0.9, age_s=0.0):
+    """Pretend the belly camera just reported a pad."""
+    det = PadDetection()
+    det.camera = "down"
+    det.confidence = float(confidence)
+    det.position_valid = True
+    node._last_down = det
+    node._last_down_t = node._now() - age_s
+
+
+def enter(node, state, age_s=0.0):
+    """Put the node in a state, optionally pretending it has been there a while."""
+    node._enter(state)
+    node._state_since = node._now() - age_s
+
+
+# ── Angle helpers ────────────────────────────────────────────────────────────
+
+def test_wrap_pi_folds_into_one_turn():
+    assert wrap_pi(0.0) == pytest.approx(0.0)
+    assert wrap_pi(math.radians(370.0)) == pytest.approx(math.radians(10.0))
+    assert wrap_pi(math.radians(-190.0)) == pytest.approx(math.radians(170.0))
+
+
+def test_yaw_of_reads_the_quaternion(node):
+    set_pose(node, 0.0, yaw=math.radians(30.0))
+    assert math.degrees(yaw_of(node.pose)) == pytest.approx(30.0)
+
+
+# ── What counts as a landing candidate ───────────────────────────────────────
+
+def test_the_takeoff_base_is_never_a_candidate(node):
+    """The one that costs a whole search cycle per run if it regresses."""
+    node.home = (9.0, 9.0)              # so the home-proximity guard is not it
+    assert not node._is_candidate(pad(1, 0.0, 0.0, takeoff_base=True))
+
+
+def test_a_visited_pad_is_never_a_candidate(node):
+    node.home = (9.0, 9.0)
+    assert not node._is_candidate(pad(1, 2.0, 0.0, visited=True))
+
+
+def test_a_blacklisted_pad_is_never_a_candidate(node):
+    node.home = (9.0, 9.0)
+    node.blacklist.add(7)
+    assert not node._is_candidate(pad(7, 2.0, 0.0))
+
+
+def test_an_unconfirmed_pad_is_never_a_candidate(node):
+    """Two sightings is not a base. The map confirms at three."""
+    node.home = (9.0, 9.0)
+    assert not node._is_candidate(pad(1, 2.0, 0.0, observations=2))
+    assert node._is_candidate(pad(1, 2.0, 0.0, observations=3))
+
+
+def test_anything_sitting_where_we_armed_is_never_a_candidate(node):
+    """Belt and braces for a failed takeoff-base registration."""
+    node.home = (0.0, 0.0)
+    assert not node._is_candidate(pad(1, 0.3, -0.2))
+
+
+def test_the_nearest_candidate_wins(node):
+    node.home = (9.0, 9.0)
+    set_pose(node, 0.0, 0.0)
+    set_map(node, pad(1, 3.0, 0.0), pad(2, 1.5, 0.0))
+    assert node._best_candidate().id == 2
+
+
+def test_no_map_means_no_candidate(node):
+    node.pad_map = None
+    assert node._best_candidate() is None
+
+
+# ── The search: settle, then turn ────────────────────────────────────────────
+
+def test_the_map_is_not_read_before_the_settle_window_closes(node):
+    """A pad seen mid-turn is projected through a slewing yaw estimate.
+
+    Acting on it means flying to a position that is wrong by metres, so SETTLE
+    must hold even when the map is already offering something.
+    """
+    node.home = (9.0, 9.0)
+    set_map(node, pad(1, 2.0, 0.0))
+    enter(node, node.SETTLE, age_s=0.5)
+    node._do_settle()
+    assert node.state == node.SETTLE
+
+
+def test_a_candidate_found_after_settling_is_taken(node):
+    node.home = (9.0, 9.0)
+    set_map(node, pad(1, 2.0, 0.0))
+    enter(node, node.SETTLE, age_s=5.0)
+    node._do_settle()
+    assert node.state == node.SELECT
+
+
+def test_settling_with_nothing_in_the_map_starts_a_turn(node):
+    set_map(node)
+    enter(node, node.SETTLE, age_s=5.0)
+    node._do_settle()
+    assert node.state == node.ROTATE
+
+
+def test_the_turn_is_clockwise(node):
+    """ENU yaw runs counter-clockwise from east, so clockwise SUBTRACTS."""
+    set_map(node)
+    node.setpoint = [0.0, 0.0, 1.0, 0.0]
+    enter(node, node.SETTLE, age_s=5.0)
+    node._do_settle()
+    assert math.degrees(node.setpoint[3]) == pytest.approx(-45.0)
+
+
+def test_the_turn_wraps_rather_than_winding_up(node):
+    set_map(node)
+    node.setpoint = [0.0, 0.0, 1.0, math.radians(-170.0)]
+    enter(node, node.SETTLE, age_s=5.0)
+    node._do_settle()
+    assert math.degrees(node.setpoint[3]) == pytest.approx(145.0)
+
+
+def test_the_turn_does_not_move_the_vehicle(node):
+    set_map(node)
+    node.setpoint = [1.3, -0.7, 1.0, 0.0]
+    enter(node, node.SETTLE, age_s=5.0)
+    node._do_settle()
+    assert node.setpoint[:3] == pytest.approx([1.3, -0.7, 1.0])
+
+
+def test_a_turn_completes_once_the_heading_is_reached(node):
+    node.setpoint = [0.0, 0.0, 1.0, math.radians(-45.0)]
+    enter(node, node.ROTATE)
+    set_pose(node, 0.0, yaw=math.radians(-44.0))
+    node._do_rotate()
+    assert node.state == node.SETTLE
+    assert node.rotations_done == 1
+
+
+def test_a_turn_that_never_arrives_still_counts(node):
+    """Otherwise a yaw the FCU will not fly hangs the mission forever."""
+    node.setpoint = [0.0, 0.0, 1.0, math.radians(-45.0)]
+    enter(node, node.ROTATE, age_s=999.0)
+    set_pose(node, 0.0, yaw=0.0)
+    node._do_rotate()
+    assert node.state == node.SETTLE
+    assert node.rotations_done == 1
+
+
+def test_the_search_terminates(node):
+    """Eight turns is a full circle. Past that there is nothing new to see."""
+    set_map(node)
+    node.rotations_done = node.max_rotations
+    enter(node, node.SETTLE, age_s=5.0)
+    node._do_settle()
+    assert node.state == node.LAND
+    assert node.landing_for == node.LAND_FALLBACK
+    assert not node.stream_setpoint      # the FCU owns the descent now
+
+
+def test_a_full_search_makes_exactly_max_rotations_turns(node):
+    """Walk the real loop rather than trusting the counter arithmetic."""
+    set_map(node)
+    enter(node, node.SETTLE, age_s=5.0)
+    for _ in range(200):
+        if node.state == node.SETTLE:
+            node._state_since = node._now() - 5.0
+            node._do_settle()
+        elif node.state == node.ROTATE:
+            set_pose(node, 0.0, yaw=node.setpoint[3])
+            node._do_rotate()
+        else:
+            break
+    assert node.rotations_done == node.max_rotations
+    assert node.state == node.LAND
+
+
+# ── Choosing what to do with the air ─────────────────────────────────────────
+
+def test_a_confirmed_candidate_is_flown_to(node):
+    node.home = (9.0, 9.0)
+    set_pose(node, 0.0, 0.0)
+    set_map(node, pad(4, 2.0, 1.0))
+    node._do_select()
+    assert node.state == node.TRAVEL
+    assert node.target_id == 4
+    assert node.setpoint[:3] == pytest.approx([2.0, 1.0, 1.0])
+    assert node.landing_for == node.LAND_PAD
+
+
+def test_the_heading_is_held_while_travelling(node):
+    """Turning and translating at once moves the detector's geometry and the
+    controller's demand together, for nothing: the belly camera looks down."""
+    node.home = (9.0, 9.0)
+    node.setpoint = [0.0, 0.0, 1.0, math.radians(-90.0)]
+    set_map(node, pad(4, 2.0, 1.0))
+    node._do_select()
+    assert node.setpoint[3] == pytest.approx(math.radians(-90.0))
+
+
+def test_nothing_in_the_map_falls_through_to_the_search(node):
+    set_map(node)
+    node._do_select()
+    assert node.state == node.SETTLE
+
+
+def test_the_quota_sends_the_drone_home(node):
+    node.landed_count = 2
+    set_map(node, pad(0, -0.5, 0.2, takeoff_base=True),
+            pad(4, 2.0, 1.0))
+    node._do_select()
+    assert node.state == node.TRAVEL
+    assert node.landing_for == node.LAND_FINAL
+    assert node.setpoint[:2] == pytest.approx([-0.5, 0.2])
+
+
+def test_home_falls_back_to_where_we_armed(node):
+    """If registration failed there is no takeoff-base entry to fly to."""
+    node.home = (1.25, -3.5)
+    node.landed_count = 2
+    set_map(node, pad(4, 2.0, 1.0))
+    node._do_select()
+    assert node.setpoint[:2] == pytest.approx([1.25, -3.5])
+
+
+# ── Arriving, and confirming ─────────────────────────────────────────────────
+
+def test_arriving_over_a_candidate_starts_the_confirmation(node):
+    node.target_id = 4
+    node.landing_for = node.LAND_PAD
+    node.setpoint = [2.0, 1.0, 1.0, 0.0]
+    set_pose(node, 2.05, 1.05)
+    enter(node, node.TRAVEL)
+    node._do_travel()
+    assert node.state == node.CONFIRM
+    assert node._confirm_hits == 0
+
+
+def test_arriving_home_lands_without_confirming(node):
+    """There is nothing to confirm: we registered this base ourselves."""
+    node.landing_for = node.LAND_FINAL
+    node.setpoint = [0.0, 0.0, 1.0, 0.0]
+    set_pose(node, 0.0, 0.0)
+    enter(node, node.TRAVEL)
+    node._do_travel()
+    assert node.state == node.LAND
+
+
+def test_a_candidate_we_cannot_reach_is_blacklisted(node):
+    node.target_id = 4
+    node.landing_for = node.LAND_PAD
+    node.setpoint = [20.0, 0.0, 1.0, 0.0]
+    set_pose(node, 0.0, 0.0)
+    enter(node, node.TRAVEL, age_s=999.0)
+    node._do_travel()
+    assert 4 in node.blacklist
+    assert node.state == node.SETTLE
+
+
+def test_confirmation_needs_several_looks(node):
+    node.target_id = 4
+    enter(node, node.CONFIRM)
+    for _ in range(node.confirm_detections - 1):
+        see_pad(node, confidence=0.9)
+        node._do_confirm()
+        assert node.state == node.CONFIRM
+    see_pad(node, confidence=0.9)
+    node._do_confirm()
+    assert node.state == node.LAND
+    assert node.landing_for == node.LAND_PAD
+
+
+def test_one_frame_cannot_satisfy_the_whole_quota(node):
+    """The belly camera and the tick both run at 10 Hz. Without clearing the
+    detection, a single frame would be counted three times in 0.3 s."""
+    node.target_id = 4
+    enter(node, node.CONFIRM)
+    see_pad(node, confidence=0.9)
+    for _ in range(10):
+        node._do_confirm()
+    assert node._confirm_hits == 1
+    assert node.state == node.CONFIRM
+
+
+def test_an_unconfident_look_does_not_count(node):
+    node.target_id = 4
+    enter(node, node.CONFIRM)
+    for _ in range(10):
+        see_pad(node, confidence=0.4)
+        node._do_confirm()
+    assert node._confirm_hits == 0
+
+
+def test_a_stale_look_does_not_count(node):
+    node.target_id = 4
+    enter(node, node.CONFIRM)
+    for _ in range(10):
+        see_pad(node, confidence=0.95, age_s=30.0)
+        node._do_confirm()
+    assert node._confirm_hits == 0
+
+
+def test_a_candidate_that_never_confirms_is_blacklisted(node):
+    """What makes a blue tarp cost half a minute instead of the mission."""
+    node.target_id = 4
+    enter(node, node.CONFIRM, age_s=999.0)
+    node._do_confirm()
+    assert 4 in node.blacklist
+    assert node.state == node.SETTLE
+    assert node.target_id is None
+
+
+def test_a_rejection_restarts_the_search_from_scratch(node):
+    """The drone is somewhere new facing a new direction; the turns it made
+    over the old spot say nothing about what is visible from here."""
+    node.target_id = 4
+    node.rotations_done = 6
+    set_pose(node, 2.0, 1.0)
+    enter(node, node.CONFIRM, age_s=999.0)
+    node._do_confirm()
+    assert node.rotations_done == 0
+    assert node.setpoint[:3] == pytest.approx([2.0, 1.0, 1.0])
+
+
+# ── The fallback ─────────────────────────────────────────────────────────────
+
+def test_the_fallback_hops_once_and_stops(node):
+    """Land, take off, land again, done — and no leg home: the whole reason we
+    are in the fallback is that the search stopped producing anything."""
+    node.landing_for = node.LAND_FALLBACK
+    enter(node, node.DWELL, age_s=999.0)
+    node._do_dwell()
+    assert node.state == node.ARMING
+    assert node._land_after_takeoff
+    assert node.landing_for == node.LAND_FINAL
+
+    # ... the hop: takeoff completes and goes straight back down, in place.
+    set_pose(node, 1.7, -0.4, z=1.0)
+    enter(node, node.TAKEOFF)
+    node._do_takeoff()
+    assert node.state == node.LAND
+    assert not node._land_after_takeoff
+
+    enter(node, node.DWELL, age_s=999.0)
+    node._do_dwell()
+    assert node.state == node.DONE
+
+
+def test_an_ordinary_takeoff_searches_instead_of_landing(node):
+    set_pose(node, 0.0, 0.0, z=1.0)
+    enter(node, node.TAKEOFF)
+    node._do_takeoff()
+    assert node.state == node.SELECT
+    assert node.rotations_done == 0
+
+
+def test_takeoff_holds_the_heading_it_climbed_with(node):
+    """Commanding yaw 0 would spin the vehicle the moment the stream starts."""
+    set_pose(node, 0.0, 0.0, z=1.0, yaw=math.radians(140.0))
+    enter(node, node.TAKEOFF)
+    node._do_takeoff()
+    assert math.degrees(node.setpoint[3]) == pytest.approx(140.0, abs=1e-3)
+
+
+# ── Between landings ─────────────────────────────────────────────────────────
+
+def test_a_pad_landing_leads_to_another_takeoff(node):
+    node.landing_for = node.LAND_PAD
+    node.landed_count = 1
+    node.target_id = 4
+    enter(node, node.DWELL, age_s=999.0)
+    node._do_dwell()
+    assert node.state == node.ARMING
+    assert node.target_id is None
+
+
+def test_the_final_landing_ends_the_mission(node):
+    node.landing_for = node.LAND_FINAL
+    enter(node, node.DWELL, age_s=999.0)
+    node._do_dwell()
+    assert node.state == node.DONE
+
+
+def test_the_takeoff_base_is_registered_before_the_first_climb_only(node):
+    node.base_registered = False
+    enter(node, node.ARMING)
+    node.mav_state.mode = "GUIDED"
+    node.mav_state.armed = True
+    node._do_arming()
+    assert node.state == node.REGISTER
+
+    node.base_registered = True
+    enter(node, node.ARMING)
+    node._do_arming()
+    assert node.state == node.TAKEOFF
+
+
+# ── The setpoint on the wire ─────────────────────────────────────────────────
+
+def test_the_published_setpoint_carries_the_commanded_yaw(node):
+    node._goto(1.0, 2.0, 1.0, math.radians(-90.0))
+    published = []
+    node.pub_sp.publish = published.append
+    node._stream()
+    sp = published[0]
+    assert sp.pose.position.x == pytest.approx(1.0)
+    assert math.degrees(yaw_of(sp)) == pytest.approx(-90.0)
+
+
+def test_nothing_is_published_once_the_fcu_owns_the_descent(node):
+    node._begin_landing()
+    published = []
+    node.pub_sp.publish = published.append
+    node._stream()
+    assert published == []

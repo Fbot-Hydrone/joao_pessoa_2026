@@ -39,8 +39,31 @@ Pruning
 -------
 A pad seen once and never again was a false positive. Entries below
 `min_observations` that have not been re-seen within `provisional_ttl_s` are
-dropped. Confirmed and visited entries are never pruned — forgetting where you
-landed would undo the whole point.
+dropped. Confirmed, visited and takeoff-base entries are never pruned —
+forgetting where you landed would undo the whole point.
+
+The takeoff base
+----------------
+The drone always starts standing ON a base, and it is not one of the sites it is
+meant to land on. Two things follow, and both are handled here rather than in
+the mission:
+
+  * **Nothing is mapped before the first arm.** On the ground the belly camera
+    is a few centimetres above that base and the forward camera is looking along
+    it at a grazing angle, which is exactly the geometry that produces a
+    detection of the start base. Mapping it then would seed a candidate the
+    mission has to fly to and rule out. `require_armed` (default true) drops
+    every detection until /mavros/state first reports armed.
+  * **It is declared, not detected.** `RegisterTakeoffBase` is called the
+    instant the drone arms, with the position it is standing at. That entry
+    carries `is_takeoff_base`, is never pruned, is never offered as a landing
+    candidate, and claims later detections within `takeoff_base_radius` so a
+    glancing view of it from the air cannot spawn a phantom pad beside it.
+
+Registering costs nothing and is certain. The alternative — letting the detector
+find the start base later and having the mission hover over it to decide — spends
+a travel leg and a confirmation hover, and every second of both is accumulated
+visual-odometry drift, on a question that was already answered.
 """
 
 import math
@@ -55,15 +78,18 @@ from sensor_msgs.msg import Range
 from std_msgs.msg import ColorRGBA
 from visualization_msgs.msg import Marker, MarkerArray
 
+from mavros_msgs.msg import State
+
 from hydrone_msgs.msg import Pad, PadDetection, PadMap
-from hydrone_msgs.srv import MarkPadVisited
+from hydrone_msgs.srv import MarkPadVisited, RegisterTakeoffBase
 
 
 class _Entry:
     """Mutable map entry. Converted to a Pad message on publish."""
 
     __slots__ = ("id", "x", "y", "z", "weight", "confidence", "observations",
-                 "last_seen", "height", "height_measured", "visited")
+                 "last_seen", "height", "height_measured", "visited",
+                 "is_takeoff_base")
 
     def __init__(self, pad_id, x, y, z, weight, confidence, stamp):
         self.id = pad_id
@@ -77,6 +103,7 @@ class _Entry:
         self.height = z
         self.height_measured = False
         self.visited = False
+        self.is_takeoff_base = False
 
     def fuse(self, x, y, z, weight, confidence, stamp):
         total = self.weight + weight
@@ -131,6 +158,24 @@ class PadMapNode(Node):
         self.declare_parameter("publish_hz", 2.0)
         self.declare_parameter("world_frame", "map")
 
+        # Map nothing until the vehicle has armed at least once. On the ground
+        # the cameras are looking at the base the drone is standing on, from the
+        # grazing angles that detect it best; without this the map opens with a
+        # candidate the mission then has to fly to and rule out. See the module
+        # docstring.
+        self.declare_parameter("require_armed", True)
+        self.declare_parameter("state_topic", "/mavros/state")
+        # How far from the registered takeoff base a detection is still THAT
+        # base. Wider than merge_radius on purpose: the start base is seen from
+        # the air at an angle, where the projection error is largest, and a
+        # phantom pad 1.3 m from the real one would be indistinguishable from a
+        # genuine second site.
+        self.declare_parameter("takeoff_base_radius", 1.5)
+        # Seconds between repeats of the same (camera, gate) rejection warning.
+        # 0 logs every one — useful when counting how often a gate closes, noisy
+        # at 10 Hz per camera.
+        self.declare_parameter("reject_log_period_s", 5.0)
+
         p = lambda name: self.get_parameter(name).value
         self.merge_radius = float(p("merge_radius"))
         self.min_conf = float(p("min_confidence"))
@@ -141,12 +186,22 @@ class PadMapNode(Node):
         self.ttl = float(p("provisional_ttl_s"))
         self.overhead_radius = float(p("overhead_radius"))
         self.world_frame = p("world_frame")
+        self.require_armed = bool(p("require_armed"))
+        self.takeoff_base_radius = float(p("takeoff_base_radius"))
+        self.reject_log_period = float(p("reject_log_period_s"))
 
         # ── State ───────────────────────────────────────────────────────────
         self.pads: dict[int, _Entry] = {}
         self._next_id = 0
         self.pose: PoseStamped | None = None
         self.range_m: float | None = None
+        # Latched, never cleared: the gate is "has this vehicle ever been
+        # armed", not "is it armed now". It is disarmed on every pad it lands
+        # on, and detections must keep flowing then.
+        self.armed_once = not self.require_armed
+        self.takeoff_base_id: int | None = None
+        # (camera, gate) -> when that combination last logged. See _reject.
+        self._last_reject: dict[tuple[str, str], float] = {}
 
         sensor_qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -164,13 +219,21 @@ class PadMapNode(Node):
                                  self._cb_pose, sensor_qos)
         self.create_subscription(Range, p("range_topic"),
                                  self._cb_range, sensor_qos)
+        # MAVROS publishes /mavros/state RELIABLE, unlike the sensor buses.
+        self.create_subscription(State, p("state_topic"), self._cb_state, 10)
 
         self.srv_visited = self.create_service(
             MarkPadVisited, "/hydrone/pads/mark_visited", self._svc_visited)
+        self.srv_takeoff_base = self.create_service(
+            RegisterTakeoffBase, "/hydrone/pads/register_takeoff_base",
+            self._svc_register_takeoff_base)
 
         self.create_timer(1.0 / max(float(p("publish_hz")), 0.1), self._tick)
 
-        self.get_logger().info("pad_map ready — fusing landing-pad detections.")
+        gate = ("holding all detections until the first arm"
+                if self.require_armed else "mapping from the first frame")
+        self.get_logger().info(
+            f"pad_map ready — fusing landing-pad detections, {gate}.")
 
     # ────────────────────────────────────────────────────────────────────────
     # Inputs
@@ -178,6 +241,13 @@ class PadMapNode(Node):
 
     def _cb_pose(self, msg: PoseStamped):
         self.pose = msg
+
+    def _cb_state(self, msg: State):
+        """Latch the first arm. Everything before it is discarded."""
+        if msg.armed and not self.armed_once:
+            self.armed_once = True
+            self.get_logger().info(
+                "vehicle armed — accepting pad detections from now on.")
 
     def _cb_range(self, msg: Range):
         """Cache the last plausible downward range reading."""
@@ -187,12 +257,43 @@ class PadMapNode(Node):
             self.range_m = None
 
     def _cb_detection(self, msg: PadDetection):
-        if not msg.position_valid or msg.confidence < self.min_conf:
+        if not self.armed_once:
+            # Not "ignore the start base" — ignore EVERYTHING. On the ground
+            # there is no useful geometry to map from: the belly camera is
+            # centimetres off a surface and the forward camera is looking at the
+            # horizon, and both project through a pose the EKF has not settled.
+            self._throttle_pregate()
+            return
+        # Every rejection below is SILENT unless it is logged: the detector goes
+        # on drawing a confident box on its debug image while the map stays
+        # empty, and from the outside that is indistinguishable from "the
+        # detector never saw it". Say which gate closed, throttled so a
+        # persistent false positive cannot flood the log.
+        if not msg.position_valid:
+            # The pixel could not be placed in the world: no camera_info, no
+            # vehicle pose, a stale pose, or a ray that never meets the ground
+            # plane. Nothing to do with distance or confidence.
+            self._reject(msg, "projection",
+                         "position_valid is false — the detector could not "
+                         "project it (no camera_info, no/stale pose, or a ray "
+                         "at or above the horizon)")
+            return
+        if msg.confidence < self.min_conf:
+            self._reject(msg, "confidence",
+                         f"confidence {msg.confidence:.2f} < min_confidence "
+                         f"{self.min_conf:.2f}")
             return
         if msg.range_m > self.max_range:
+            self._reject(msg, "range",
+                         f"range {msg.range_m:.1f} m > max_range_m "
+                         f"{self.max_range:.1f} m")
             return
         if not (self.min_height <= msg.position.z <= self.max_height):
             # Projected well off the floor: a reflection, or a bad depth sample.
+            self._reject(msg, "height",
+                         f"projected z {msg.position.z:.2f} m outside "
+                         f"[{self.min_height:.2f}, {self.max_height:.2f}] — a "
+                         "reflection, or a bad depth sample")
             return
 
         # Weight close, confident looks far above distant ones — projection
@@ -221,17 +322,80 @@ class PadMapNode(Node):
                     f"{entry.observations} looks, conf {entry.confidence:.2f}")
 
     def _nearest(self, x: float, y: float) -> _Entry | None:
-        """Closest map entry within merge_radius, or None."""
-        best, best_d = None, self.merge_radius
+        """Closest map entry whose claim radius covers (x, y), or None.
+
+        Every entry claims `merge_radius`; the takeoff base claims
+        `takeoff_base_radius`, which is wider. The comparison is on the ratio
+        d/radius rather than on d, so an entry that only just reaches the point
+        never outbids one that covers it comfortably — otherwise the takeoff
+        base's wider reach would let it steal detections from a genuine pad
+        sitting closer to them.
+        """
+        best, best_score = None, 1.0
         for entry in self.pads.values():
-            d = math.hypot(entry.x - x, entry.y - y)
-            if d < best_d:
-                best, best_d = entry, d
+            radius = (self.takeoff_base_radius if entry.is_takeoff_base
+                      else self.merge_radius)
+            score = math.hypot(entry.x - x, entry.y - y) / radius
+            if score < best_score:
+                best, best_score = entry, score
         return best
 
     # ────────────────────────────────────────────────────────────────────────
     # Services
     # ────────────────────────────────────────────────────────────────────────
+
+    def _svc_register_takeoff_base(self, request, response):
+        """Declare the pad the drone is standing on as the takeoff base.
+
+        Called once, at the first arm. Two cases:
+
+          * an entry already covers that position — it IS this base, seen from
+            the air on some earlier run or (with require_armed off) from the
+            ground. Flag it in place rather than creating a duplicate 20 cm
+            away.
+          * nothing there — create the entry outright. It is not a detection and
+            it does not pretend to be one: observations is left at 1 and
+            confidence at 1.0, because its identity comes from the vehicle
+            having been standing on it, which is better evidence than any
+            camera produces.
+
+        Idempotent: calling it again moves the flag to whatever is under the
+        drone now and clears it from the previous holder, so a re-armed mission
+        cannot end up with two takeoff bases.
+        """
+        x = float(request.position.x)
+        y = float(request.position.y)
+        z = float(request.position.z)
+
+        entry = self._closest_within(x, y, self.takeoff_base_radius)
+        if entry is None:
+            entry = _Entry(self._next_id, x, y, z, weight=1.0, confidence=1.0,
+                           stamp=self._now())
+            self.pads[self._next_id] = entry
+            self._next_id += 1
+            created = "registered"
+        else:
+            created = f"claimed existing pad {entry.id} as"
+
+        # The drone is standing on it, so its top surface is exactly the
+        # altitude the drone reports. That is a measurement, not a projection.
+        entry.height = z
+        entry.z = z
+        entry.height_measured = True
+
+        for other in self.pads.values():
+            other.is_takeoff_base = (other is entry)
+        self.takeoff_base_id = entry.id
+
+        response.success = True
+        response.id = int(entry.id)
+        response.message = f"pad {entry.id} is the takeoff base"
+        self.get_logger().info(
+            f"{created} TAKEOFF BASE pad {entry.id} at "
+            f"({entry.x:.2f}, {entry.y:.2f}, {entry.height:.2f}) — it will "
+            "never be offered as a landing candidate.")
+        self._publish()
+        return response
 
     def _svc_visited(self, request, response):
         entry = self.pads.get(int(request.id))
@@ -283,7 +447,8 @@ class PadMapNode(Node):
         pz = self.pose.pose.position.z
 
         entry = self._closest_within(px, py, self.overhead_radius,
-                                     skip_visited=True)
+                                     skip_visited=True,
+                                     skip_takeoff_base=True)
         if entry is None:
             return
 
@@ -306,10 +471,13 @@ class PadMapNode(Node):
                     f"({'ELEVATED' if height > 0.15 else 'ground level'})")
 
     def _closest_within(self, x: float, y: float, radius: float,
-                        skip_visited: bool = False) -> _Entry | None:
+                        skip_visited: bool = False,
+                        skip_takeoff_base: bool = False) -> _Entry | None:
         best, best_d = None, radius
         for entry in self.pads.values():
             if skip_visited and entry.visited:
+                continue
+            if skip_takeoff_base and entry.is_takeoff_base:
                 continue
             d = math.hypot(entry.x - x, entry.y - y)
             if d < best_d:
@@ -321,6 +489,7 @@ class PadMapNode(Node):
         now = self.get_clock().now().nanoseconds * 1e-9
         doomed = [pid for pid, e in self.pads.items()
                   if not e.visited
+                  and not e.is_takeoff_base
                   and e.observations < self.min_obs
                   and now - e.last_seen > self.ttl]
         for pid in doomed:
@@ -332,6 +501,39 @@ class PadMapNode(Node):
     # ────────────────────────────────────────────────────────────────────────
     # Output
     # ────────────────────────────────────────────────────────────────────────
+
+    def _now(self) -> float:
+        return self.get_clock().now().nanoseconds * 1e-9
+
+    def _reject(self, msg: PadDetection, gate: str, why: str):
+        """Say why a detection did not reach the map.
+
+        WARN rather than INFO: a detection that the detector was confident
+        enough to publish and the map then threw away is the one event where the
+        two halves of the pipeline disagree, and it is invisible everywhere else.
+
+        Throttled PER (camera, gate), by hand. rclpy's own throttle_duration_sec
+        keys its state on the CALL SITE — (function, file, line) in
+        rcutils_logger.py — and every gate here funnels through this one line, so
+        the built-in version would give all four reasons and both cameras a
+        single shared bucket. The belly camera rejecting something at 10 Hz would
+        then hide the forward camera's reason for 5 s at a time, which is exactly
+        the case this logging exists to diagnose.
+        """
+        key = (msg.camera, gate)
+        now = self._now()
+        if now - self._last_reject.get(key, -1e9) < self.reject_log_period:
+            return
+        self._last_reject[key] = now
+        self.get_logger().warn(
+            f"detection from {msg.camera} at ({msg.position.x:.2f}, "
+            f"{msg.position.y:.2f}, {msg.position.z:.2f}) conf "
+            f"{msg.confidence:.2f} range {msg.range_m:.1f} m REJECTED: {why}")
+
+    def _throttle_pregate(self):
+        self.get_logger().info(
+            "detection ignored: nothing is mapped before the first arm "
+            "(require_armed).", throttle_duration_sec=10.0)
 
     def _publish(self):
         now = self.get_clock().now().to_msg()
@@ -359,11 +561,18 @@ class PadMapNode(Node):
         pad.height = float(entry.height)
         pad.height_measured = bool(entry.height_measured)
         pad.visited = bool(entry.visited)
+        pad.is_takeoff_base = bool(entry.is_takeoff_base)
         return pad
 
     def _to_markers(self, map_msg: PadMap) -> MarkerArray:
-        """Disc + id label per pad. Grey = candidate, cyan = confirmed,
-        green = landed on."""
+        """Disc + id label per pad.
+
+        Grey = candidate, cyan = confirmed, green = landed on,
+        ORANGE = the takeoff base. The takeoff base is checked first because it
+        is the one state that says "never fly here"; it would otherwise render
+        as an ordinary candidate and look exactly like the thing the mission is
+        hunting for.
+        """
         markers = MarkerArray()
         # A leading DELETEALL keeps pruned pads from lingering in RViz.
         clear = Marker()
@@ -371,7 +580,9 @@ class PadMapNode(Node):
         markers.markers.append(clear)
 
         for pad in map_msg.pads:
-            if pad.visited:
+            if pad.is_takeoff_base:
+                colour = ColorRGBA(r=1.0, g=0.55, b=0.0, a=0.85)
+            elif pad.visited:
                 colour = ColorRGBA(r=0.1, g=0.9, b=0.2, a=0.85)
             elif pad.observations >= self.min_obs:
                 colour = ColorRGBA(r=0.1, g=0.8, b=0.9, a=0.75)
@@ -403,7 +614,8 @@ class PadMapNode(Node):
             text.pose.orientation.w = 1.0
             text.scale.z = 0.3
             text.color = colour
-            state = ("landed" if pad.visited
+            state = ("takeoff-base" if pad.is_takeoff_base
+                     else "landed" if pad.visited
                      else "confirmed" if pad.observations >= self.min_obs
                      else "candidate")
             text.text = (f"pad {pad.id} [{state}] "

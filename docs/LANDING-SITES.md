@@ -4,6 +4,15 @@ Everything about the landing-pad behaviour: the detector, the maps, the mission,
 how to run it, how to tell whether it is working, and what is deliberately not
 done yet.
 
+> **There is a second mission over the same machinery.**
+> [`PHASE1-MISSION.md`](PHASE1-MISSION.md) documents `phase1_mission_node`,
+> which searches by turning on the spot instead of flying forward, uses the
+> forward camera as an identifier and the belly camera as a validator, and
+> declares the base it takes off from instead of detecting it. It shares this
+> document's detector, projection and pad map unchanged. The two are
+> alternatives — each has its own launch file and only one may drive the
+> vehicle at a time.
+
 **One-line summary:** the drone takes off, flies a bounded search pattern, finds
 the blue-with-yellow-ring-and-cross pad with a classic (non-learned) OpenCV
 pipeline on a forward and a downward camera, lands on it, records that it landed
@@ -38,18 +47,30 @@ vision pose and a global origin before it accepts a takeoff (see
 `DEVELOP-PIPELINES.md`). `pad_mission_node` waits for exactly that and logs what
 it is waiting for; it does not need babysitting.
 
+> **`landing_sites.launch.py` currently launches no mission node.** Its
+> `pad_mission` entry is commented out at line 279, so the launch brings up the
+> detectors, the maps and the TF link and nothing flies. Uncomment it to fly the
+> forward run.
+
 Useful launch arguments:
+
+Defaults live in `landing_sites.launch.py`. `landing_sites_sim.launch.py`
+deliberately does not restate them — a wrapper that re-declares an argument
+overrides the inner file's default with its own, and editing the documented file
+then does nothing (see [`PHASE1-MISSION.md`](PHASE1-MISSION.md) §1). Overriding
+on the command line works through either file.
 
 | argument | default | what it does |
 |---|---|---|
-| `cruise_alt` | `2.5` | search altitude, m. **Must clear the arena's 1.5 m structure** — there is no forward obstacle avoidance. |
-| `align_alt` | `2.0` | altitude to settle at over a pad before descending |
-| `search_radius` | `12.0` | half-width of the search box around the takeoff point |
-| `search_step` | `3.0` | spacing between spiral legs |
-| `max_pads` | `0` | return home after N landings; 0 = until the pattern is exhausted |
+| `cruise_alt` | `2.5` | flight altitude, m. **Must clear the arena's 1.5 m structure** — there is no forward obstacle avoidance. |
+| `forward_step` | `1.0` | how far ahead the setpoint is placed, m. Each step is a position error the FCU answers with acceleration — keep it small. |
+| `forward_limit_m` | `0.0` | land and finish after this much ground; 0 = forward until aborted |
+| `rearm_distance_m` | `3.0` | ignore the down camera for this much ground after each takeoff, or the drone lands on the pad it just left, forever |
+| `min_confidence` | `0.60` | down-camera confidence that counts as "a pad is below" |
 | `auto_start` | `true` | `false` holds until `/hydrone/mission/start` is called |
 | `debug_images` | `true` | annotated detector views |
 | `feature_map` | `true` | the world/coverage mapper over the ZED's cloud |
+| `map_odom_tf` | `true` | publish the measured `map → odom` that joins TF's two trees |
 | `range_topic` | `/mavros/distance_sensor/rangefinder` | the same in sim and on the drone — see §7 |
 | `odom_source` | `vo` | what the EKF navigates on. `ground_truth` swaps in BiguaSim dynamics as a debugging aid — read §10 first. |
 
@@ -63,7 +84,8 @@ ros2 run rqt_image_view rqt_image_view /hydrone/pads/forward/debug_image
 ```
 
 In RViz (fixed frame `map`): `/hydrone/pads/markers` (grey = candidate, cyan =
-confirmed, **green = landed on**), `/hydrone/map/cloud`, `/hydrone/map/coverage`.
+confirmed, **green = landed on**, orange = the takeoff base — see §5),
+`/hydrone/map/cloud`, `/hydrone/map/coverage`.
 The camera's own per-frame cloud is `/zed/zed_node/point_cloud/cloud_registered`.
 
 Stop it early: `ros2 service call /hydrone/mission/abort std_srvs/srv/Trigger`
@@ -145,8 +167,12 @@ That produces a useful property, and the mission depends on it:
 > cannot be resolved. The remaining weights sum to 0.75, so **confidence > 0.75
 > implies the ring and the cross were actually verified.**
 
-Which is why `pad_mission_node`'s `commit_confidence` is **0.80**: a pad spotted
-far ahead is a *lead* worth flying to, never something to land on sight.
+Which is what lets a mission treat a distant sighting as a *lead* worth flying
+to and never as something to land on sight. `pad_mission_node` no longer uses
+it (it only ever reads the belly camera, from directly above); it is
+`phase1_mission_node` that depends on the property, in the split between the
+forward camera identifying and the belly camera validating — see
+[`PHASE1-MISSION.md`](PHASE1-MISSION.md) §5.
 `test_pad_detector.py::test_high_confidence_implies_the_structure_was_verified`
 pins this.
 
@@ -191,12 +217,35 @@ saturation floor is what keeps pale look-alikes out — lower it as little as yo
 can get away with.
 
 **The sim already needed exactly this.** Measured on BiguaSim's rendering
-(2026-08-18): UE's tonemapping/bloom pushes the pad's yellow toward white —
-S ≈ 82–109 against the built-in floor of 110 — so the yellow mask came out
-empty and NO pad was ever detected, from any altitude. `landing_sites.launch.py`
-therefore passes `yellow_hsv_low: [18, 60, 90]` to both detectors. The library
-default (and its tests) are unchanged; re-do this tuning against the real
-arena's light.
+(2026-08-18): UE's tonemapping/bloom pushes the whole pad toward white, and the
+saturation floor of 110 admitted **zero** pixels of either colour, so no pad was
+ever detected from any altitude. Measured inside the pad's bounding box on a
+lossless `/down_cam` frame at a 3 m hover:
+
+```
+blue field         S 37-75, mean 56
+yellow ring+cross  S 38-59, mean 48
+```
+
+An earlier grab over the spawn pad put the yellow at S ≈ 82–109, so saturation
+varies a lot with altitude and local lighting inside the map. **Both** floors
+have to come down, not just yellow: `detect()` runs `findContours` on the BLUE
+mask and iterates over blue contours, so an empty blue mask means zero
+candidates and the yellow, ring, cross and concentricity checks never run at
+all.
+
+`landing_sites.launch.py` and `phase1.launch.py` therefore both pass
+
+```
+blue_hsv_low:   [95, 30, 50]
+yellow_hsv_low: [18, 30, 90]
+```
+
+S ≥ 30 covers every pixel of both grabs with margin and leaves the
+discrimination to the structural checks, which is where it belongs — on a
+confirmed detection ring coverage is 1.0, arms 4, concentricity offset 0.005.
+The library default (and its tests) are unchanged; re-do this tuning against the
+real arena's light.
 
 ---
 
@@ -241,9 +290,35 @@ back-projection, the ground-plane fallback, and every refusal case.
   fly to it. One sighting is noise.
 - **Pruning**: unconfirmed entries not re-seen within `provisional_ttl_s` (20 s)
   are dropped. Confirmed and visited entries are never pruned.
+- **Rejections are logged.** A detection that does not pass `position_valid`,
+  `min_confidence`, `max_range_m` (30 m) or the `min/max_pad_height` band is
+  warned about, naming the gate and the offending value, throttled per
+  (camera, gate) at `reject_log_period_s` (5 s; 0 logs every one). Without it
+  the detector draws a confident box while the map stays empty and nothing says
+  why — see [`PHASE1-MISSION.md`](PHASE1-MISSION.md) §12 for the gate table and
+  what usually closes at range.
 - **`visited`**: set through the `MarkPadVisited` service after touchdown. This
   is the flag that turns "land" into "land, then keep going" — without it the
   drone re-detects the pad it is standing on and lands on it forever.
+- **`require_armed`** (default true): nothing is mapped at all until
+  `/mavros/state` first reports armed. On the ground both cameras are looking at
+  the base the drone is standing on, from the grazing angles that detect it
+  best, through a pose the EKF has not settled. The gate latches — the vehicle
+  disarms on every pad it lands on and detections must keep flowing then.
+- **`is_takeoff_base`**: set through the `RegisterTakeoffBase` service at arm
+  time, with the position the drone is standing at. That entry is never pruned,
+  never offered as a landing candidate, has its height recorded as measured (the
+  drone is standing on it), is exempt from the rangefinder refinement below, and
+  claims detections within `takeoff_base_radius` (1.5 m, wider than
+  `merge_radius`) so a glancing sighting from the air cannot spawn a phantom pad
+  beside it. Association compares `distance / claim_radius`, so the wider claim
+  cannot steal a detection that sits closer to a genuine pad. It draws **orange**
+  in RViz.
+
+  Both of these exist for `phase1_mission_node`; the full argument is in
+  [`PHASE1-MISSION.md`](PHASE1-MISSION.md) §4. `pad_mission_node` is unaffected
+  by either — it never reads `is_takeoff_base`, and it arms before it needs the
+  map.
 
 ### How the elevated base gets its height
 
@@ -264,14 +339,30 @@ exactly, and a later glancing pass over the floor beside it must not undo that.
 
 ## 6. The mission
 
+`pad_mission_node` is deliberately the smallest thing that flies a full cycle:
+
 ```
-WAIT_FCU -> ARMING -> TAKEOFF -> SEARCH -+-> INSPECT -> ALIGN -> DESCEND
-                                ^        |                        |
-                                |        |                     LAND -> DWELL
-                                +--------+------------------------+
-                                |
-                                +-> RETURN_HOME -> FINAL_LAND -> DONE
+WAIT_FCU -> ARMING -> TAKEOFF -> FORWARD -> LAND -> DWELL -+-> DONE
+              ^                                            |
+              +--------------------------------------------+
 ```
+
+Take off, walk the setpoint along world **+X** in `forward_step` (1 m) pieces,
+land the moment the belly camera reports a pad, mark it visited, take off again,
+carry on. There is no search pattern, no forward-camera lead, no align or
+descend phase and no return-home leg — that was the point. Get one full
+takeoff/detect/land/takeoff cycle working in the sim, then add pieces back.
+Anything more is another thing that can break while you are trying to find out
+why the drone will not fly.
+
+> An earlier draft of this document described a much larger mission —
+> `SEARCH`/`INSPECT`/`ALIGN`/`DESCEND`/`RETURN_HOME`, an expanding square
+> spiral, `align_alt`, `search_radius`, `commit_confidence`, `max_pads`. None of
+> that is in the node. It was cut back to the skeleton above before the first
+> flight attempt and the document was not updated with it. Corrected
+> 2026-08-21. The **two-stage** idea it described — a distant camera identifies,
+> a close one validates — was worth keeping and now lives in
+> `phase1_mission_node`; see [`PHASE1-MISSION.md`](PHASE1-MISSION.md).
 
 Driven by a 10 Hz tick. **Every service call is asynchronous with its own
 deadline** — a blocking call inside a timer callback would stall the setpoint
@@ -280,58 +371,47 @@ stream and hand the vehicle to the FCU's failsafe.
 **Commands are re-sent on a timer, not on the previous call's result.** MAVROS
 acking a mode change is not the same as ArduPilot accepting it (EKF not ready,
 pre-arm check pending), so `/mavros/state` is the only thing treated as truth.
+`ARMING` checks GUIDED *before* armed, which matters on the relaunch after a
+landing: ArduCopter auto-disarms only after `DISARM_DELAY` (10 s) and the dwell
+is shorter, so the vehicle is usually still armed — and still in `LAND`. Taking
+"armed" as done would send a takeoff while in LAND, which ArduPilot refuses,
+forever.
 
-### Why the search is bounded
+### Why the setpoint is stepped
 
-The world outside the arena is an empty plane. A drone told to "fly forward until
-you see something" flies forward forever. The search is an **expanding square
-spiral** centred on the takeoff point and clipped to `search_radius`, with legs
-of 1,1,2,2,3,3,… × `search_step`.
+The setpoint is placed one `forward_step` ahead and only advanced once the
+vehicle has actually arrived, so the position error the FCU sees never exceeds
+one step. That error is what the position controller turns into acceleration,
+and an aggressive demand under BiguaSim's ~0.3–0.5 s actuation lag is what flips
+the vehicle. `phase1_mission_node` takes the other route — one setpoint per leg,
+with the speed capped at the FCU — for the reasons in
+[`PHASE1-MISSION.md`](PHASE1-MISSION.md) §8.
 
-Its **first leg runs straight along the takeoff heading**, so the simple case —
-take off, go forward, the pad is there — is literally step one, while the failure
-case ("there is nothing out there") terminates and comes home instead of running
-until the battery does.
+### Why the drone does not land on the pad it just left
 
-Keep `search_step` below the belly camera's ground footprint
-(`2 · align_alt · tan(FOV/2)`, ≈ 5 m at 2.5 m and 90°) so the legs overlap.
-
-### Why a pad is confirmed twice
-
-The forward camera finds pads at range, where confidence is capped at 0.75 (§3).
-Enough to fly to, not enough to land on. The drone flies over the candidate and
-re-checks it on the **down camera** from a few metres, where the structure *is*
-resolvable and confidence clears `commit_confidence`.
-
-A candidate that never confirms is **blacklisted** and the search resumes. That
-is what makes a blue tarp cost twenty seconds instead of the mission.
-
-`inspect_timeout` counts only while the drone is actually **hovering over** the
-candidate; getting there has its own, much larger `travel_timeout`. These are
-wall-clock budgets and BiguaSim runs well below real time, so a merged budget
-would be eaten by the flight across the arena and blacklist good pads before
-ever looking at them — the same trap `config/timeouts.yaml` documents for the
-MAVROS timeouts.
+After a takeoff, the pad it took off from is still directly below and still
+being detected. `rearm_distance_m` (3 m) ignores the belly camera until that
+much ground has been covered on the current leg; without it the mission lands on
+the same pad forever. The `visited` flag in the map is the durable half of the
+same idea.
 
 ### Landing and taking off again
 
-`ALIGN` requires the error to be small **and stay small** for `align_hold_s` — a
-single frame inside tolerance can be a swing straight through the target, and
-descending on that drifts off the pad on the way down.
+At a detection the setpoint stream **stops** and LAND is handed to the FCU,
+whose rangefinder flare does the touchdown — a position setpoint arriving
+mid-landing at best is ignored and at worst fights it. Touchdown is detected by
+either the vehicle disarming or its altitude settling low, held for
+`land_settle_s`. Then: mark visited (recording the resting altitude as the pad's
+height), dwell, and go back to `ARMING` — which re-arms and re-takes-off,
+because ArduCopter will not climb from a bare position setpoint in GUIDED.
 
-`DESCEND` walks the setpoint down in `descend_step` increments, re-centring on
-each fresh down-camera look and only advancing once the vehicle has caught up.
-Drift beyond 3× `align_tol` climbs back to `ALIGN`. At
-`pad.height + land_trigger_agl` (0.8 m above the pad's own surface) the setpoint
-stream **stops** and LAND is handed to the FCU, whose rangefinder flare does the
-touchdown — a position setpoint arriving mid-landing at best is ignored and at
-worst fights it.
+### Yaw
 
-Touchdown is detected by either the vehicle disarming or its altitude settling at
-the pad, held for `land_settle_s`. Then: mark visited (recording the resting
-altitude as the pad's height), dwell, and go back to `ARMING` — which re-arms and
-re-takes-off, because ArduCopter will not climb from a bare position setpoint in
-GUIDED.
+Setpoints carry `orientation.w = 1.0`, i.e. yaw 0, which commands the nose along
+world +X — the direction of travel, so the two agree. Note this is an absolute
+heading, not "hold what you have": a vehicle that booted facing elsewhere will
+turn to face map-east on the first setpoint. `phase1_mission_node` seeds its yaw
+from the heading the vehicle climbed with instead.
 
 ---
 
@@ -560,7 +640,8 @@ actually flip?" is the question that run turned on.
 
 ## 11. Tests
 
-109 tests, none needing UE5:
+148 tests across `hydrone_vision`, `hydrone_nav` and `hydrone_mission`, plus 18
+in `hydrone_bringup`. None need UE5:
 
 ```bash
 docker run --rm -v $PWD:/repo -w /repo <image> bash -c \
@@ -572,9 +653,12 @@ docker run --rm -v $PWD:/repo -w /repo <image> bash -c \
 |---|---|
 | `hydrone_vision/test/test_pad_detector.py` (41) | the detector against synthetic renders: size sweep, rotation, oblique views, noise/exposure/blur, and every negative in §3 |
 | `hydrone_vision/test/test_pad_projection.py` (17) | the frame algebra, by hand-checkable poses; and the real-vs-sim mount TF |
-| `hydrone_nav/test/test_pad_pipeline.py` (6) | the real nodes wired together — topic names, QoS compatibility, TF lookup, fused map position, `visited`, elevated-pad height |
+| `hydrone_nav/test/test_pad_pipeline.py` (6) | the real nodes wired together — topic names, QoS compatibility, TF lookup, fused map position, `visited`, elevated-pad height. Its `FakeSim` publishes `/mavros/state` armed, because with `require_armed` a stack that never arms maps nothing |
+| `hydrone_nav/test/test_takeoff_base.py` (24) | the pre-arm gate and its latch; registering the takeoff base, claiming an existing entry, the wider claim radius; never pruned; height not rewritten by a fly-over; the flag and the marker colour; every rejection gate naming itself in the log |
 | `hydrone_bringup/test/test_odom_source.py` (14) | which estimator flies the vehicle: single owner of the flight topic, single TF broadcaster, fail-safe on a bad value |
-| `hydrone_mission/test/test_pad_mission.py` (31) | the search spiral and target selection: bounded, terminating, non-repeating; visited/blacklisted/unconfirmed pads skipped; the down-camera confirmation gate; the relaunch-from-LAND trap; the landing quota |
+| `hydrone_mission/test/test_pad_mission.py` (19) | the forward run: the setpoint never far ahead of the vehicle, stale and unconfident detections refused, the just-left pad not re-landed on |
+| `hydrone_mission/test/test_phase1_mission.py` (41) | the Phase 1 mission — see [`PHASE1-MISSION.md`](PHASE1-MISSION.md) §11 |
+| `hydrone_bringup/test/test_launch_arguments.py` (4) | neither `*_sim.launch.py` wrapper re-declares or forwards an argument its autonomy layer declares. A wrapper that does silently overrides the inner file's defaults, so editing them has no effect — found 2026-08-22 |
 
 The flight states (arming, takeoff, landing) are **not** unit-tested — they are
 conversations with ArduPilot, and mocking one proves nothing about the real
@@ -593,24 +677,23 @@ Ordered by how much they matter.
    in the landing-site code.
 2. **The landing behaviour itself still has not been observed.** The first
    closed-loop run (2026-08-17) never got airborne. Detection, mapping and the
-   state machine are tested; search → land → take off → continue has not yet
-   been watched end to end. Expect tuning of `align_tol`, `descend_step` and the
-   HSV bands, not structural change.
+   state machines are tested; find → land → take off → continue has not yet been
+   watched end to end, by either mission. Expect tuning of tolerances, timeouts
+   and the HSV bands, not structural change.
 3. **No forward obstacle avoidance.** `cruise_alt` (2.5 m) simply flies over the
    arena's 1.5 m structure. The ZED depth is right there and a "stop if the
    centre of the frame is closer than X" guard is small; it was left out to keep
    the first flight's failure modes few, since a badly-tuned guard stops the
    drone on the pad itself.
-4. **The coverage grid is not fed back into the search.** `feature_map_node`
+4. **The coverage grid is not fed back into either search.** `feature_map_node`
    answers "where have I looked?", which is what a search needs before it can
-   claim there is nothing left — but the mission flies a fixed spiral and only
-   publishes the grid for the operator. Wiring it in (skip a well-seen leg,
-   re-fly a poorly-seen one) is the natural next step, deliberately left until
-   the fixed pattern has been flown.
-5. **Yaw is not controlled.** Setpoints hold a fixed orientation. The detector is
-   rotation-invariant so this costs nothing for detection, but turning to face
-   the direction of travel would put more of the search area in the forward
-   camera.
+   claim there is nothing left — but both missions decide on their own and only
+   publish the grid for the operator. `phase1_mission_node` is the one that
+   would benefit: it could stop turning once the circle is covered rather than
+   counting to eight.
+5. **Yaw is not controlled *by this mission*.** `pad_mission_node`'s setpoints
+   hold an absolute yaw of 0. `phase1_mission_node` does command yaw, and turning
+   in place is its entire search — see [`PHASE1-MISSION.md`](PHASE1-MISSION.md).
 6. **One pad geometry.** The check thresholds assume the ring sits well inside
    the field and the cross spans the ring. A pad with very different proportions
    would need `structure_radius_px` and the yellow-fraction band retuned — the

@@ -36,7 +36,7 @@ project: it starts the BiguaSim⇄ArduPilot physics bridge and ArduPilot SITL
 | `deps.repos` | Pinned source dependencies (ArduPilot, micro-ROS agent/msgs, XRCE-Gen) |
 | `docker/`, `Dockerfile`, `docker-compose.yml` | Reproducible containerized bringup |
 | `docker-compose.dev.yml` | Dev override: bind-mounts `src/` so code edits need no image rebuild (`docker_up.sh --dev`) |
-| `docs/` | Onboarding notes and historical docs. Start with [`LANDING-SITES.md`](docs/LANDING-SITES.md) and [`DEVELOP-PIPELINES.md`](docs/DEVELOP-PIPELINES.md) |
+| `docs/` | Onboarding notes and historical docs. Start with [`PHASE1-MISSION.md`](docs/PHASE1-MISSION.md), [`LANDING-SITES.md`](docs/LANDING-SITES.md) and [`DEVELOP-PIPELINES.md`](docs/DEVELOP-PIPELINES.md) |
 
 Third-party sources (`src/ardupilot`, `src/micro_ros_agent`, `src/micro_ros_msgs`,
 `tools/Micro-XRCE-DDS-Gen`) are **not committed** — they are pinned in
@@ -57,8 +57,12 @@ anywhere else, point `BS_SIM_DIR` at it).
 ./scripts/docker_up.sh
 # sim repo in a custom location:
 BS_SIM_DIR=~/Documents/bs-drone-competition ./scripts/docker_up.sh
-# autonomous landing-site mission (find a pad, land, take off, keep going):
+# Phase 1 mission (turn until a base is found, confirm it, land, come home):
+./scripts/docker_up.sh --phase1             # docs/PHASE1-MISSION.md
+# the earlier landing-site mission (fly forward, land on what you see):
 ./scripts/docker_up.sh --landing-sites      # docs/LANDING-SITES.md
+# any name:=value argument is forwarded to the launch:
+./scripts/docker_up.sh --phase1 target_bases:=2 takeoff_alt:=1.5
 ```
 
 That's it — the script allows X access, builds the image (first build compiles
@@ -185,16 +189,28 @@ ros2 launch hydrone_bringup hydrone.launch.py phase:=1
 `hydrone.launch.py` arguments: `phase:=1..4`, `open_hardware:=true|false`
 (2× score), `use_two_drones:=true|false` (phase 3), `camera_topic`, `depth_topic`.
 
-**Landing-site mission** — the autonomous find-a-pad / land / take-off / continue
-behaviour, sim and autonomy in one command:
+**Phase 1 mission** — take off, turn on the spot until a landing base appears,
+fly over it, confirm it on the belly camera, land, repeat, then come home:
+
+```bash
+ros2 launch hydrone_bringup phase1_sim.launch.py     # or: docker_up.sh --phase1
+```
+
+`target_bases` defaults to **1** while the mission has never been flown; the
+competition number is 2. Full description, tuning and what has not been flown
+yet in [`docs/PHASE1-MISSION.md`](docs/PHASE1-MISSION.md).
+
+**Landing-site mission** — the earlier, simpler behaviour: fly forward and land
+on whatever the belly camera sees.
 
 ```bash
 ros2 launch hydrone_bringup landing_sites_sim.launch.py
 ```
 
-It is an **alternative** to `hydrone.launch.py`, not an addition: both publish
-position setpoints and must not run together. Full description, tuning and
-limitations in [`docs/LANDING-SITES.md`](docs/LANDING-SITES.md).
+These and `hydrone.launch.py` are **alternatives**, not additions: each carries a
+mission node, they all publish position setpoints, and two of them running at
+once fight over the vehicle. Full description, tuning and limitations in
+[`docs/LANDING-SITES.md`](docs/LANDING-SITES.md).
 
 ### Start a mission
 
@@ -215,13 +231,15 @@ ros2 run rqt_image_view rqt_image_view /hydrone/vision/debug_image
 ros2 node list                                   # what's alive
 ```
 
-Landing-site mission (`landing_sites_sim.launch.py`):
+Pad missions (`phase1_sim.launch.py`, `landing_sites_sim.launch.py`):
 
 ```bash
 ros2 topic echo /hydrone/mission/status          # state machine, 1 Hz
 ros2 topic echo /hydrone/pads/map                # the pad map (incl. `visited`)
 ros2 run rqt_image_view rqt_image_view /hydrone/pads/down/debug_image
+ros2 run rqt_image_view rqt_image_view /hydrone/pads/forward/debug_image
 # RViz, fixed frame `map`: /hydrone/pads/markers, /hydrone/map/cloud
+#   grey = candidate, cyan = confirmed, green = landed on, orange = takeoff base
 ```
 
 ## Configuration

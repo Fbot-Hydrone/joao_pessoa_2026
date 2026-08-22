@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Bring up the full simulation stack in Docker.
 #
-# Usage: scripts/docker_up.sh [--dev] [--no-build] [--landing-sites]
+# Usage: scripts/docker_up.sh [--dev] [--no-build] [--phase1] [--landing-sites]
 #                             [--ground-truth] [--no-odom-print]
-#                             [docker compose up args...]
+#                             [name:=value ...] [docker compose up args...]
 #   --dev             mount the project packages from the host into the
 #                     container (docker-compose.dev.yml) and skip the image
 #                     build. Node code, launch files and config YAML are then
@@ -11,9 +11,12 @@
 #                     Use scripts/dev_rebuild.sh for .msg / setup.py / new-file
 #                     changes. Implies --no-build.
 #   --no-build        don't pass --build to compose (reuse the current image).
-#   --landing-sites   run the autonomous landing-site mission (pad detectors +
-#                     pad/feature maps + search-land-take-off state machine)
-#                     instead of the bare sim bring-up. See docs/LANDING-SITES.md.
+#   --phase1          run the Phase 1 mission (take off, turn on the spot until
+#                     a landing base is found, fly over it, confirm it on the
+#                     belly camera, land, repeat, come home) instead of the bare
+#                     sim bring-up. See docs/PHASE1-MISSION.md.
+#   --landing-sites   run the earlier landing-site mission (fly forward and land
+#                     on whatever the belly camera sees). See docs/LANDING-SITES.md.
 #   --ground-truth    fly the EKF on BiguaSim ground truth instead of the real
 #                     visual odometry (odom_source:=ground_truth). A DEBUGGING
 #                     AID for separating autonomy bugs from localization bugs —
@@ -21,6 +24,14 @@
 #                     drone, which has none. See docs/LANDING-SITES.md §10.
 #   --no-odom-print   silence odom_error_node's 1 Hz VO-drift line (the CSV is
 #                     still written either way). On by default.
+#
+# Any argument containing ':=' is a LAUNCH argument and is appended to the
+# ros2 launch command inside the container, so the mission can be tuned without
+# editing a file:
+#
+#   scripts/docker_up.sh --phase1 target_bases:=2 takeoff_alt:=1.5
+#
+# --phase1 and --landing-sites are mutually exclusive; the last one given wins.
 # Anything else is forwarded untouched to `docker compose up` (-d, --force-recreate, ...).
 set -e
 cd "$(dirname "$0")/.."
@@ -32,20 +43,32 @@ HYDRONE_LAUNCH=hydrone_sim.launch.py
 ODOM_SOURCE=vo
 DEV_MODE=false
 DO_BUILD=true
+launch_args=()
 compose_args=()
 for arg in "$@"; do
     case "$arg" in
         --no-odom-print) ODOM_ERROR_PRINT=false ;;
+        --phase1)        HYDRONE_LAUNCH=phase1_sim.launch.py ;;
         --landing-sites) HYDRONE_LAUNCH=landing_sites_sim.launch.py ;;
         --ground-truth)  ODOM_SOURCE=ground_truth ;;
         --dev)           DEV_MODE=true; DO_BUILD=false ;;
         --no-build)      DO_BUILD=false ;;
+        # A ros2 launch argument, not a compose one. Matched on the ':=' rather
+        # than on a list of known names so a new launch argument needs no change
+        # here — the launch file is the one place that knows what it accepts,
+        # and it errors clearly on a name it does not.
+        *:=*)            launch_args+=("$arg") ;;
         *)               compose_args+=("$arg") ;;
     esac
 done
-export ODOM_ERROR_PRINT   # interpolated into `command:` in docker-compose.yml
-export HYDRONE_LAUNCH     # ditto — selects which launch file the container runs
-export ODOM_SOURCE        # ditto — what the EKF navigates on (vo|ground_truth)
+# Joined with spaces because docker compose interpolates this into the `command:`
+# STRING and then splits it shell-style. That also means a launch argument whose
+# value contains a space would not survive; none of ours do.
+HYDRONE_LAUNCH_ARGS="${launch_args[*]}"
+export ODOM_ERROR_PRINT     # interpolated into `command:` in docker-compose.yml
+export HYDRONE_LAUNCH       # ditto — selects which launch file the container runs
+export ODOM_SOURCE          # ditto — what the EKF navigates on (vo|ground_truth)
+export HYDRONE_LAUNCH_ARGS  # ditto — extra name:=value pairs, possibly empty
 
 # Let the containerized UE5 viewport open on the host X server
 xhost +local:docker
@@ -88,6 +111,9 @@ if [ "$DEV_MODE" = true ]; then
 fi
 
 echo "Launch file  : $HYDRONE_LAUNCH"
+if [ -n "$HYDRONE_LAUNCH_ARGS" ]; then
+    echo "Launch args  : $HYDRONE_LAUNCH_ARGS"
+fi
 echo "Odom source  : $ODOM_SOURCE$([ "$ODOM_SOURCE" = ground_truth ] && echo ' (DEBUGGING AID — proves nothing about the real drone)')"
 echo "VO drift print: $ODOM_ERROR_PRINT (CSV is written either way)"
 

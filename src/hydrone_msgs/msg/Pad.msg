@@ -29,3 +29,10 @@ bool height_measured
 # True once the drone has landed on this pad. The mission never targets a
 # visited pad again.
 bool visited
+
+# True for the pad the drone was standing on when it first armed, registered
+# through the RegisterTakeoffBase service rather than detected. The mission
+# never treats it as a landing candidate — it is the one pad whose identity is
+# known before any camera looks at it, so no confirmation hover is ever spent
+# on it — and it is the target of the final return leg.
+bool is_takeoff_base
