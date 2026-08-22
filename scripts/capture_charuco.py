@@ -129,7 +129,38 @@ def _topic_source(args):
             rclpy.shutdown()
 
 
+def _chown_to_dir_owner(out):
+    """Hand the output back to whoever owns the tree it was written into.
+
+    The container runs as root and the output directory is a bind mount of the
+    user's checkout, so every frame lands root-owned and the user cannot then
+    delete or move them without sudo. Match the owner of the PARENT directory,
+    which is the checkout itself and therefore the right answer whoever ran it.
+    """
+    if os.geteuid() != 0:
+        return
+    try:
+        parent = os.path.dirname(os.path.abspath(out)) or "."
+        st = os.stat(parent)
+        if st.st_uid == 0:
+            return                      # genuinely root's tree; leave it
+        os.chown(out, st.st_uid, st.st_gid)
+        for name in os.listdir(out):
+            os.chown(os.path.join(out, name), st.st_uid, st.st_gid)
+    except OSError:
+        pass                            # cosmetic; never fail the capture
+
+
 def main():
+    # Without a TTY -- `docker run` with no -t, a pipe, nohup -- Python
+    # BLOCK-buffers stdout, so progress output sits in the buffer and the
+    # program appears to be doing nothing at all. reconfigure() is the
+    # in-process equivalent of python3 -u.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except AttributeError:
+        pass
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--device",
                     default="/dev/v4l/by-path/"
@@ -163,7 +194,8 @@ def main():
     kept = 0
     received = 0
     last_report = 0.0
-    print(f"Saving to {args.out}/  --  Ctrl-C when the table stops filling.")
+    print(f"Saving to {args.out}/  --  Ctrl-C when the table stops filling.",
+          flush=True)
     print("Move the board: all four corners of the frame, close AND far,")
     print("and tilted 30-45 degrees. Frames that add nothing are discarded.\n")
 
@@ -178,6 +210,24 @@ def main():
             corners, ids = detect_markers(gray, dictionary)
             n = 0 if ids is None else len(ids)
             received += 1
+
+            # Report unconditionally. The first version only printed when a
+            # frame was KEPT, so a run that detected nothing produced no
+            # output whatsoever and was indistinguishable from a hang. The
+            # number that matters when nothing is being kept is how many
+            # markers are actually visible.
+            now = time.time()
+            if now - last_report > 0.5:
+                last_report = now
+                pos = len({(k[0], k[1]) for k in bins})
+                size = len({k[2] for k in bins})
+                tilt = len({k[3] for k in bins})
+                note = "" if n >= args.min_markers else \
+                       f"  <- need {args.min_markers}+, board not in view?"
+                print(f"\rseen {received:5d}  kept {kept:3d}/{args.target}  "
+                      f"markers now {n:2d}{note}  "
+                      f"[pos {pos}/9 size {size}/3 tilt {tilt}/2]   ",
+                      end="", flush=True)
             # `not corners` as well as the threshold: with --min-markers 0 a
             # frame containing no markers passes the test and then reaches
             # np.concatenate([]), which raises "need at least one array to
@@ -207,17 +257,11 @@ def main():
             kept += 1
             cv2.imwrite(os.path.join(args.out, f"view_{kept:03d}.png"), frame)
 
-            now = time.time()
-            if now - last_report > 0.4:
-                last_report = now
-                pos = len({(k[0], k[1]) for k in bins})
-                size = len({k[2] for k in bins})
-                tilt = len({k[3] for k in bins})
-                print(f"\rkept {kept:3d}/{args.target}  "
-                      f"position {pos}/9  size {size}/3  tilt {tilt}/2  "
-                      f"(markers {n:2d})", end="", flush=True)
+
     except KeyboardInterrupt:
         print()
+
+    _chown_to_dir_owner(args.out)
 
     pos = len({(k[0], k[1]) for k in bins})
     size = len({k[2] for k in bins})
