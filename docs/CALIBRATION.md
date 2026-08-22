@@ -159,6 +159,62 @@ Aim for 40+ samples spread over the frame, not 40 of the same pose.
 
 ---
 
+## 3b. The fast route: capture here, solve there
+
+The GUI does capture and solve in one process on the machine holding the
+camera, and on a Tegra X1 the solve is the problem. Measured 2026-08-22: **26+
+minutes and still running**, GUI frozen throughout, because
+`camera_calibrator.py:298` calls `do_calibration()` straight from the mouse
+callback — the same thread as `cv2.imshow`. The identical solve on a desktop
+i7 took **0.9 s**.
+
+Splitting the two also keeps the images. A GUI calibration that goes wrong has
+to be re-waved from scratch; a directory of frames can be re-solved as often as
+you like.
+
+```bash
+# on the Jetson -- no GUI, no solve, just frames
+docker run --rm --privileged -v /dev:/dev -v $PWD:/repo -w /repo \
+  hydrone-jetson:humble python3 scripts/capture_charuco.py --out /repo/cal_imgs
+
+# copy them somewhere fast
+scp -r jetson@192.168.0.102:~/cbr2026/joao_pessoa_2026/cal_imgs .
+
+# solve, in about a second
+python3 scripts/calibrate_offline.py --images cal_imgs
+```
+
+`capture_charuco.py` bins each view by where the board sits in frame, how much
+of the frame it fills and how far it is tilted, keeping only frames that land in
+a bin still short of views. That is the same idea as the GUI's X/Y/Size/Skew
+bars, printed as a table.
+
+V4L2 capture is **exclusive**, so if something already holds the camera — a
+running calibrator, or `jetson_up.sh --sources` — pass
+`--from-topic /down_cam/image_raw` instead and it subscribes rather than opening
+the device. Verified: 244 frames received in 20 s from a second container while
+a calibration solve was running in the first.
+
+`calibrate_offline.py` works out `--size` and the legacy-pattern flag by
+homography residual rather than trusting either. It was checked against ground
+truth by rendering ChArUco views through a known camera: `fx` 560 → 558.91,
+`cx` 322.0 → 322.10.
+
+### The legacy pattern, and when it matters
+
+OpenCV 4.6 changed which squares of a ChArUco board carry markers. A board
+printed to the old convention and detected under 4.6+ **without**
+`setLegacyPattern(True)` maps its corner IDs to the wrong object points — it
+still detects, still calibrates, and returns a plausible wrong answer. This
+matters here because the Jetson image has OpenCV 4.5.4 (legacy only) while a
+desktop is likely on 4.11.
+
+For a **9×11** board it happens not to bite: legacy and new generate
+byte-identical images *and* identical object points. It does bite boards with an
+even dimension. `calibrate_offline.py` scores both regardless.
+
+---
+
 ## 4. Feeding the numbers back
 
 The calibrator prints a YAML block. What matters:
