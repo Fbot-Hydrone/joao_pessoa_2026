@@ -7,6 +7,8 @@
 # (There is no --landing-sites here: landing_sites has no _real wrapper. Its
 # sim launch drives BiguaSim's mimic nodes, which have no hardware counterpart.)
 #   ./scripts/jetson_up.sh --shell                  # a shell inside the image
+#   ./scripts/jetson_up.sh --calibrate              # belly camera + the
+#                                                   # calibration GUI
 #   ./scripts/jetson_up.sh takeoff_alt:=1.0 target_bases:=1
 #   ./scripts/jetson_up.sh --rebuild                # after a .msg/setup.py edit
 #   ./scripts/jetson_up.sh --build                  # rebuild the image first
@@ -55,14 +57,26 @@ LAUNCH=phase1_real.launch.py
 DO_BUILD=false
 DO_REBUILD=false
 SHELL_MODE=false
+CALIBRATE=false
 NO_DEV=false
 launch_args=()
+
+# The belly camera's ChArUco target. Defaults are the calib.io board in use
+# here, whose own footer reads "11x9 | Checker 22 mm | Marker 16 mm | DICT_4X4".
+# Note --size is COLUMNS x ROWS and counts SQUARES, not interior corners, which
+# is the opposite of what -p chessboard wants; scripts/charuco_probe.py checks
+# it against the camera. docs/CALIBRATION.md has the why.
+CAL_SIZE="${CAL_SIZE:-9x11}"
+CAL_SQUARE="${CAL_SQUARE:-0.022}"
+CAL_MARKER="${CAL_MARKER:-0.016}"
+CAL_DICT="${CAL_DICT:-4x4_250}"
 
 for arg in "$@"; do
     case "$arg" in
         --phase1)        LAUNCH=phase1_real.launch.py ;;
         --sources)       LAUNCH=sources_real.launch.py ;;
         --shell)         SHELL_MODE=true ;;
+        --calibrate)     CALIBRATE=true ;;
         --build)         DO_BUILD=true ;;
         --rebuild)       DO_REBUILD=true ;;
         --no-dev)        NO_DEV=true ;;
@@ -162,8 +176,79 @@ fi
 # __pycache__ directories that the normal user then cannot delete.
 run_args+=(-e PYTHONDONTWRITEBYTECODE=1)
 
+# ── X, for the calibration GUI ──────────────────────────────────────────────
+# Two display routes, and they need different plumbing:
+#   the Jetson's own screen  -> DISPLAY=:0, a unix socket in /tmp/.X11-unix
+#   ssh -X from your desk    -> DISPLAY=localhost:10.0, a TCP port that
+#                               --network host already reaches
+# Both need the auth cookie, or the connection is refused with "Authorization
+# required". The container runs as root and the cookie belongs to the login
+# user, so it is mounted explicitly rather than relying on $HOME.
+if [ "$CALIBRATE" = true ]; then
+    run_args+=(-e "DISPLAY=${DISPLAY:-:0}")
+    [ -d /tmp/.X11-unix ] && run_args+=(-v /tmp/.X11-unix:/tmp/.X11-unix)
+    # Finding the cookie is the fiddly part. $HOME/.Xauthority is very often
+    # STALE -- on this board it was two months old and held cookies for a
+    # display that no longer exists, which produces
+    #     Invalid MIT-MAGIC-COOKIE-1 key
+    # and then a GTK failure that reads like missing X libraries rather than
+    # an auth problem. The authoritative answer is the -auth file the running
+    # X server was started with, so ask it: gdm keeps it under /run/user.
+    xauth_file="${XAUTHORITY:-}"
+    if [ -z "$xauth_file" ]; then
+        xauth_file=$(ps -o args= -C Xorg 2>/dev/null |
+                     sed -n 's/.*-auth \([^ ]*\).*/\1/p' | head -1)
+    fi
+    [ -z "$xauth_file" ] && xauth_file="$HOME/.Xauthority"
+
+    if [ -r "$xauth_file" ]; then
+        echo "X cookie: $xauth_file"
+        run_args+=(-v "$xauth_file:/root/.Xauthority:ro"
+                   -e XAUTHORITY=/root/.Xauthority)
+    else
+        echo "NOTE: no readable X cookie (tried $xauth_file). If the GUI is" >&2
+        echo "      refused, run 'xhost +local:' on the machine that owns" >&2
+        echo "      the display." >&2
+    fi
+fi
+
 if [ "$SHELL_MODE" = true ]; then
     exec docker run "${run_args[@]}" "$IMAGE" bash
+fi
+
+# ── Calibration: the belly camera, and the GUI, and nothing else ────────────
+# Deliberately NOT sources_real.launch.py. That would also start the ZED, its
+# depth computation and MAVROS -- on a Tegra X1 that is most of the CPU, and
+# the calibrator wants frames delivered promptly or the GUI feels broken.
+if [ "$CALIBRATE" = true ]; then
+    echo "+ belly camera + cameracalibrator"
+    echo "  board: --size $CAL_SIZE --square $CAL_SQUARE"
+    echo "         --charuco_marker_size $CAL_MARKER --aruco_dict $CAL_DICT"
+    echo "  DISPLAY=${DISPLAY:-:0}"
+    echo
+    echo "  Fill all four coverage bars (X, Y, Size, Skew), then CALIBRATE,"
+    echo "  then SAVE. Do NOT use COMMIT: down_cam_usb_node takes its"
+    echo "  intrinsics as ROS parameters and offers no set_camera_info"
+    echo "  service, so COMMIT has nothing to talk to. SAVE writes"
+    echo "  /tmp/calibrationdata.tar.gz inside the container -- copy it out"
+    echo "  with 'docker cp $CONTAINER:/tmp/calibrationdata.tar.gz .' from"
+    echo "  another terminal BEFORE you stop this, because --rm discards the"
+    echo "  container's filesystem on exit."
+    echo
+    exec docker run "${run_args[@]}" -w /ws "$IMAGE" bash -lc "
+        set -e
+        . /ws/install/setup.sh
+        ros2 run hydrone_bringup down_cam_usb_node --ros-args             -p device:=/dev/v4l/by-path/platform-70090000.xusb-usb-0:2.2:1.0-video-index0             &
+        camera_pid=\$!
+        trap 'kill \$camera_pid 2>/dev/null' EXIT
+        # Wait for the topic rather than sleeping: the calibrator subscribes
+        # once at startup and does not retry, so racing it produces a window
+        # that never updates and looks like a broken camera.
+        for _ in \$(seq 1 30); do
+            ros2 topic list 2>/dev/null | grep -q /down_cam/image_raw && break
+            sleep 1
+        done
+        exec ros2 run camera_calibration cameracalibrator             --pattern charuco --size $CAL_SIZE --square $CAL_SQUARE             --charuco_marker_size $CAL_MARKER --aruco_dict $CAL_DICT             --no-service-check             image:=/down_cam/image_raw camera:=/down_cam"
 fi
 
 inner=""

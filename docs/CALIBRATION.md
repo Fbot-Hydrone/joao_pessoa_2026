@@ -86,26 +86,51 @@ python3 scripts/charuco_probe.py --image /tmp/synth.png
 
 ## 3. Run it
 
-Two terminals on the Jetson.
-
 ```bash
-# 1 — the camera
-./scripts/jetson_up.sh --sources
-
-# 2 — the calibrator, on the Jetson's display (or after `ssh -X`)
-docker exec -it -e DISPLAY=${DISPLAY:-:0} hydrone-jetson bash -lc '
-  . /ws/install/setup.sh
-  ros2 run camera_calibration cameracalibrator \
-      --pattern charuco --size 9x11 --square 0.022 \
-      --charuco_marker_size 0.016 --aruco_dict 4x4_250 \
-      --no-service-check \
-      image:=/down_cam/image_raw camera:=/down_cam'
+./scripts/jetson_up.sh --calibrate
 ```
+
+That starts the belly camera and the calibrator GUI together, with the board
+parameters above already filled in (override with `CAL_SIZE`, `CAL_SQUARE`,
+`CAL_MARKER`, `CAL_DICT` in the environment for a different target).
+
+It deliberately does **not** use `sources_real.launch.py`, which would also
+start the ZED, its depth computation and MAVROS. On a Tegra X1 that is most of
+the CPU, and the calibrator wants frames promptly or the GUI feels broken.
+
+### Where the window appears, and the cookie that stops it
+
+`--calibrate` passes `$DISPLAY` through and mounts the X cookie. Two routes
+work: the Jetson's own screen (`DISPLAY=:0`), or `ssh -X` from your desk
+(`DISPLAY=localhost:10.0`, reachable because the container is on `--network
+host`).
+
+The cookie is the part that bites. `$HOME/.Xauthority` is very often **stale** —
+on this board it was two months old and held cookies for a display that no
+longer existed. The symptom is
+
+```
+Invalid MIT-MAGIC-COOKIE-1 key
+cv2.error: ... Can't initialize GTK backend in function 'cvInitSystem'
+```
+
+which reads like missing X libraries rather than an authorisation failure. The
+script therefore asks the running X server which `-auth` file it was started
+with (`ps -o args= -C Xorg`) instead of guessing; here that is
+`/run/user/1000/gdm/Xauthority`. If it still fails, `xhost +local:` on whichever
+machine owns the display.
 
 `--no-service-check` because `down_cam_usb_node` takes its intrinsics as ROS
 **parameters** and offers no `set_camera_info` service. The calibrator's
 **COMMIT** button therefore does nothing useful here; use **SAVE**, which
 writes `/tmp/calibrationdata.tar.gz`, and copy the numbers out by hand (§4).
+
+That file is written **inside the container**, which runs with `--rm`. Copy it
+out from a second terminal *before* stopping the GUI:
+
+```bash
+docker cp hydrone-jetson:/tmp/calibrationdata.tar.gz .
+```
 
 Run the GUI **on the Jetson**, not on a laptop subscribing over the network:
 the board is on wifi, and `/down_cam/image_raw` at 640×480×3 × 15 Hz is about
