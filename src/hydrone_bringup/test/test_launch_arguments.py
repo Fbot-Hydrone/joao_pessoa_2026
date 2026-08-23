@@ -66,7 +66,31 @@ WRAPPER_PAIRS = [
     # The real-hardware wrapper includes TWO files and must not shadow either.
     ("phase1_real.launch.py", "phase1.launch.py"),
     ("phase1_real.launch.py", "sources_real.launch.py"),
+    # phase1_dry is here for the SHADOWING test only — it must not re-declare
+    # anything either. It is exempt from the forwarding test, because
+    # forwarding is the entire reason it exists; see FORWARDING_EXEMPT and
+    # test_the_dry_launch_really_is_dry, which pins what it forwards far more
+    # tightly than "nothing" would.
+    ("phase1_dry.launch.py", "phase1.launch.py"),
+    ("phase1_dry.launch.py", "sources_real.launch.py"),
 ]
+
+# {wrapper: {inner: allowed forwards}}. Every entry needs the argument written
+# out next to it: a forward the wrapper declared would override the inner
+# file's default, and a forward it did not declare is usually redundant.
+FORWARDING_EXEMPT = {
+    # A fact about the PAD IN FRONT OF THE CAMERA — exactly what a hardware
+    # wrapper knows and the shared autonomy file cannot. Forwarded without
+    # being declared, so a command-line value still wins.
+    ("phase1_real.launch.py", "phase1.launch.py"): {"field_mode"},
+    # The dry launch exists to override its includes. Neither is tuning
+    # somebody would edit elsewhere and expect to win, and dry_run is asserted
+    # to actually arrive by test_the_dry_launch_really_is_dry.
+    ("phase1_dry.launch.py", "phase1.launch.py"):
+        {"field_mode", "dry_run"},
+    ("phase1_dry.launch.py", "sources_real.launch.py"):
+        {"zed_point_cloud"},
+}
 
 
 def load(name: str) -> LaunchDescription:
@@ -89,6 +113,45 @@ def load(name: str) -> LaunchDescription:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module.generate_launch_description()
+
+
+def included_sources(description: LaunchDescription):
+    """[(included file name, IncludeLaunchDescription)] for one description.
+
+    `source.location` LOOKS like a path and is not one until the source has
+    been expanded: before that the property returns `str()` of the internal
+    list of substitutions, i.e. "[<TextSubstitution object at 0x...>]".
+    `os.path.basename` of that is itself, so
+
+        if os.path.basename(source.location) != inner_name: continue
+
+    never matched, and `test_the_wrapper_forwards_nothing_to_the_autonomy_layer`
+    passed vacuously for as long as it existed — it would not have caught the
+    2026-08-22 bug it was written for. Found 2026-08-23 when a new test using
+    the same idiom failed with the forward plainly present.
+
+    So perform the substitutions on the source's own list. The public route to
+    the same answer, `get_launch_description(context)`, expands the location as
+    a side effect of EXECUTING the included file — which on the drone's image
+    fails outright for the sim wrappers, whose includes reach for
+    `ardupilot_sitl`. This only needs the file's NAME, so it does not run
+    anything.
+    """
+    context = LaunchContext()
+    out = []
+    for entity in description.entities:
+        if not isinstance(entity, IncludeLaunchDescription):
+            continue
+        source = entity.launch_description_source
+        if not isinstance(source, PythonLaunchDescriptionSource):
+            continue
+        location = getattr(source, "_LaunchDescriptionSource__location", None)
+        if location is None:                      # a launch version that keeps
+            location = source.location            # it somewhere else
+        if not isinstance(location, str):
+            location = perform_substitutions(context, list(location))
+        out.append((os.path.basename(location), entity))
+    return out
 
 
 def declared(description: LaunchDescription) -> dict[str, str]:
@@ -131,28 +194,30 @@ def test_the_wrapper_forwards_nothing_to_the_autonomy_layer(wrapper_name,
     its damage. The wrapper may still forward to `sources_sim.launch.py` — that
     is the half it genuinely owns.
     """
-    for entity in load(wrapper_name).entities:
-        if not isinstance(entity, IncludeLaunchDescription):
+    matched = False
+    for inner, entity in included_sources(load(wrapper_name)):
+        if inner != inner_name:
             continue
-        source = entity.launch_description_source
-        if not isinstance(source, PythonLaunchDescriptionSource):
-            continue
-        if os.path.basename(source.location) != inner_name:
-            continue
-        forwarded = [name for name, _ in entity.launch_arguments]
-        # field_mode is allowed through phase1_real: it states which PAD is in
-        # front of the camera, which is exactly what a hardware wrapper knows
-        # and the shared autonomy file cannot. It is forwarded without being
-        # declared there, so a command-line value still wins. Nothing else may
-        # be added here without the same argument.
-        forwarded = [n for n in forwarded
-                     if not (wrapper_name == "phase1_real.launch.py"
-                             and n == "field_mode")]
+        matched = True
+        forwarded = [argument_text(name)
+                     for name, _ in entity.launch_arguments]
+        # A few forwards are deliberate. Each is listed in FORWARDING_EXEMPT
+        # with the reason it is allowed; nothing may be added there without
+        # one.
+        allowed = FORWARDING_EXEMPT.get((wrapper_name, inner_name), set())
+        forwarded = [n for n in forwarded if n not in allowed]
         assert not forwarded, (
             f"{wrapper_name} forwards {forwarded} into {inner_name}. Forwarding "
             "a configuration the wrapper declared overrides the inner file's "
             "default; forwarding one it did not declare is redundant, because "
             "inheritance already carries it.")
+
+    # The check that keeps this test from going quiet again. It spent its whole
+    # life matching nothing and reporting success; if the pair stops lining up,
+    # that is a broken test and not a passing one.
+    assert matched, (
+        f"{wrapper_name} does not include {inner_name} at all, so this test "
+        "checked nothing. Fix WRAPPER_PAIRS or the wrapper.")
 
 
 # ── Every launch file's parameters must actually evaluate ───────────────────
@@ -182,6 +247,7 @@ LAUNCH_FILES = [
     "phase1.launch.py",
     "phase1_sim.launch.py",
     "phase1_real.launch.py",
+    "phase1_dry.launch.py",
     "sources_real.launch.py",
     "sources_sim.launch.py",
     "landing_sites.launch.py",
@@ -262,3 +328,79 @@ def test_every_node_parameter_evaluates(launch_file):
                         f"value_type={value_type!r}, which launch rejects at "
                         f"RUN time ({exc}). Use the typing generic — "
                         f"List[float], not list([float]) or [float].")
+
+
+# ── The dry launch really is dry ────────────────────────────────────────────
+#
+# phase1_dry.launch.py's one job is that the mission commands nothing. That job
+# is done by a single forwarded launch argument, and a forward that silently
+# stops arriving — a renamed argument, a wrapper rewritten to "declare nothing"
+# like its siblings — leaves a launch that looks identical and flies the
+# vehicle. This is the check that replaces "the wrapper forwards nothing" for
+# this one file, and it is the stricter of the two: it asserts what DOES
+# arrive.
+#
+# It says nothing about whether the VEHICLE can arm, because this launch does
+# not claim that: MAVROS runs normally and the transmitter never went through
+# it. That belongs to the flight controller.
+
+
+def argument_text(value) -> str:
+    """A launch_argument name or value as a plain string.
+
+    IncludeLaunchDescription keeps these as they were handed to it, so a
+    literal stays a `str` while anything built from a substitution arrives as a
+    sequence of Substitution objects. Both shapes turn up.
+    """
+    if isinstance(value, str):
+        return value
+    return perform_substitutions(LaunchContext(), list(value))
+
+
+def test_the_dry_launch_really_is_dry():
+    """`dry_run=true` reaches phase1.launch.py, and so the mission node."""
+    seen = {}
+    for inner, entity in included_sources(load("phase1_dry.launch.py")):
+        for name, value in entity.launch_arguments:
+            seen[(inner, argument_text(name))] = argument_text(value)
+
+    key = ("phase1.launch.py", "dry_run")
+    assert seen.get(key) == "true", (
+        "phase1_dry.launch.py must forward dry_run=true into "
+        f"phase1.launch.py; it forwards {seen.get(key)!r}. Without it the "
+        "mission arms the vehicle and flies it, and nothing else about the "
+        "launch looks different. See phase1_dry.launch.py's docstring.")
+
+
+def test_dry_run_reaches_the_mission_node():
+    """And phase1.launch.py actually hands it to phase1_mission_node.
+
+    The argument arriving at the launch file is half the path; the other half
+    is the parameter on the node. Declared-but-never-passed is exactly the bug
+    `down_cam_distortion` had — the node had the parameter from the start and
+    the launch never passed it, so setting it did nothing at all.
+    """
+    from launch_ros.actions import Node
+
+    context = LaunchContext()
+    description = load("phase1.launch.py")
+    for name, default in declared(description).items():
+        if default is not None:
+            context.launch_configurations[name] = default
+
+    mission = [n for n in _nodes_of(description)
+               if n._Node__node_executable == "phase1_mission_node"]
+    assert mission, "phase1.launch.py no longer starts phase1_mission_node."
+
+    keys = set()
+    for entry in (mission[0]._Node__parameters or []):
+        if isinstance(entry, dict):
+            for key in entry:
+                try:
+                    keys.add(perform_substitutions(context, list(key)))
+                except (TypeError, AttributeError):
+                    keys.add(str(key))
+    assert "dry_run" in keys, (
+        "phase1.launch.py declares dry_run but does not pass it to "
+        "phase1_mission_node, so phase1_dry.launch.py forwards a value that "
+        "goes nowhere and the mission flies.")

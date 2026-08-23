@@ -81,6 +81,35 @@ out:  /mavros/setpoint_position/local
       /hydrone/mission/status     std_msgs/String
 srv:  /mavros/set_mode, /mavros/cmd/arming, /mavros/cmd/takeoff
       /hydrone/pads/mark_visited, /hydrone/pads/register_takeoff_base
+
+Dry run — `dry_run:=true`, and phase1_dry.launch.py
+---------------------------------------------------
+The same state machine, the same map, the same belly camera, and NOTHING SENT
+TO THE FLIGHT CONTROLLER. A human carries the drone and is the actuator: the
+node prints `>>> RAISE …`, `>>> TURN … 45 deg`, `>>> CARRY … 2.4 m`, `>>> PUT
+IT DOWN`, and every transition still waits on the MEASURED pose, so the
+rehearsal advances only when the drone has physically been moved. It exists
+because the mission is worth debugging in the arena, against the real pads and
+the real estimate, without motors — a spinning propeller in someone's hands is
+the one failure this whole file must never produce.
+
+What makes that structural rather than a promise: the arm, mode and takeoff
+CLIENTS and the setpoint PUBLISHER are never created (see the I/O section), so
+no path through this node reaches the FCU — including one added later by
+someone who did not read this. `_start_call`, `_set_mode` and `_stream` all
+refuse on None, so a forgotten guard is a log line rather than a command.
+
+This is a guarantee about THIS STACK, not about the vehicle. MAVROS runs
+normally, /mavros/cmd/arming still exists for anyone who types one, and the
+transmitter never went through MAVROS at all. Arming is settled at the flight
+controller: set an arming check the vehicle cannot pass before a rehearsal, and
+take the props off. `_dry_audit` checks the one thing it usefully can — that
+nothing ELSE in the graph is publishing setpoints, which is what a forgotten
+phase1_real in another terminal looks like.
+
+What still happens, because it is the point: the pretend-arm registers the
+takeoff base, that opens pad_map_node's gate, and the map, its markers and the
+feature map build from there exactly as they would in flight.
 """
 
 import math
@@ -255,6 +284,28 @@ class Phase1MissionNode(Node):
         self.declare_parameter("service_timeout_s", 30.0)
         self.declare_parameter("setpoint_hz", 10.0)
         self.declare_parameter("auto_start", True)
+
+        # ── DRY RUN: the vehicle never arms, a human is the actuator ────────
+        # The whole state machine runs, against the REAL map, the REAL pose and
+        # the REAL belly camera — but nothing is ever sent to the FCU. Every
+        # command becomes an instruction to the person holding the drone, and
+        # every transition still waits on the measured pose, so the rehearsal
+        # only advances when that person actually raises, turns, carries or sets
+        # the drone down.
+        #
+        # This is NOT a soft switch. In dry run the arm, mode and takeoff
+        # service clients and the setpoint publisher are never CREATED, so
+        # there is no object for a bug in the state machine to send through.
+        # It stops THIS STACK commanding the vehicle; it does not stop the
+        # vehicle arming — that belongs to the flight controller, as an arming
+        # check it cannot pass.
+        self.declare_parameter("dry_run", False)
+        # How long to sit on the takeoff base before the rehearsal treats the
+        # vehicle as armed. It is the moment the takeoff base is registered and
+        # the map starts accepting detections, exactly as a real arm is, so it
+        # wants to be long enough for the person to have the drone still and
+        # square on the base.
+        self.declare_parameter("dry_arm_delay_s", 3.0)
         # Gap between repeats of a mode/arm/takeoff command. MAVROS acking a
         # command is not the same as ArduPilot accepting it, so every command is
         # re-sent on this period until /mavros/state shows the effect.
@@ -282,6 +333,8 @@ class Phase1MissionNode(Node):
         self.svc_timeout = float(p("service_timeout_s"))
         self.auto_start = bool(p("auto_start"))
         self.retry_period = float(p("retry_period_s"))
+        self.dry_run = bool(p("dry_run"))
+        self.dry_arm_delay = float(p("dry_arm_delay_s"))
 
         # ── State ───────────────────────────────────────────────────────────
         self.state = self.WAIT_FCU
@@ -334,7 +387,14 @@ class Phase1MissionNode(Node):
             depth=1,
         )
 
-        self.pub_sp = self.create_publisher(
+        # THE SETPOINT PUBLISHER IS NOT CREATED IN DRY RUN, and neither are the
+        # three FCU clients below. A flag consulted at each call site is one
+        # missed `if` away from commanding a vehicle somebody is holding; an
+        # object that does not exist cannot be sent through by any path,
+        # including one added later by someone who never read this comment.
+        # _stream, _set_mode and _start_call all refuse on None, so the failure
+        # mode of forgetting a guard is a log line, not a spinning motor.
+        self.pub_sp = None if self.dry_run else self.create_publisher(
             PoseStamped, "/mavros/setpoint_position/local", 10)
         self.pub_status = self.create_publisher(
             String, "/hydrone/mission/status", 10)
@@ -357,9 +417,19 @@ class Phase1MissionNode(Node):
         self.create_subscription(StatusText, "/mavros/statustext/recv",
                                  self._cb_statustext, sensor_qos)
 
-        self.cli_mode = self.create_client(SetMode, "/mavros/set_mode")
-        self.cli_arm = self.create_client(CommandBool, "/mavros/cmd/arming")
-        self.cli_takeoff = self.create_client(CommandTOL, "/mavros/cmd/takeoff")
+        if self.dry_run:
+            self.cli_mode = None
+            self.cli_arm = None
+            self.cli_takeoff = None
+        else:
+            self.cli_mode = self.create_client(SetMode, "/mavros/set_mode")
+            self.cli_arm = self.create_client(CommandBool,
+                                              "/mavros/cmd/arming")
+            self.cli_takeoff = self.create_client(CommandTOL,
+                                                  "/mavros/cmd/takeoff")
+        # The map's own services are NOT part of the lockdown: they move no
+        # vehicle. Registering the takeoff base and marking a pad visited are
+        # exactly the bookkeeping a rehearsal is there to exercise.
         self.cli_visited = self.create_client(MarkPadVisited,
                                               "/hydrone/pads/mark_visited")
         self.cli_base = self.create_client(
@@ -372,6 +442,27 @@ class Phase1MissionNode(Node):
                           self._stream)
         self.create_timer(0.1, self._tick)
         self.create_timer(1.0, self._publish_status)
+
+        if self.dry_run:
+            # The human needs a REPEATING cue, not a one-shot line that has
+            # scrolled away by the time they have both hands on the drone.
+            self.create_timer(1.0, self._pilot_cue)
+            # And one late check that nothing ELSE is driving the vehicle.
+            # See _dry_audit.
+            self._audit_timer = self.create_timer(10.0, self._dry_audit)
+            self.get_logger().warn(
+                "════════════════════════════════════════════════════════\n"
+                "  DRY RUN — NOTHING IS SENT TO THE FLIGHT CONTROLLER.\n"
+                "  No arm, mode or takeoff client exists in this node and no\n"
+                "  setpoint is published. A human is the actuator: raise,\n"
+                "  turn, carry and set the drone down when told to, and the\n"
+                "  mission advances on the MEASURED pose exactly as it would\n"
+                "  in flight. Instructions are the >>> lines below.\n"
+                "\n"
+                "  This stops the STACK commanding the vehicle. It does not\n"
+                "  stop the vehicle ARMING — set an arming check it cannot\n"
+                "  pass, and take the props off.\n"
+                "════════════════════════════════════════════════════════")
 
         self.get_logger().info(
             f"phase1_mission ready — takeoff to {self.takeoff_alt:.1f} m, "
@@ -469,7 +560,11 @@ class Phase1MissionNode(Node):
         position setpoint arriving mid-landing is at best ignored and at worst
         fights the flare.
         """
-        if not self.stream_setpoint:
+        # Dry run: there IS no publisher. The state machine still sets
+        # `stream_setpoint` and still keeps `self.setpoint` up to date — that is
+        # what _pilot_cue reads to tell the human where to put the drone — it
+        # just has nowhere to send it.
+        if self.pub_sp is None or not self.stream_setpoint:
             return
         x, y, z, yaw = self.setpoint
         sp = PoseStamped()
@@ -522,8 +617,10 @@ class Phase1MissionNode(Node):
         if not (self.mav_state.connected and self.pose is not None):
             self._throttle("waiting for MAVROS link and a local position...")
             return
-        if not (self.cli_arm.service_is_ready()
-                and self.cli_mode.service_is_ready()):
+        # Not in dry run: those clients do not exist, so there is nothing to
+        # ask. Waiting on them would hold the rehearsal at WAIT_FCU forever.
+        if not self.dry_run and not (self.cli_arm.service_is_ready()
+                                     and self.cli_mode.service_is_ready()):
             self._throttle("waiting for MAVROS command services...")
             return
 
@@ -548,7 +645,25 @@ class Phase1MissionNode(Node):
         default) and dwell is shorter than that, so the vehicle is usually still
         armed — and still in LAND. Taking "armed" as done would send a takeoff
         while in LAND, which ArduPilot refuses, forever.
+
+        DRY RUN: none of that happens. After `dry_arm_delay_s` on the base the
+        rehearsal simply declares the vehicle armed and moves on, because the
+        arm is not the interesting part — what the arm TRIGGERS is. Registering
+        the takeoff base and opening pad_map's gate both hang off this moment,
+        and both still happen, from REGISTER, exactly as they do in flight.
         """
+        if self.dry_run:
+            if self._since_entered() < self.dry_arm_delay:
+                return
+            self.get_logger().warn(
+                "[dry] WOULD ARM (GUIDED, then arm) — nothing sent. Treating "
+                "the vehicle as armed from here; the takeoff base is about to "
+                "be registered and the map starts accepting detections.")
+            self._takeoff_tries = 0
+            self._enter(self.REGISTER if not self.base_registered
+                        else self.TAKEOFF)
+            return
+
         if self.mav_state.mode == "GUIDED" and self.mav_state.armed:
             self._takeoff_tries = 0
             self._enter(self.REGISTER if not self.base_registered
@@ -659,6 +774,15 @@ class Phase1MissionNode(Node):
                 self._begin_landing()
                 return
             self._enter(self.SELECT)
+            return
+
+        # DRY RUN: no command, and deliberately no timeout. The climb check
+        # above is the REAL one — it is satisfied when the person actually
+        # raises the drone — and ArduPilot is not here to refuse anything, so
+        # the "takeoff refused three times, aborting" path below would only
+        # ever fire on somebody being slow with their hands. _pilot_cue does
+        # the asking.
+        if self.dry_run:
             return
 
         if self._poll_call() == "pending":
@@ -943,7 +1067,8 @@ class Phase1MissionNode(Node):
         # Keep asking until /mavros/state agrees we are in LAND. An acked mode
         # command that ArduPilot then declined would otherwise leave us hovering
         # here until the timeout.
-        if (self.mav_state.mode != "LAND"
+        if (not self.dry_run
+                and self.mav_state.mode != "LAND"
                 and self._poll_call() != "pending"
                 and self._now() - self._last_cmd_t >= self.retry_period):
             self.get_logger().warn("not in LAND yet; re-sending the mode.")
@@ -966,7 +1091,12 @@ class Phase1MissionNode(Node):
         # what height the pad is at, and it cannot be satisfied on the way down:
         # a descending vehicle moves far more than land_still_tol_m across the
         # window, a resting one moves only estimator noise.
-        disarmed = not self.mav_state.armed
+        # In a DRY RUN the vehicle is disarmed for the whole run by
+        # construction, so this signal is permanently true and would declare
+        # touchdown the instant LAND was entered — at hover height, writing that
+        # height into the pad. Ignore it there and let stillness-plus-descent
+        # decide, which is what the person setting the drone down produces.
+        disarmed = (not self.dry_run) and (not self.mav_state.armed)
         still = self._z_is_still()
         descended = (self._land_entry_z is not None
                      and self.pose is not None
@@ -1095,11 +1225,21 @@ class Phase1MissionNode(Node):
     # ────────────────────────────────────────────────────────────────────────
 
     def _set_mode(self, mode: str):
+        if self.cli_mode is None:      # dry run
+            self.get_logger().info(f"[dry] would set mode {mode}.")
+            return
         req = SetMode.Request()
         req.custom_mode = mode
         self._start_call("mode", self.cli_mode, req)
 
     def _start_call(self, tag: str, client, request):
+        # The last gate. In dry run the FCU clients are None, so a call site
+        # that forgot its own guard lands here and is refused rather than
+        # reaching MAVROS.
+        if client is None:
+            self.get_logger().warn(
+                f"[dry] refused to send '{tag}' — no client exists in dry run.")
+            return
         if not client.service_is_ready():
             self._throttle(f"service {client.srv_name} not up yet")
             return
@@ -1149,13 +1289,134 @@ class Phase1MissionNode(Node):
     def _throttle(self, text: str):
         self.get_logger().info(text, throttle_duration_sec=5.0)
 
+    # ────────────────────────────────────────────────────────────────────────
+    # Dry run: talking to the person holding the drone
+    # ────────────────────────────────────────────────────────────────────────
+
+    def _pilot_cue(self):
+        """Once a second, say what the mission wants the human to do NOW.
+
+        Derived entirely from the live state, setpoint and pose rather than
+        emitted once at each transition: the person has both hands on a drone
+        and is not watching the moment a line scrolls past, and a cue that is
+        recomputed cannot drift from what the state machine is actually waiting
+        for. Every number in here is measured — the same numbers the transition
+        is testing — so when a cue stops changing, that IS the mission being
+        stuck, not the reporting.
+        """
+        pose = self.pose
+        cue = None
+
+        if self.state == self.WAIT_FCU:
+            if not self.mav_state.connected:
+                cue = "waiting for the MAVROS link to the FCU."
+            elif pose is None:
+                cue = ("waiting for /mavros/local_position/pose. No position "
+                       "estimate yet — the EKF needs vision; check that "
+                       "/mavros/vision_pose/pose is being published.")
+            else:
+                cue = "ready."
+        elif self.state == self.ARMING:
+            left = max(0.0, self.dry_arm_delay - self._since_entered())
+            cue = (f"HOLD STILL on the base — treating the vehicle as armed in "
+                   f"{left:.0f} s. Nothing will be sent to the FCU.")
+        elif self.state == self.REGISTER:
+            cue = "HOLD STILL — registering this spot as the takeoff base."
+        elif self.state == self.TAKEOFF and pose is not None:
+            climbed = pose.pose.position.z - self._takeoff_start_z
+            cue = (f"RAISE the drone to {self.takeoff_alt:.2f} m above what it "
+                   f"is standing on — {climbed:.2f} m of "
+                   f"{self.takeoff_alt:.2f} m so far.")
+        elif self.state == self.SETTLE:
+            left = max(0.0, self.settle_s - self._since_entered())
+            cue = (f"HOLD STILL where you are for {left:.0f} s — the map is not "
+                   "read while anything is moving.")
+        elif self.state == self.ROTATE and pose is not None:
+            err = wrap_pi(self.setpoint[3] - yaw_of(pose))
+            way = "LEFT (anticlockwise)" if err > 0 else "RIGHT (clockwise)"
+            cue = (f"TURN the drone {way} {abs(math.degrees(err)):.0f} deg, on "
+                   f"the spot — to heading "
+                   f"{math.degrees(self.setpoint[3]):.0f} deg.")
+        elif self.state == self.TRAVEL and pose is not None:
+            dx = self.setpoint[0] - pose.pose.position.x
+            dy = self.setpoint[1] - pose.pose.position.y
+            d = math.hypot(dx, dy)
+            if d <= self.arrive_tol:
+                cue = "HOLD — you are over the target."
+            else:
+                # A compass-style bearing relative to the nose, because the
+                # person is behind the drone and cannot read an ENU heading.
+                rel = math.degrees(wrap_pi(math.atan2(dy, dx) - yaw_of(pose)))
+                side = "left" if rel > 0 else "right"
+                cue = (f"CARRY the drone {d:.2f} m to "
+                       f"({self.setpoint[0]:.2f}, {self.setpoint[1]:.2f}) — "
+                       f"{abs(rel):.0f} deg to the {side} of where the nose "
+                       f"points. Keep it at {self.setpoint[2]:.2f} m and do "
+                       "not turn it.")
+        elif self.state == self.CONFIRM:
+            left = max(0.0, self.confirm_timeout - self._since_entered())
+            cue = (f"HOLD THE DRONE OVER THE PAD, lens down — "
+                   f"{self._confirm_hits}/{self.confirm_detections} good looks, "
+                   f"{left:.0f} s before this candidate is rejected.")
+        elif self.state == self.LAND:
+            cue = ("PUT THE DRONE DOWN on the pad and let go — touchdown is "
+                   "declared when the altitude stops changing.")
+        elif self.state == self.DWELL:
+            left = max(0.0, self.dwell_s - self._since_entered())
+            cue = f"RESTING on the pad — {left:.0f} s, then pick it up again."
+        elif self.state == self.DONE:
+            cue = "rehearsal complete."
+        elif self.state == self.ABORTED:
+            cue = "rehearsal aborted."
+
+        if cue is not None:
+            self.get_logger().info(f">>> {cue}")
+
+    def _dry_audit(self):
+        """Check, once, that nothing else is driving the vehicle either.
+
+        This node publishes no setpoint in dry run — it has no publisher. But a
+        rehearsal is usually started while something else was already up, and
+        the failure that produces is silent: phase1_real or landing_sites left
+        running in another terminal goes on commanding the vehicle for real
+        while this window prints >>> lines as though the drone were inert.
+        Every launch file in this package warns that two of them fight over
+        /mavros/setpoint_position/local; this is that warning, at the one moment
+        it can be checked rather than remembered.
+
+        Deliberately NOT a check on whether the vehicle can be armed. It cannot
+        be one: MAVROS runs normally here, /mavros/cmd/arming exists, and the
+        transmitter was never going through MAVROS in the first place. Arming
+        is settled at the flight controller — an arming check the vehicle
+        cannot pass — and a green line here would only invite someone to skip
+        setting it.
+        """
+        self._audit_timer.cancel()
+        others = self.count_publishers("/mavros/setpoint_position/local")
+        if others == 0:
+            self.get_logger().info(
+                "[dry] nothing is publishing setpoints — this is the only "
+                "thing talking to the vehicle, and it is talking to you.")
+            return
+        self.get_logger().error(
+            "════════════════════════════════════════════════════════\n"
+            f"  {others} NODE(S) ARE PUBLISHING SETPOINTS.\n"
+            "  It is not this one — in dry run this node has no setpoint\n"
+            "  publisher at all. Something else is commanding the vehicle\n"
+            "  for real: most likely phase1_real.launch.py or\n"
+            "  landing_sites.launch.py still running in another terminal.\n"
+            "  Stop it before you pick the drone up. The >>> lines below\n"
+            "  are NOT the only thing the vehicle is being told.\n"
+            "════════════════════════════════════════════════════════")
+
     def _publish_status(self):
         x = self.pose.pose.position.x if self.pose else float("nan")
         y = self.pose.pose.position.y if self.pose else float("nan")
         z = self.pose.pose.position.z if self.pose else float("nan")
         yaw = math.degrees(yaw_of(self.pose)) if self.pose else float("nan")
         self.pub_status.publish(String(data=(
-            f"state={self.state} mode={self.mav_state.mode} "
+            ("DRY " if self.dry_run else "")
+            + f"state={self.state} mode={self.mav_state.mode} "
             f"armed={self.mav_state.armed} "
             f"x={x:.2f} y={y:.2f} z={z:.2f} yaw={yaw:.0f} "
             f"landed={self.landed_count}/{self.target_bases} "

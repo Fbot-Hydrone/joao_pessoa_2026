@@ -376,19 +376,21 @@ def test_real_pad_is_found_in_dark_blue_mode(render):
 @pytest.mark.parametrize("render", [render_real_pad, render_real_pad_as_zed],
                          ids=["phone_colours", "zed_colours"])
 def test_real_pad_cross_is_actually_resolved(render):
-    """Four arms, not the zero the yellow border produced before the shrink.
+    """Four arms — not eight, and not zero.
 
-    An isotropic erosion deep enough to clear the border along the square's
-    edges still leaves its corners, and _polar_checks then takes a corner for
-    the ring and probes the circle instead of the arms.
+    Eight is what a PER-RAY arm reference gives on a square pad: the outermost
+    marking is the border, whose radius swings by sqrt(2) between edge and
+    corner, so in the corner directions the band lands on the circle and each
+    arm is counted twice. Zero is what an ROI eroded too little gives, when the
+    border is taken for the ring and the probe lands outside the arms.
     """
     dets = real().detect(render())
     assert dets
     scores = dets[0].scores
     assert scores["arms"] == 4, f"arms={scores['arms']}, expected the cross's 4"
-    assert scores["mid_occ"] > 0.02, (
-        f"mid_occ={scores['mid_occ']:.3f}: the mid-radius probe found no cross, "
-        "which is what happens when the border is taken for the ring")
+    assert 0.05 < scores["arm_occ"] < 0.85, (
+        f"arm_occ={scores['arm_occ']:.3f}: at the arms' radius the pad is "
+        "marked in four narrow sectors, neither nowhere nor everywhere")
 
 
 def test_the_zed_colours_really_are_outside_the_yellow_band():
@@ -423,15 +425,25 @@ def test_sim_mode_finds_no_yellow_at_all_in_zed_colours():
     assert cv2.countNonZero(yellow) == 0
 
 
-def test_real_mode_needs_the_blue_mat():
-    """The markings alone are not a pad: they have to be lying on the floor.
+def test_real_mode_rejects_pad_markings_on_a_pale_field():
+    """The pad is DARK ground under bright paint. Invert that and it is not one.
 
-    This is what keeps the walls, the ceiling and everything hanging on them
-    out of a mask that accepts any local contrast.
+    This replaces an earlier "the markings must lie on blue floor" gate. That
+    gate was measured on raw ZED capture and found to select 80-94% of every
+    frame -- under the camera's blue cast a white wall is more blue-dominant
+    than distant blue foam -- so the floor is not separable by colour at all.
+    What does separate a pad from the bright window lattice that outranked one
+    is which side of its surroundings its field sits on.
     """
-    scene = render_real_pad(floor=(70, 90, 95), field=(60, 80, 85),
-                            seam=(75, 95, 100))
+    scene = render_real_pad(floor=(120, 120, 120), field=(215, 215, 215),
+                            mark=(150, 235, 245), seam=(125, 125, 125))
     assert real().detect(scene) == []
+    # The same geometry with the field darker than the floor IS a pad, so the
+    # test is about the step and not about the drawing.
+    assert real().detect(render_real_pad(floor=(215, 215, 215),
+                                         field=(120, 120, 120),
+                                         mark=(150, 235, 245),
+                                         seam=(210, 210, 210)))
 
 
 def test_real_mode_rejects_a_scuff_on_the_mat():
@@ -534,16 +546,123 @@ def test_real_pad_across_apparent_sizes(side):
     assert abs(dets[0].u - 320) < 0.12 * side
 
 
-def test_real_mode_reports_the_mat_and_the_markings_for_debugging():
+def test_real_mode_reports_the_markings_and_their_contrast_for_debugging():
     """real_masks is the first thing to look at when the arena light changes,
-    so it stays part of the public surface."""
+    so it stays part of the public surface — the binary mask AND how far each
+    pixel cleared the threshold, which is what mark_delta is tuned against."""
     det = real()
-    mat, mark = det.real_masks(render_real_pad_as_zed())
-    assert cv2.countNonZero(mat) > 0 and cv2.countNonZero(mark) > 0
-    assert cv2.countNonZero(cv2.bitwise_and(mark, cv2.bitwise_not(mat))) == 0, \
-        "markings were accepted outside the mat"
-    det.detect(render_real_pad_as_zed())
-    assert det.last_field_mask is not None and det.last_yellow_mask is not None
+    scene = render_real_pad_as_zed()
+    mark, contrast = det.real_masks(scene)
+    assert cv2.countNonZero(mark) > 0
+    assert contrast.shape == scene.shape[:2]
+    assert contrast[mark > 0].min() > det.mark_delta
+    det.detect(scene)
+    # Real mode does not segment the floor, so there is no field mask to show.
+    assert det.last_field_mask is None
+    assert det.last_yellow_mask is not None
+
+
+# ── What the two cameras each need ───────────────────────────────────────────
+
+def test_centre_comes_from_the_ring_when_the_ring_resolves():
+    """The reported pixel is projected into the world, so it has to be the
+    pad's centre and not the middle of whatever paint was grouped together."""
+    det = real().detect(render_real_pad(side=300))[0]
+    assert det.scores["source"] == "ring"
+    assert math.hypot(det.u - 320, det.v - 240) < 3.0, (
+        f"centre ({det.u:.0f},{det.v:.0f}) is off the pad's true centre")
+
+
+def test_a_ring_fit_outranks_a_cluster_fit_on_the_same_pad():
+    """Both families propose the same pad; the exact one must win, because the
+    winner is what gets projected."""
+    dets = real(min_confidence=0.0).detect(render_real_pad())
+    assert dets and dets[0].scores["source"] == "ring"
+
+
+@pytest.mark.parametrize("cy,tag", [(150, "bottom half"), (60, "a sliver"),
+                                    (20, "barely an arc")])
+def test_partly_visible_pad_is_found_from_the_belly_camera(cy, tag):
+    """At landing height the pad no longer fits in the belly camera's view.
+
+    An arc of the circle plus the cross is enough, and the fitted ellipse puts
+    the centre where the pad's centre actually is — even when that is outside
+    the image, which is the case the mission descends into.
+    """
+    scene = render_real_pad_as_zed(side=300, cy=cy)
+    dets = real(min_seen=0.30).detect(scene)
+    assert dets, f"{tag}: lost the pad"
+    assert dets[0].scores["source"] == "ring", f"{tag}: not from the arc"
+    assert abs(dets[0].u - 320) < 15 and abs(dets[0].v - cy) < 15, (
+        f"{tag}: centre ({dets[0].u:.0f},{dets[0].v:.0f}) should be near "
+        f"(320,{cy})")
+
+
+def test_cross_alone_is_not_enough_for_the_belly_camera():
+    """A deliberate limit, not an oversight.
+
+    Below the height where any of the circle is in shot, all that is left is
+    two crossing bars, and a mat seam crossing another seam forges that. The
+    belly camera's answer gates a landing, so it says no.
+    """
+    # A pad rendered far larger than the frame: the circle and the border are
+    # entirely outside it and only the cross is in shot, which is what the
+    # belly camera sees in the last stretch of a descent.
+    for side in (900, 1200, 1600):
+        assert real(min_seen=0.0).detect(
+            render_real_pad_as_zed(side=side)) == [], f"side={side}"
+
+
+def test_min_seen_is_what_separates_the_two_cameras():
+    """Which candidate WINS, not whether anything is found.
+
+    On a pad hanging off the top of the frame there are two readings: the arc,
+    whose sweep runs off the image but whose centre is right, and a compact
+    cluster wholly inside the frame whose centre is 60-80 px low. `min_seen`
+    chooses. The belly camera wants the arc; the forward camera, which should
+    never be looking at a clipped pad and whose answer becomes a world
+    position, would rather have neither.
+    """
+    scene = render_real_pad_as_zed(side=300, cy=40)
+    belly = real(min_seen=0.30).detect(scene)
+    forward = real(min_seen=0.85).detect(scene)
+    assert belly and belly[0].scores["source"] == "ring"
+    assert abs(belly[0].v - 40) < 15, "belly reading should be on the centre"
+    assert forward and forward[0].scores["source"] == "cluster"
+    assert forward[0].v - 40 > 40, (
+        "the fully-visible cluster reading is the biased one; if it stops "
+        "being biased this test is measuring nothing")
+
+
+def test_ignore_regions_blanks_the_airframe():
+    """The belly camera sees the drone's own legs, and a dark object with a
+    bright edge on blue foam passes every test in the detector — one scored
+    0.95. Nothing in a single frame separates them, so they go by position."""
+    scene = render_real_pad_as_zed(side=200, cx=460, cy=300)
+    assert real().detect(scene), "the pad itself must survive"
+    covering_the_pad = [0.5, 0.4, 1.0, 1.0]
+    assert real(ignore_regions=covering_the_pad).detect(scene) == []
+    # Same rectangles, expressed the way a ROS parameter carries them.
+    assert real(ignore_regions=[(0.5, 0.4, 1.0, 1.0)]).detect(scene) == []
+
+
+def test_ignore_regions_rejects_a_malformed_parameter():
+    with pytest.raises(ValueError):
+        PadDetector(field_mode="dark_blue", ignore_regions=[0.1, 0.2, 0.3])
+
+
+def test_foreshortening_is_paid_for_in_confidence():
+    """A pad squashed by perspective is still a pad, but its centre is loose
+    along the short axis. pad_map weights by confidence, so a slant sighting
+    has to arrive as a lead rather than as a fix."""
+    square = real().detect(render_real_pad_as_zed(side=280))
+    squashed = cv2.resize(render_real_pad_as_zed(side=280), (640, 160))
+    slant = real(min_confidence=0.0).detect(squashed)
+    assert square and slant
+    assert slant[0].scores["ecc"] > 2.0
+    assert slant[0].confidence < square[0].confidence - 0.10, (
+        f"slant {slant[0].confidence:.2f} vs square {square[0].confidence:.2f}: "
+        "foreshortening cost nothing")
 
 
 def test_field_mode_rejects_nonsense():

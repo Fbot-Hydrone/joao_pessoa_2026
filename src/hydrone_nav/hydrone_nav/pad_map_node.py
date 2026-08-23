@@ -450,6 +450,22 @@ class PadMapNode(Node):
             other.is_takeoff_base = (other is entry)
         self.takeoff_base_id = entry.id
 
+        # Registering the takeoff base OPENS THE GATE, if the arm has not
+        # already. These are the same event: the mission calls this exactly
+        # once, in the moment between arming and leaving the ground, so on a
+        # real flight `armed_once` is already true here and this line does
+        # nothing. It earns its place in a DRY RUN, where the vehicle never
+        # arms and /mavros/state therefore never reports it — without this the
+        # map would stay empty for the whole rehearsal and the thing being
+        # rehearsed would have no input. Note this is strictly better than
+        # running the rehearsal with `require_armed:=false`, which would map
+        # the pre-arm frames the gate exists to throw away.
+        if not self.armed_once:
+            self.armed_once = True
+            self.get_logger().info(
+                "takeoff base registered without an arm (dry run) — accepting "
+                "pad detections from now on.")
+
         response.success = True
         response.id = int(entry.id)
         response.message = f"pad {entry.id} is the takeoff base"
