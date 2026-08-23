@@ -1,21 +1,53 @@
 #!/usr/bin/env python3
-"""
+r"""
 pad_detector — classic (non-learned) detection of the competition landing pad.
 
-The pad
--------
-A strongly saturated BLUE field carrying a YELLOW ring with a YELLOW cross
-through its centre. Everything on it is far more saturated than the arena floor,
-which is what makes plain HSV thresholding viable here — no training, no model
-files, deterministic cost per frame.
+TWO PADS, AND THE REAL ONE HIDES INSIDE ITS OWN BACKGROUND
+----------------------------------------------------------
+BiguaSim's pad is a strongly saturated BLUE field carrying a YELLOW ring and
+cross. The REAL pad, photographed 2026-08-23, is blue too — and so is the
+interlocking-foam floor it lies on. They are the SAME HUE. What separates them
+is brightness: the floor reads about V 190, the pad field about V 90, and the
+pad is the less saturated of the two. The real pad also carries a yellow SQUARE
+BORDER the simulated one does not have.
 
-    +-----------------+
-    |     .-----.     |     blue   = pad field
-    |    /   |   \    |     yellow = ring + cross
-    |   |----+----|   |
-    |    \   |   /    |
-    |     '-----'     |
-    +-----------------+
+    SIM                          REAL
+    +-----------------+          +=================+  <- yellow border
+    |     .-----.     |          I     .-----.     I
+    |    /   |   \    |          I    /   |   \    I     dark  = pad field
+    |   |----+----|   |          I   |----+----|   I     yellow= ring + cross
+    |    \   |   /    |          I    \   |   /    I
+    |     '-----'     |          I     '-----'     I
+    +-----------------+          +=================+
+     blue field                   dark field, BLUE FLOOR all around
+
+Run the sim detector on the real pad and its blue band — H 95..135, any value
+above 50 — swallows BOTH, so the mask is one enormous blob covering floor and
+pad together and the pad stops being a region at all. Measured on a synthetic
+replica: the sim band gave a single 306081 px contour spanning the frame,
+rejected only by the max-area gate, while a value-capped band gave a clean
+61502 px square at solidity 1.00.
+
+`field_mode` selects which. "blue" is the simulator, "dark_blue" the real
+arena.
+Only the FIELD mask changes; every structure check below is untouched, because
+they ask about yellow relative to the field blob and never about the field's
+own colour.
+
+THE YELLOW BORDER, AND WHY THE ROI IS ERODED
+--------------------------------------------
+_polar_checks takes the OUTERMOST yellow along each ray to be the ring. The
+real pad's yellow border lies further out than the ring, so any of it that
+survives into the ROI BECOMES the ring, and the mid-radius probe then lands on
+the actual circle rather than on the cross arms.
+
+Most of the border falls outside the field contour for free, the border not
+being the field colour. But antialiasing and colour fringing leave a thread of
+it just inside, and a thread is enough: measured on the replica, yellow
+survived out to r=175 px with the ring at 97, and mid_occ came out 0.000 with
+zero arms — the pad rejected outright. The ROI is therefore eroded by
+`roi_erode_frac` of the blob's equivalent radius before yellow is masked into
+it.
 
 Why not just "find the blue blob"
 ---------------------------------
@@ -74,6 +106,16 @@ DEFAULT_BLUE_HSV_HIGH = (135, 255, 255)
 DEFAULT_YELLOW_HSV_LOW = (18, 110, 90)
 DEFAULT_YELLOW_HSV_HIGH = (38, 255, 255)
 
+# The real pad's field. It is BLUE — the same hue as the floor it sits on —
+# but markedly DARKER and less saturated. That value gap is the whole
+# separation, so this band is blue in hue and capped in value: the floor reads
+# around V 190, the pad field around V 90.
+DEFAULT_DARK_HSV_LOW = (90, 40, 25)
+DEFAULT_DARK_HSV_HIGH = (130, 215, 130)
+
+FIELD_BLUE = "blue"
+FIELD_DARK = "dark_blue"
+
 
 @dataclass
 class PadDetection2D:
@@ -106,6 +148,9 @@ class PadDetector:
         blue_hsv_high=DEFAULT_BLUE_HSV_HIGH,
         yellow_hsv_low=DEFAULT_YELLOW_HSV_LOW,
         yellow_hsv_high=DEFAULT_YELLOW_HSV_HIGH,
+        field_mode: str = FIELD_BLUE,
+        dark_hsv_low=DEFAULT_DARK_HSV_LOW,
+        dark_hsv_high=DEFAULT_DARK_HSV_HIGH,
         min_area_px: float = 150.0,
         max_area_frac: float = 0.85,
         min_solidity: float = 0.80,
@@ -117,11 +162,21 @@ class PadDetector:
         mid_occ_min: float = 0.02,
         mid_occ_max: float = 0.85,
         structure_radius_px: float = 22.0,
+        roi_erode_frac: float = 0.06,
         min_confidence: float = 0.50,
         max_detections: int = 8,
     ):
-        self.blue_lo = np.array(blue_hsv_low, dtype=np.uint8)
-        self.blue_hi = np.array(blue_hsv_high, dtype=np.uint8)
+        if field_mode not in (FIELD_BLUE, FIELD_DARK):
+            raise ValueError(
+                f"field_mode must be {FIELD_BLUE!r} or {FIELD_DARK!r}, "
+                f"got {field_mode!r}")
+        self.field_mode = field_mode
+        if field_mode == FIELD_DARK:
+            self.field_lo = np.array(dark_hsv_low, dtype=np.uint8)
+            self.field_hi = np.array(dark_hsv_high, dtype=np.uint8)
+        else:
+            self.field_lo = np.array(blue_hsv_low, dtype=np.uint8)
+            self.field_hi = np.array(blue_hsv_high, dtype=np.uint8)
         self.yellow_lo = np.array(yellow_hsv_low, dtype=np.uint8)
         self.yellow_hi = np.array(yellow_hsv_high, dtype=np.uint8)
 
@@ -136,6 +191,7 @@ class PadDetector:
         self.mid_occ_min = float(mid_occ_min)
         self.mid_occ_max = float(mid_occ_max)
         self.structure_radius_px = float(structure_radius_px)
+        self.roi_erode_frac = float(roi_erode_frac)
         self.min_confidence = float(min_confidence)
         self.max_detections = int(max_detections)
 
@@ -144,7 +200,7 @@ class PadDetector:
         self._k_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
 
         # Last frame's masks, kept only so the node can draw them for debugging.
-        self.last_blue_mask: np.ndarray | None = None
+        self.last_field_mask: np.ndarray | None = None
         self.last_yellow_mask: np.ndarray | None = None
 
     # ────────────────────────────────────────────────────────────────────────
@@ -156,16 +212,16 @@ class PadDetector:
         if bgr is None or bgr.size == 0:
             return []
 
-        blue, yellow = self.color_masks(bgr)
-        self.last_blue_mask, self.last_yellow_mask = blue, yellow
+        field_mask, yellow = self.color_masks(bgr)
+        self.last_field_mask, self.last_yellow_mask = field_mask, yellow
 
         img_area = float(bgr.shape[0] * bgr.shape[1])
-        contours, _ = cv2.findContours(blue, cv2.RETR_EXTERNAL,
+        contours, _ = cv2.findContours(field_mask, cv2.RETR_EXTERNAL,
                                        cv2.CHAIN_APPROX_SIMPLE)
 
         found: list[PadDetection2D] = []
         for contour in contours:
-            det = self._evaluate(contour, blue, yellow, img_area)
+            det = self._evaluate(contour, field_mask, yellow, img_area)
             if det is not None:
                 found.append(det)
 
@@ -182,7 +238,7 @@ class PadDetector:
         """
         hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
         masks = []
-        for lo, hi in ((self.blue_lo, self.blue_hi),
+        for lo, hi in ((self.field_lo, self.field_hi),
                        (self.yellow_lo, self.yellow_hi)):
             mask = cv2.inRange(hsv, lo, hi)
             mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, self._k_close)
@@ -194,9 +250,9 @@ class PadDetector:
     # Per-candidate evaluation
     # ────────────────────────────────────────────────────────────────────────
 
-    def _evaluate(self, contour, blue, yellow,
+    def _evaluate(self, contour, field_mask, yellow,
                   img_area: float) -> PadDetection2D | None:
-        """Run the check cascade on one blue contour. None = not a pad."""
+        """Run the check cascade on one FIELD contour. None = not a pad."""
         area = float(cv2.contourArea(contour))
         if area < self.min_area_px or area > self.max_area_frac * img_area:
             return None
@@ -225,6 +281,19 @@ class PadDetector:
         x, y, w, h = cv2.boundingRect(contour)
         roi = np.zeros((h, w), dtype=np.uint8)
         cv2.drawContours(roi, [contour], -1, 255, cv2.FILLED, offset=(-x, -y))
+
+        # Pull the footprint in from its own edge before asking about yellow.
+        # The real pad has a yellow BORDER just outside this contour, and a
+        # thread of it survives antialiasing and colour fringing. Because
+        # _polar_checks treats the outermost yellow as the ring, that thread
+        # replaces the ring and the arms vanish — measured, mid_occ 0.000 and
+        # zero arms on a pad that is plainly a pad. Eroding costs nothing on
+        # the simulated pad, whose markings sit well inside the field.
+        erode_px = int(round(self.roi_erode_frac * math.sqrt(area / math.pi)))
+        if erode_px >= 1:
+            k = 2 * erode_px + 1
+            roi = cv2.erode(roi, cv2.getStructuringElement(
+                cv2.MORPH_ELLIPSE, (k, k)))
 
         yellow_roi = cv2.bitwise_and(yellow[y:y + h, x:x + w], roi)
         yellow_px = int(cv2.countNonZero(yellow_roi))

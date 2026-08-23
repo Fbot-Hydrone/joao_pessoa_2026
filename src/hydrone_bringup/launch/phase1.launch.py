@@ -75,6 +75,18 @@ def generate_launch_description():
                         "avoidance: raise this only for an arena you know is "
                         "clear at the new height."),
         DeclareLaunchArgument(
+            "field_mode", default_value="blue",
+            description="Which pad the detector is looking at. 'blue' is "
+                        "BiguaSim's: a bright saturated blue field. "
+                        "'dark_blue' is the REAL arena's, whose field is the "
+                        "same HUE as the foam floor it lies on and is "
+                        "separated only by being darker and less saturated "
+                        "(floor V~190, field V~90). Run 'blue' against the "
+                        "real pad and the mask swallows floor and pad "
+                        "together, so the pad stops being a region at all "
+                        "and nothing is detected. phase1_real.launch.py sets "
+                        "this; see docs/LANDING-SITES.md."),
+        DeclareLaunchArgument(
             "target_bases", default_value="1",
             description="How many landing sites to visit before returning to "
                         "the takeoff base. The takeoff base is not one of "
@@ -175,6 +187,7 @@ def generate_launch_description():
     # SIM VALUES. Retune against the real arena's light before flying it.
     blue_hsv_low = [95, 30, 50]
     yellow_hsv_low = [18, 30, 90]
+    field_mode = LaunchConfiguration("field_mode")
 
     # ── Detectors: one per camera, same algorithm, different geometry ───────
     # The forward ZED sees pads across the arena and has depth to place them
@@ -194,6 +207,7 @@ def generate_launch_description():
             "publish_debug": ParameterValue(debug_images, value_type=bool),
             "blue_hsv_low": blue_hsv_low,
             "yellow_hsv_low": yellow_hsv_low,
+            "field_mode": field_mode,
             "ground_z": ParameterValue(ground_z, value_type=float),
         }],
     )
@@ -217,6 +231,7 @@ def generate_launch_description():
             "publish_debug": ParameterValue(debug_images, value_type=bool),
             "blue_hsv_low": blue_hsv_low,
             "yellow_hsv_low": yellow_hsv_low,
+            "field_mode": field_mode,
             "ground_z": ParameterValue(ground_z, value_type=float),
         }],
     )
