@@ -152,6 +152,20 @@ def generate_launch_description():
                         "false to hold until /hydrone/mission/start is "
                         "called."),
         DeclareLaunchArgument(
+            "dry_run", default_value="false",
+            description="Rehearse the mission with NOTHING SENT TO THE FCU. "
+                        "The state machine, the map and the belly camera all "
+                        "run for real; a human carries the drone and is the "
+                        "actuator, following the >>> instructions the mission "
+                        "prints, and every transition still waits on the "
+                        "measured pose. In dry run the mission node never even "
+                        "creates its arm/mode/takeoff clients or its setpoint "
+                        "publisher. Set by phase1_dry.launch.py, which ALSO "
+                        "denies MAVROS's actuation plugins — this argument on "
+                        "its own leaves /mavros/cmd/arming callable by "
+                        "anything else in the graph, so it is not by itself a "
+                        "reason to hold the drone."),
+        DeclareLaunchArgument(
             "debug_images", default_value="true",
             description="Publish annotated detector views on "
                         "/hydrone/pads/<camera>/debug_image."),
@@ -232,6 +246,13 @@ def generate_launch_description():
             "blue_hsv_low": blue_hsv_low,
             "yellow_hsv_low": yellow_hsv_low,
             "field_mode": field_mode,
+            # dark_blue: this camera's answer becomes a WORLD POSITION, so it
+            # must not read a pad hanging off the edge of the frame. There are
+            # always two readings of a clipped pad -- the arc, whose sweep runs
+            # off the image but whose centre is right, and a compact cluster
+            # wholly inside the frame whose centre is 60-80 px biased -- and a
+            # high min_seen refuses both rather than take the biased one.
+            "min_seen": 0.85,
             "ground_z": ParameterValue(ground_z, value_type=float),
         }],
     )
@@ -265,6 +286,22 @@ def generate_launch_description():
             "blue_hsv_low": blue_hsv_low,
             "yellow_hsv_low": yellow_hsv_low,
             "field_mode": field_mode,
+            # dark_blue, and the mirror image of the forward camera's setting.
+            # At landing height the pad no longer fits in this camera's view --
+            # measured on belly footage from 2026-08-23, roughly a third of the
+            # frames with a pad in them show only part of it, and in some the
+            # centre is outside the image altogether. An arc of the circle plus
+            # the cross is enough to answer yes, and the fitted ellipse puts
+            # the centre where the pad's centre really is. This camera reports
+            # no position, so a centre outside the frame costs nothing.
+            "min_seen": 0.30,
+            # The drone's own landing legs, as x0,y0,x1,y1 fractions. A dark
+            # object with a bright edge on blue foam passes every test in the
+            # detector; one scored 0.95 in the footage. MEASURED OFF THAT
+            # FOOTAGE -- re-measure if the camera or the legs move, by watching
+            # /hydrone/pads/down/debug_image on the ground with rotors stopped.
+            "ignore_regions": [0.75, 0.0, 1.0, 0.22,
+                               0.0, 0.78, 0.16, 1.0],
         }],
     )
 
@@ -334,6 +371,8 @@ def generate_launch_description():
                 LaunchConfiguration("confirm_timeout_s"), value_type=float),
             "auto_start": ParameterValue(
                 LaunchConfiguration("auto_start"), value_type=bool),
+            "dry_run": ParameterValue(
+                LaunchConfiguration("dry_run"), value_type=bool),
             # Confirmation comes off the belly camera's own topic. The mission
             # reads only `confidence` from it; there is no position to read.
             "detections_topic": DOWN_DETECTIONS,

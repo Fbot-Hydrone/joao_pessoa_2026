@@ -147,7 +147,7 @@ class PadDetectorNode(Node):
         self.declare_parameter("field_mode", "blue")
         self.declare_parameter("yellow_hsv_low", [18, 110, 90])
         self.declare_parameter("yellow_hsv_high", [38, 255, 255])
-        # dark_blue knobs. These are contrasts and sizes, not colours.
+        # dark_blue knobs. These are contrasts, sizes and counts, not colours.
         # mark_delta is the one to reach for first if the arena's light changes
         # and the pad goes quiet: lower it until the markings come back in
         # /hydrone/pads/<camera>/debug_image, no further.
@@ -156,8 +156,21 @@ class PadDetectorNode(Node):
         # How far real paint has to clear mark_delta, as a multiple of it.
         # Raise if stains and mat seams start being reported; lower if a real
         # pad is being thrown out at range.
-        self.declare_parameter("mark_contrast_mult", 2.5)
-        self.declare_parameter("real_min_radius_px", 24.0)
+        self.declare_parameter("mark_contrast_mult", 1.5)
+        self.declare_parameter("min_axis_px", 18.0)
+        # THE ONE THAT DIFFERS BETWEEN THE TWO CAMERAS. How much of the polar
+        # sweep has to stay inside the image. The belly camera at landing
+        # height sees a pad whose centre is off-frame and needs this low; the
+        # forward camera, whose answer becomes a world position, should never
+        # be reading a fragment at the frame edge and wants it high.
+        self.declare_parameter("min_seen", 0.30)
+        # Parts of the frame the drone itself occupies, as x0,y0,x1,y1
+        # fractions, repeated. The belly camera sees its own landing legs, and
+        # a dark object with a bright edge on blue foam passes every test the
+        # detector has -- one scored 0.95. Nothing in a single frame separates
+        # them, so they are excluded by position. MEASURE THESE ON THE ACTUAL
+        # AIRFRAME; the defaults are empty.
+        self.declare_parameter("ignore_regions", [0.0])
         self.declare_parameter("min_area_px", 150.0)
         self.declare_parameter("min_confidence", 0.50)
 
@@ -172,6 +185,12 @@ class PadDetectorNode(Node):
         rate = float(p("max_rate_hz"))
         self.min_period_ns = int(1e9 / rate) if rate > 0.0 else 0
 
+        # A ROS double array cannot be declared empty, so the default is a
+        # single 0.0 and anything shorter than one rectangle means "none".
+        ignore = [float(v) for v in p("ignore_regions")]
+        if len(ignore) < 4:
+            ignore = []
+
         self.detector = PadDetector(
             blue_hsv_low=tuple(int(v) for v in p("blue_hsv_low")),
             blue_hsv_high=tuple(int(v) for v in p("blue_hsv_high")),
@@ -179,7 +198,9 @@ class PadDetectorNode(Node):
             mark_delta=float(p("mark_delta")),
             mark_window_frac=float(p("mark_window_frac")),
             mark_contrast_mult=float(p("mark_contrast_mult")),
-            real_min_radius_px=float(p("real_min_radius_px")),
+            min_axis_px=float(p("min_axis_px")),
+            min_seen=float(p("min_seen")),
+            ignore_regions=ignore,
             yellow_hsv_low=tuple(int(v) for v in p("yellow_hsv_low")),
             yellow_hsv_high=tuple(int(v) for v in p("yellow_hsv_high")),
             min_area_px=float(p("min_area_px")),

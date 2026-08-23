@@ -208,10 +208,9 @@ behaviour rather than a surprise.
 
 ### The real arena: `field_mode="dark_blue"`
 
-The real pad is **not the simulated pad recoloured**, and the first version of
-this mode — an HSV band cut for a "dark blue" field — never detected anything.
-Why is worth writing down, because it is the same trap for anyone who retunes
-it next.
+The real pad is **not the simulated pad recoloured**, and it is not found by
+colour at all. Two earlier attempts were, and both silently detected nothing;
+why is worth keeping, because it is the same trap for whoever retunes this next.
 
 Measured off the arena photographs and off the ZED's own frames, 2026-08-22:
 
@@ -221,152 +220,188 @@ Measured off the arena photographs and off the ZED's own frames, 2026-08-22:
 | floor, ZED | 103–105 | 220 | 190 |
 | pad field, phone | 107 | 104 | 158 |
 | pad field, ZED | 101 | 172 | 146 |
-| markings, phone | 25 | 218 | 254 |
 | **markings, ZED** | **58** | **44** | **196** |
 
-Two things follow, and both kill a fixed band.
+**The markings are not yellow to the ZED.** Its auto white balance throws a
+heavy green cast and its exposure washes the paint out: hue 58 is *green*,
+saturation 44 is almost none. The yellow band is H 18–38, S ≥ 110, and against
+a real ZED frame it admits **zero pixels**. Every structural check reaches the
+image only through that mask, so the cascade never ran — the detector returned
+nothing and reported nothing. Pinned by
+`test_sim_mode_finds_no_yellow_at_all_in_zed_colours`.
 
-**The markings are not yellow to the ZED.** Under the arena's lights its auto
-white balance throws a heavy green cast and its exposure washes the paint out:
-hue 58 is *green*, saturation 44 is almost none. The yellow band is H 18–38,
-S ≥ 110, and against a real ZED frame it admits **zero pixels**. Every
-structural check reaches the image only through the yellow mask, so the cascade
-never ran at all — the detector returned nothing and reported nothing. Pinned
-by `test_sim_mode_finds_no_yellow_at_all_in_zed_colours`.
+**Nor is the floor separable by colour.** Raw ZED capture (2026-08-23) has a
+global *blue* cast, and in it the white wall reads more blue-dominant than the
+far mat (opponent −39 against −28). The previous version gated on "markings
+must lie on blue-dominant floor"; measured across 44 labelled frames that gate
+selected **80–94% of every frame**, walls included. It has been removed rather
+than retuned.
 
-**The field moves further than any band is wide.** Floor saturation is 142 in
-one camera and 220 in the other. A band cut to separate floor from field in one
-frame merges them in the other — the earlier `dark_hsv_*` capped saturation at
-168, calibrated on the ZED where the floor is 220, and swallowed floor and pad
-together on the phone photograph where the floor is 142.
+#### What it does instead
 
-So `dark_blue` uses **no hue and no absolute threshold anywhere**:
+Every candidate is an **ellipse**, verified by one polar sweep in that
+ellipse's own normalised coordinates.
 
-1. **Markings, by contrast.** Take the opponent channel `yb = (R+G)/2 − B` and
-   subtract its own local mean over a large box. Blue floor and blue field both
-   sit below their neighbourhood; paint sits above it. A colour *difference*
-   against a *local* reference, so a white-balance shift, an exposure change,
-   and the slow horizontal banding the ZED shows under these lights all move
-   signal and reference together and cancel.
-2. **The mat.** Blue-dominant pixels, holes filled, then eroded. Markings only
-   count inside it. The erosion is not cosmetic: the floor/wall boundary is
-   neither blue nor paint, so it fires the contrast test along its whole length
-   and, left in, bridges every real marking into one useless cluster.
-3. **Footprint.** Cluster the marking pixels, take each cluster's convex hull.
-   The link distance should scale with the pad and the pad is what we are
-   looking for, so clustering runs at three link radii and the overlap
-   suppression settles it.
-4. Checks 2–6 then run **unchanged**.
-5. **Contrast, a second time.** `mark_delta` is deliberately low so faint
-   far-away paint still enters the mask; the last gate asks how far the
-   markings inside a surviving candidate actually cleared it. Real paint
-   clears it by a wide margin, a stain only just clears it. Measured across
-   the arena images: real pads 25–192, **every** false positive 9–13, so the
-   gate at 2.5 × `mark_delta` = 20 sits in a gap with a factor of two of
-   margin either side.
+1. **Markings, by contrast.** Opponent channel `yb = (R+G)/2 − B`, minus its
+   own local mean. A colour *difference* against a *local* reference, so white
+   balance, exposure and the ZED's rolling-shutter banding all move signal and
+   reference together and cancel.
+2. **Two hypothesis families**, because the pad is two different things at the
+   two ranges that matter:
+   - **ring fit** — the circle resolves as its own marking component; fitting
+     an ellipse to it puts the centre exactly on the pad. This is the belly
+     camera at landing height.
+   - **cluster fit** — border, ring and cross merge into one small patch (the
+     forward ZED across the arena). Coarser, but it still carries the
+     foreshortening a circular model throws away.
 
-Two consequences worth knowing:
+   A ring fit outranks a cluster fit over the same pad (`ring_bonus`), because
+   the winner is the position that gets projected into the world.
+3. **One verifier.** 72 rays to normalised radius 1.25:
+   - `ring_cov` — rays whose marking **reaches out** to the ring. Not "the ray
+     met marking somewhere": a cross has paint over the centre, so a plain
+     any-hit test returns 1.00 for two crossing bars, and that alone scored a
+     bare cross at 0.89.
+   - `arms` — angular lobes of marking between 0.25 and 0.55 of the **median**
+     outer radius. Measuring against the median rather than each ray's own
+     radius is what stops a square border, whose radius swings by √2 between
+     edge and corner, reporting eight arms for a four-armed cross.
+   - `seen` — how much of the sweep stayed inside the image. **Per camera.**
+4. **The field is darker than the mat.** median(inside) − median(outside) over
+   non-marking pixels; negative for a pad under any illumination, and two
+   medians from the same frame so a colour cast cancels. Every labelled pad
+   −25..−2; the bright window lattice that was outranking pads, +7..+95.
+5. **Strength** — how far the markings actually cleared `mark_delta`.
+6. **Airframe** — `ignore_regions` blanks the parts of the frame the drone
+   occupies. See below.
 
-- The ROI is **scaled** toward its centroid (`roi_shrink`, 0.80) rather than
-  eroded. The pad's square border is inside the hull by construction, and an
-  isotropic erosion deep enough to clear it along the square's edges still
-  leaves its corners a factor √2 further out — measured, 23 px of erosion on a
-  297 px hull left paint at r=169 and the arms vanished.
-- Checks 5–6 **gate outright** here, rather than only above
-  `structure_radius_px`. The mask is deliberately permissive — any local
-  contrast, not one hue — so an unresolvable blob is indistinguishable from a
-  smudge, and letting it through on concentricity alone is how a scuff becomes
-  a landing site.
+The square border needs no special handling any more: sweeping to 1.25 and
+referencing the arms to the median outer radius covers both the case where the
+outermost marking is the border and the case where it is the circle. The ROI
+shrink, the rect-fill gate and the mat gate are all gone.
 
-#### Measured on the arena images
+#### Measured, on 44 labelled frames from the arena
 
-Eight images: four phone photographs of the pads and four grabs of
-`/hydrone/pads/forward/debug_image`. The shipped detector found **0 pads in all
-eight**.
+Two ZED clips and two belly-camera clips (2026-08-23), hand-labelled. Scored on
+whether the **best-ranked** detection is the pad, which is what the mission
+acts on:
 
-`dark_blue` as it now stands reports **every pad and nothing else** in all
-eight, at confidence 0.77–0.92 — including both pads in each of the two frames
-that show two. The far pad in `22.12.44`, about 170 px across at the other end
-of the arena, is found at 0.77.
+| | top-1 | mis-ranked | missed | on empty frames |
+|---|---|---|---|---|
+| shipped before | 8/42 | 4 | 30 | 0 |
+| **this version** | **29/42** | **0** | 13 | 1 |
 
-Cost, on a desktop CPU: **5 ms/frame at 672×376, 15 ms at 1280×720**, against
-1.2 ms and 6.5 ms for `blue`. The gap is the price of the big-window filtering;
-it is not the difference between 20 Hz and not, but `max_rate_hz` is there if
-the Jetson disagrees.
+Centre error median **11.1 px**, p90 **30.9 px** (was p90 43.8 on the few it
+found). Per camera:
 
-A ninth input, a 3226-frame phone video walking the arena at eye level, was
-held back from the design and used only to check it afterwards. Of 216 sampled
-frames the pad is reported in 66 — it is out of shot or cut off by the frame
-edge in most of the rest — and **five** detections reach 0.80. Two are the
-pad. The other three are the two confusers below.
+| clip | top-1 | mis-ranked | centre err median |
+|---|---|---|---|
+| ZED clean | 6/11 | 0 | 18.8 px |
+| ZED stained | 7/13 | 0 | 19.0 px |
+| belly clean | 7/7 | 0 | 0.5 px |
+| belly stained | 9/11 | 0 | 1.7 px |
 
-Misses and confusers:
+The belly camera is **16/18 with nothing mis-ranked**, which is the number that
+matters for confirmation. The forward camera is 13/24; what it misses is the
+pad seen almost edge-on at the far wall, 9:1 foreshortened and a few thousand
+pixels in area.
 
-- A pad seen edge-on and clipped by the frame border (aspect > 4.5) is not
-  found. Safe, and it clears as the drone turns toward it.
-- **A solar panel leaning against the arena wall** is blue, rectangular and
-  ruled with a pale grid. At long range it satisfied every check and outranked
-  a real pad. The contrast gate happens to drop it in these frames, which is
-  luck rather than a discriminator: it cannot be told from a pad by appearance,
-  and what separates them is that the panel is *vertical* while pads lie on the
-  *floor*. The real fix is a ground-plane gate in `pad_detector_node` on the
-  back-projected point. **Not implemented — do not assume the panel stays
-  rejected from another angle.**
-- **The safety netting at the mat's edge** reads as a vertical row of bright
-  dots on blue, and a hull round six of them passes every structural check —
-  0.84 in the video. `floor_erode_frac` is meant to pull the search away from
-  the mat's boundary and at this resolution it only pulls back 10 px, which is
-  not enough.
-- **The drone itself, sitting on the mat**, scores 0.90. Of no consequence to
-  the forward camera — it cannot see itself — but worth knowing before pointing
-  this at a frame with a second vehicle in it.
+Cost, desktop CPU: **4.6 ms/frame at 672×376, 12.2 ms at 960×544.**
 
-Those last two are *small*: hull radius 25–30 px, against 72–421 px for every
-real pad in all nine inputs. Raising `real_min_radius_px` from 24 to **40**
-removes all three high-confidence false positives and changes **nothing** on
-any of the eight still images. It is not the default, because 40 px is an
-absolute size and the far pad in `22.12.44` would sit at r≈53 if the ZED is
-running at 672×376 — too little margin to spend blind. Raise it once real
-telemetry says how far away pads are actually being picked up, and note that
-the two cameras can carry different values: the belly camera only ever
-validates a pad from directly above, where it is large.
+> The belly-camera centre errors are partly circular: those labels were
+> produced by fitting ellipses to the rings and confirming the fits by eye,
+> because reading coordinates off a contact sheet by hand put four of them out
+> by ~130 px. Recall and mis-ranking counts there are honest; the sub-pixel
+> centre figures are not independent evidence. The ZED labels *were* read
+> independently, so their 12–21 px is a real number (and is inside the ±20 px
+> the hand-reading is good to).
 
-None of these three would cause a landing on the wrong thing — the forward
-camera identifies and the belly camera validates
-([`PHASE1-MISSION.md`](PHASE1-MISSION.md) §5), so a false lead costs an
-excursion, not a crash.
+#### The two cameras are configured differently
+
+One parameter, opposite ends:
+
+```
+forward ZED   min_seen: 0.85     its answer becomes a WORLD POSITION
+belly camera  min_seen: 0.30     it only ever answers yes/no
+```
+
+At landing height roughly a third of the belly frames showing a pad show only
+part of one, sometimes with the centre outside the image. An arc of the circle
+plus the cross is enough, and the fitted ellipse puts the centre where the
+pad's centre really is.
+
+A clipped pad always offers *two* readings — the arc, whose sweep runs off the
+image but whose centre is right, and a compact cluster wholly inside the frame
+whose centre is 60–80 px biased. `min_seen` chooses. The belly camera wants the
+arc; the forward camera would rather have neither than the biased one.
+
+**Cross alone is deliberately not enough.** Below the height where any of the
+circle is in shot, all that is left is two crossing bars, and a mat seam
+crossing another seam forges that. The belly camera's answer gates a landing,
+so it says no. Cost, measured: about one frame in twenty.
+
+#### The airframe
+
+The belly camera sees its own landing legs. A dark object with a bright edge on
+blue foam passes every test in the detector — one scored **0.95**. Nothing in a
+single frame separates them, so they go by position:
+
+```
+ignore_regions: [0.75, 0.0, 1.0, 0.22,     x0,y0,x1,y1 fractions
+                 0.0, 0.78, 0.16, 1.0]
+```
+
+**These were measured off the 2026-08-23 belly footage. Re-measure them if the
+camera or the legs move** — watch `/hydrone/pads/down/debug_image` on the
+ground with the rotors stopped. Without the mask that camera goes from 0
+mis-ranked and 1 ghost to 1 mis-ranked and 3 ghosts.
 
 #### Retuning it
 
-The knobs are ROS parameters on `pad_detector_node`, and none of them is a
-colour:
+ROS parameters on `pad_detector_node`, none of them a colour:
 
 ```
 mark_delta          8.0    how far above its local mean the opponent channel
                            must rise to count as paint
-mark_window_frac    0.06   size of that local neighbourhood, as a fraction of
-                           the frame's longer side
-mark_contrast_mult  2.5    how far REAL paint must clear mark_delta, as a
-                           multiple of it
-real_min_radius_px  24.0   smallest cluster still treated as a candidate
+mark_window_frac    0.06   size of that neighbourhood, as a fraction of the
+                           frame's longer side
+mark_contrast_mult  1.5    how far REAL paint must clear mark_delta
+min_axis_px        18.0    smallest ellipse worth considering
+min_seen            0.30   fraction of the sweep that must stay in frame
+ignore_regions        []   airframe, as x0,y0,x1,y1 fractions
 ```
 
 Watch `/hydrone/pads/<camera>/debug_image`. If the pad goes quiet, lower
 `mark_delta` until the markings come back — no further. If stains and mat seams
-start being reported as pads, raise `mark_contrast_mult`; every detection
-carries its measured contrast in `scores["contrast"]`, so the two numbers can
-be read off the same frame rather than guessed at.
+start being reported, raise `mark_contrast_mult`; every detection carries its
+measured contrast in `scores["contrast"]`, so both numbers can be read off the
+same frame rather than guessed.
 
-`blue_hsv_*` and `yellow_hsv_*` do **not** apply in this mode. Retuning them
-will not move it.
+`mark_contrast_mult` was **2.5** in the previous version, calibrated on
+photographs of a *monitor* showing the debug stream, which exaggerated marking
+contrast to 25–192. On raw capture a real pad measures **19**, so the gate sat
+one unit above the signal and cost one clip 64 of its 65 frames. Calibrate on
+raw frames.
 
-> **Caveat, stated plainly.** Every input above is a phone camera: four
-> photographs of the pads, four of a monitor showing the debug stream, and one
-> video. The method was built to be calibration-free precisely because of
-> that, and it holds across two cameras with very different white balance
-> without a single per-image constant — but it has not been checked against the
-> raw ZED stream. Record a bag or dump a few frames before trusting the
-> numbers.
+`blue_hsv_*` and `yellow_hsv_*` do **not** apply in this mode.
+
+#### Still open
+
+- **The forward camera cannot tell a pad from wall clutter by appearance.**
+  Measured: a solar panel leaning on the wall and a cable lying in a loop on
+  the mat produce ring coverage, arm counts, residuals and contrast
+  *statistically indistinguishable* from a real pad at that range. The
+  darker-field gate removes the bright ones; the rest cannot be separated
+  without geometry. The forward ZED already has depth, and a **ground-plane
+  gate on the back-projected point in `pad_detector_node`** would remove the
+  whole class. **NOT IMPLEMENTED** — this is the single highest-value thing
+  left in the detector chain.
+- The pad seen edge-on at the far wall (aspect 9:1, a few thousand pixels) is
+  missed. It clears as the drone turns toward it.
+- Raising the caller's threshold to 0.70 trades recall for accuracy as it
+  should: 24/42, still nothing mis-ranked, centre error median 8.1 px. That is
+  deliberate — see `ecc_penalty`, which pays for foreshortening in confidence
+  so a slant sighting arrives as a lead rather than as a fix.
 
 ### Retuning the simulator: `field_mode="blue"`
 
@@ -807,7 +842,7 @@ actually flip?" is the question that run turned on.
 
 ## 11. Tests
 
-174 tests across `hydrone_vision`, `hydrone_nav` and `hydrone_mission`, plus 31
+186 tests across `hydrone_vision`, `hydrone_nav` and `hydrone_mission`, plus 32
 in `hydrone_bringup`. None need UE5:
 
 ```bash
@@ -818,7 +853,7 @@ docker run --rm -v $PWD:/repo -w /repo <image> bash -c \
 
 | file | what it covers |
 |---|---|
-| `hydrone_vision/test/test_pad_detector.py` (68) | the detector against synthetic renders: size sweep, rotation, oblique views, noise/exposure/blur, and every negative in §3. The `dark_blue` half renders the real pad **twice** — in the phone camera's colours and in the ZED's measured ones — and pins white-balance shifts, rolling-shutter banding and a vignette |
+| `hydrone_vision/test/test_pad_detector.py` (78) | the detector against synthetic renders: size sweep, rotation, oblique views, noise/exposure/blur, and every negative in §3. The `dark_blue` half renders the real pad **twice** — in the phone camera's colours and in the ZED's measured ones — and pins white-balance shifts, rolling-shutter banding, a vignette, the partly-visible pad the belly camera sees at landing height, the cross-only view it must refuse, the airframe mask, and that the centre comes from the ring fit |
 | `hydrone_vision/test/test_pad_projection.py` (17) | the frame algebra, by hand-checkable poses; and the real-vs-sim mount TF |
 | `hydrone_nav/test/test_pad_pipeline.py` (6) | the real nodes wired together — topic names, QoS compatibility, TF lookup, fused map position, `visited`, elevated-pad height. Its `FakeSim` publishes `/mavros/state` armed, because with `require_armed` a stack that never arms maps nothing |
 | `hydrone_nav/test/test_takeoff_base.py` (24) | the pre-arm gate and its latch; registering the takeoff base, claiming an existing entry, the wider claim radius; never pruned; height not rewritten by a fly-over; the flag and the marker colour; every rejection gate naming itself in the log |
