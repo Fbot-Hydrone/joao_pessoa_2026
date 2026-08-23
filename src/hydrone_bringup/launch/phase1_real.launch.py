@@ -85,9 +85,11 @@ def generate_launch_description():
     # ONE exception to "declares nothing", and it is not a mission setting:
     # field_mode is a fact about the PAD IN FRONT OF THE CAMERA, which is the
     # one thing a real-hardware wrapper knows and phase1.launch.py cannot.
-    # The real arena's pad field is the same hue as the foam floor and differs
-    # only in brightness; the simulator's is a bright saturated blue on a
-    # different-coloured floor. Running the wrong one detects NOTHING.
+    # The real arena's pad lies on foam of its OWN hue and the ZED renders its
+    # paint green and washed out, so it is found by local contrast; the
+    # simulator's is a bright saturated blue on a different-coloured floor and
+    # is found by hue. Running the wrong one detects NOTHING, and says nothing
+    # about why.
     #
     # It is forwarded WITHOUT being declared here, so `field_mode:=blue` on
     # this file's command line still wins — which is what you want when

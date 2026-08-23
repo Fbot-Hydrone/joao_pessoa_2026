@@ -348,15 +348,21 @@ def test_arriving_home_lands_without_confirming(node):
     assert node.state == node.LAND
 
 
-def test_a_candidate_we_cannot_reach_is_blacklisted(node):
+def test_a_long_leg_is_not_given_up_on(node):
+    """No travel timeout: a base the ZED found is flown to until it arrives.
+
+    A 60 s budget used to blacklist pad 4 while the vehicle was 0.70 m away and
+    still closing, so CONFIRM was never entered and the belly camera never got
+    to vote on a base that was right there.
+    """
     node.target_id = 4
     node.landing_for = node.LAND_PAD
     node.setpoint = [20.0, 0.0, 1.0, 0.0]
     set_pose(node, 0.0, 0.0)
-    enter(node, node.TRAVEL, age_s=999.0)
+    enter(node, node.TRAVEL, age_s=99999.0)
     node._do_travel()
-    assert 4 in node.blacklist
-    assert node.state == node.SETTLE
+    assert node.blacklist == set()
+    assert node.state == node.TRAVEL
 
 
 def test_confirmation_needs_several_looks(node):
@@ -437,8 +443,9 @@ def test_the_fallback_hops_once_and_stops(node):
     assert node.landing_for == node.LAND_FINAL
 
     # ... the hop: takeoff completes and goes straight back down, in place.
-    set_pose(node, 1.7, -0.4, z=1.0)
+    set_pose(node, 1.7, -0.4, z=0.0)
     enter(node, node.TAKEOFF)
+    set_pose(node, 1.7, -0.4, z=1.0)      # climbed takeoff_alt
     node._do_takeoff()
     assert node.state == node.LAND
     assert not node._land_after_takeoff
@@ -449,8 +456,9 @@ def test_the_fallback_hops_once_and_stops(node):
 
 
 def test_an_ordinary_takeoff_searches_instead_of_landing(node):
-    set_pose(node, 0.0, 0.0, z=1.0)
+    set_pose(node, 0.0, 0.0, z=0.0)
     enter(node, node.TAKEOFF)
+    set_pose(node, 0.0, 0.0, z=1.0)       # climbed takeoff_alt
     node._do_takeoff()
     assert node.state == node.SELECT
     assert node.rotations_done == 0
@@ -458,10 +466,32 @@ def test_an_ordinary_takeoff_searches_instead_of_landing(node):
 
 def test_takeoff_holds_the_heading_it_climbed_with(node):
     """Commanding yaw 0 would spin the vehicle the moment the stream starts."""
-    set_pose(node, 0.0, 0.0, z=1.0, yaw=math.radians(140.0))
+    set_pose(node, 0.0, 0.0, z=0.0, yaw=math.radians(140.0))
     enter(node, node.TAKEOFF)
+    set_pose(node, 0.0, 0.0, z=1.0, yaw=math.radians(140.0))
     node._do_takeoff()
     assert math.degrees(node.setpoint[3]) == pytest.approx(140.0, abs=1e-3)
+
+
+def test_a_climb_from_a_lower_pad_still_counts_as_airborne(node):
+    """takeoff_alt is a height above what we are standing on; pose.z is measured
+    from the FIRST takeoff plane. Comparing them directly hung the mission on
+    2026-08-23: after landing on a pad 0.76 m below the start plane, a perfect
+    1.0 m climb reached z=0.24 and the old test wanted 0.85, so TAKEOFF re-sent
+    a command ArduPilot rejected because the vehicle was already flying."""
+    set_pose(node, 0.0, 0.0, z=-0.76)
+    enter(node, node.TAKEOFF)
+    set_pose(node, 0.0, 0.0, z=-0.76 + 1.0)
+    node._do_takeoff()
+    assert node.state == node.SELECT
+
+
+def test_a_takeoff_that_did_not_lift_us_stays_in_takeoff(node):
+    set_pose(node, 0.0, 0.0, z=-0.76)
+    enter(node, node.TAKEOFF)
+    set_pose(node, 0.0, 0.0, z=-0.70)
+    node._do_takeoff()
+    assert node.state == node.TAKEOFF
 
 
 # ── Between landings ─────────────────────────────────────────────────────────

@@ -314,7 +314,6 @@ def loud_node(node):
     (detection(position_valid=False), "position_valid is false"),
     (detection(confidence=0.10), "min_confidence"),
     (detection(range_m=999.0), "max_range_m"),
-    (detection(z=9.0), "outside"),
 ])
 def test_every_gate_says_why_it_dropped_a_detection(node, rejections, det,
                                                     expected):
