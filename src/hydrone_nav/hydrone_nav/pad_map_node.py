@@ -28,12 +28,29 @@ right ordering, because projection error grows with range in both routes
 
 Heights
 -------
+Pads sit at WHATEVER HEIGHT THEY SIT AT. There is no gate on a detection's z:
+the competition's bases are at different elevations, and the drone may take off
+from one of them, which puts every other pad at a negative z in the FCU's local
+frame. Rejecting on height threw those away — the detector saw them and the map
+refused them. A bad depth sample now costs a provisional entry that fails to
+reach min_observations and is pruned, which is what that gate already does.
+
 A detection's z comes from a flat-floor assumption, so every pad initially maps
 at floor level. The arena has an elevated base (~0.5 m), and landing on it needs
 its real height. The fix costs nothing extra: whenever the drone hovers within
 `overhead_radius` of a mapped pad, the downward rangefinder is measuring the top
 of THAT pad, so `height = drone_z - range` and the entry is corrected in place.
 Until then `height_measured` stays false and the mission descends cautiously.
+
+Motion
+------
+Detections are mapped ONLY while the vehicle is holding still. A projection is
+composed with the vehicle pose, and while translating or slewing that pose is
+stale by however long the estimator lags, so the pad lands in the map metres
+from where it really is — the "strange detections while moving" that then cost
+the search a leg to fly out and rule out. The search already works in
+rotate/settle/look steps, so the still moments are the ones worth believing and
+nothing is lost by ignoring the rest.
 
 Pruning
 -------
@@ -73,7 +90,7 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, TwistStamped
 from sensor_msgs.msg import Range
 from std_msgs.msg import ColorRGBA
 from visualization_msgs.msg import Marker, MarkerArray
@@ -147,9 +164,6 @@ class PadMapNode(Node):
         self.declare_parameter("min_confidence", 0.50)
         # Beyond this range a projection is too uncertain to seed the map with.
         self.declare_parameter("max_range_m", 30.0)
-        # A "pad" floating 2 m up is a detector artefact, not a landing site.
-        self.declare_parameter("max_pad_height", 2.0)
-        self.declare_parameter("min_pad_height", -0.5)
         self.declare_parameter("min_observations", 3)
         self.declare_parameter("provisional_ttl_s", 20.0)
         # How close overhead the drone must be for the rangefinder to be
@@ -165,6 +179,19 @@ class PadMapNode(Node):
         # docstring.
         self.declare_parameter("require_armed", True)
         self.declare_parameter("state_topic", "/mavros/state")
+        # Map nothing while the vehicle is MOVING. A projection is only as good
+        # as the pose it is composed with, and while translating or slewing that
+        # pose is stale by however long the estimator lags: the pad lands in the
+        # map metres from where it is, and those phantoms are what the search
+        # then flies out to rule out. Holding still costs nothing here — the
+        # search is already rotate, settle, look.
+        #
+        # The EKF's own velocity, not a pose difference: at 30 Hz a centimetre
+        # of pose noise differentiates to 0.3 m/s and would gate out everything.
+        self.declare_parameter("velocity_topic",
+                               "/mavros/local_position/velocity_local")
+        self.declare_parameter("max_map_speed", 0.15)
+        self.declare_parameter("max_map_yaw_rate_deg", 10.0)
         # How far from the registered takeoff base a detection is still THAT
         # base. Wider than merge_radius on purpose: the start base is seen from
         # the air at an angle, where the projection error is largest, and a
@@ -180,14 +207,14 @@ class PadMapNode(Node):
         self.merge_radius = float(p("merge_radius"))
         self.min_conf = float(p("min_confidence"))
         self.max_range = float(p("max_range_m"))
-        self.max_height = float(p("max_pad_height"))
-        self.min_height = float(p("min_pad_height"))
         self.min_obs = int(p("min_observations"))
         self.ttl = float(p("provisional_ttl_s"))
         self.overhead_radius = float(p("overhead_radius"))
         self.world_frame = p("world_frame")
         self.require_armed = bool(p("require_armed"))
         self.takeoff_base_radius = float(p("takeoff_base_radius"))
+        self.max_map_speed = float(p("max_map_speed"))
+        self.max_map_yaw_rate = math.radians(float(p("max_map_yaw_rate_deg")))
         self.reject_log_period = float(p("reject_log_period_s"))
 
         # ── State ───────────────────────────────────────────────────────────
@@ -200,6 +227,10 @@ class PadMapNode(Node):
         # on, and detections must keep flowing then.
         self.armed_once = not self.require_armed
         self.takeoff_base_id: int | None = None
+        # None until the first velocity message. The gate FAILS OPEN while it
+        # is None: a topic that never arrives must not silently empty the map.
+        self.twist: TwistStamped | None = None
+        self._warned_no_twist = False
         # (camera, gate) -> when that combination last logged. See _reject.
         self._last_reject: dict[tuple[str, str], float] = {}
 
@@ -219,6 +250,8 @@ class PadMapNode(Node):
                                  self._cb_pose, sensor_qos)
         self.create_subscription(Range, p("range_topic"),
                                  self._cb_range, sensor_qos)
+        self.create_subscription(TwistStamped, p("velocity_topic"),
+                                 self._cb_twist, sensor_qos)
         # MAVROS publishes /mavros/state RELIABLE, unlike the sensor buses.
         self.create_subscription(State, p("state_topic"), self._cb_state, 10)
 
@@ -249,6 +282,37 @@ class PadMapNode(Node):
             self.get_logger().info(
                 "vehicle armed — accepting pad detections from now on.")
 
+    def _cb_twist(self, msg: TwistStamped):
+        self.twist = msg
+
+    def _moving(self) -> tuple[bool, str]:
+        """Is the vehicle translating or slewing? (moving, why).
+
+        Fails OPEN — reports "not moving" — until a velocity message has been
+        seen at all, so a missing topic degrades to the old behaviour instead of
+        silently refusing to map anything.
+        """
+        if self.twist is None:
+            if not self._warned_no_twist:
+                self._warned_no_twist = True
+                # info, not warn: in this node a warn means a detection was
+                # DROPPED, and this is the opposite — the gate standing aside.
+                self.get_logger().info(
+                    "no vehicle velocity yet; mapping detections regardless of "
+                    "motion until one arrives.")
+            return False, ""
+        v = self.twist.twist.linear
+        speed = math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z)
+        yaw_rate = abs(self.twist.twist.angular.z)
+        if speed > self.max_map_speed:
+            return True, (f"vehicle is translating at {speed:.2f} m/s > "
+                          f"max_map_speed {self.max_map_speed:.2f}")
+        if yaw_rate > self.max_map_yaw_rate:
+            return True, (f"vehicle is slewing at {math.degrees(yaw_rate):.0f} "
+                          f"deg/s > max_map_yaw_rate_deg "
+                          f"{math.degrees(self.max_map_yaw_rate):.0f}")
+        return False, ""
+
     def _cb_range(self, msg: Range):
         """Cache the last plausible downward range reading."""
         if msg.min_range <= msg.range <= msg.max_range and math.isfinite(msg.range):
@@ -269,6 +333,13 @@ class PadMapNode(Node):
         # empty, and from the outside that is indistinguishable from "the
         # detector never saw it". Say which gate closed, throttled so a
         # persistent false positive cannot flood the log.
+        moving, why = self._moving()
+        if moving:
+            # Not a bad detection — a bad MOMENT to believe one. The pixel is
+            # probably a real pad; the pose it would be projected through is
+            # the part that is wrong.
+            self._reject(msg, "motion", why)
+            return
         if not msg.position_valid:
             # The pixel could not be placed in the world: no camera_info, no
             # vehicle pose, a stale pose, or a ray that never meets the ground
@@ -288,14 +359,6 @@ class PadMapNode(Node):
                          f"range {msg.range_m:.1f} m > max_range_m "
                          f"{self.max_range:.1f} m")
             return
-        if not (self.min_height <= msg.position.z <= self.max_height):
-            # Projected well off the floor: a reflection, or a bad depth sample.
-            self._reject(msg, "height",
-                         f"projected z {msg.position.z:.2f} m outside "
-                         f"[{self.min_height:.2f}, {self.max_height:.2f}] — a "
-                         "reflection, or a bad depth sample")
-            return
-
         # Weight close, confident looks far above distant ones — projection
         # error grows with range on both projection routes.
         weight = float(msg.confidence) / max(float(msg.range_m), 1.0)
@@ -453,8 +516,6 @@ class PadMapNode(Node):
             return
 
         height = pz - self.range_m
-        if not (self.min_height <= height <= self.max_height):
-            return
         # Only meaningful while genuinely airborne above it; on the ground the
         # rangefinder reads its own minimum and the subtraction is noise.
         if self.range_m < 0.25:

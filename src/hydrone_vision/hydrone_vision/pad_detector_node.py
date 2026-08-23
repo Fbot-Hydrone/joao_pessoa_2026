@@ -6,24 +6,38 @@ turns each hit into a world-frame landing-pad observation.
 One node instance per camera. The mission runs two:
 
   forward  /zed/zed_node/rgb/image_rect_color  + depth   sees pads AHEAD, far off
-  down     /down_cam/image_raw                 no depth  sees the pad BELOW, for
-                                                          the final alignment
+  down     /down_cam/image_raw                 no depth  sees the pad BELOW, and
+                                                          only says THAT it does
 
-Both publish the same message on the same topic, tagged with `camera`, so
-pad_map_node fuses them without caring which one saw what.
+Both publish the same message type, tagged with `camera`. Whether they share a
+topic is the launch file's call: phase1 gives the down camera its own, so that
+only positions the map should trust ever reach pad_map_node.
 
 Pixel -> world
 --------------
-Two routes, in order of preference:
+Three routes, in order of preference:
 
   DEPTH         if a registered depth image is available and finite at the pad
                 centroid, back-project the pixel with the intrinsics. Metric and
                 assumption-free. This is what the forward ZED normally uses.
 
   GROUND PLANE  otherwise, cast the pixel's ray and intersect it with a
-                horizontal plane at `ground_z`. The arena floor is flat, so for
-                the down camera — pointing nearly straight at it — this is
-                accurate to centimetres and needs no depth sensor at all.
+                horizontal plane at `ground_z`. Accurate only where the floor
+                really is at `ground_z`.
+
+  NONE          `project_position: False` — publish the pixel, the radius and
+                the confidence, and set `position_valid` false. The detection
+                still says a pad is in view; it makes no claim about where.
+
+That last route is not a degraded mode, it is the right one for a camera whose
+job is confirmation. The ground-plane route assumes a FLAT FLOOR AT `ground_z`,
+and the competition's bases are RAISED: a ray cast from overhead crosses the
+assumed plane beyond the pad it actually hit. Worse, pad_map_node weights every
+projection by `confidence / max(range, 1)`, so one belly-camera look from 2 m
+outweighs a ZED look from 10 m four to one, and a confirmation hover delivers
+hundreds of them — a wrong position arriving with the heaviest vote in the map,
+overwriting the ZED estimate the drone flew there on. The ZED is the position
+estimate. The belly camera is a yes/no.
 
 Which world frame
 -----------------
@@ -106,6 +120,12 @@ class PadDetectorNode(Node):
         # altitude to. Elevated pads sit above it; pad_map_node measures their
         # real height with the rangefinder rather than guessing it here.
         self.declare_parameter("ground_z", 0.0)
+        # False = this camera reports WHAT it sees, never WHERE: no depth
+        # back-projection, no ground-plane cast, position_valid always false.
+        # It then needs neither camera_info nor the vehicle pose, so it goes on
+        # answering while the position estimate is bad — which is precisely when
+        # a confirmation is worth most. See the module docstring.
+        self.declare_parameter("project_position", True)
         self.declare_parameter("publish_debug", True)
         # 0 = process every frame. Set it to cap CPU when the camera outruns the
         # detector (the sim's 20 Hz is comfortably below that).
@@ -117,16 +137,27 @@ class PadDetectorNode(Node):
         # dialled in from a launch file / YAML without touching the algorithm.
         self.declare_parameter("blue_hsv_low", [95, 110, 50])
         self.declare_parameter("blue_hsv_high", [135, 255, 255])
-        # Which colour is the pad's FIELD -- the surface the ring and cross are
-        # drawn on. "blue" is BiguaSim's pad. "dark" is the real one, whose
-        # field is near-black and which sits ON a blue floor: with "blue" the
-        # detector locks onto the FLOOR and the pad becomes a hole in it.
+        # WHICH PAD is in front of the camera, which decides how it is found
+        # at all -- not a threshold. "blue" is BiguaSim's pad: a saturated blue
+        # field on brown ground, found by its colour. "dark_blue" is the real
+        # one, which lies on foam of its OWN hue and whose paint the ZED
+        # renders green and washed out; it is found by local contrast instead,
+        # and the HSV bands below do not apply to it at all.
         # docs/LANDING-SITES.md 3.
         self.declare_parameter("field_mode", "blue")
-        self.declare_parameter("dark_hsv_low", [0, 0, 0])
-        self.declare_parameter("dark_hsv_high", [179, 190, 105])
         self.declare_parameter("yellow_hsv_low", [18, 110, 90])
         self.declare_parameter("yellow_hsv_high", [38, 255, 255])
+        # dark_blue knobs. These are contrasts and sizes, not colours.
+        # mark_delta is the one to reach for first if the arena's light changes
+        # and the pad goes quiet: lower it until the markings come back in
+        # /hydrone/pads/<camera>/debug_image, no further.
+        self.declare_parameter("mark_delta", 8.0)
+        self.declare_parameter("mark_window_frac", 0.06)
+        # How far real paint has to clear mark_delta, as a multiple of it.
+        # Raise if stains and mat seams start being reported; lower if a real
+        # pad is being thrown out at range.
+        self.declare_parameter("mark_contrast_mult", 2.5)
+        self.declare_parameter("real_min_radius_px", 24.0)
         self.declare_parameter("min_area_px", 150.0)
         self.declare_parameter("min_confidence", 0.50)
 
@@ -135,6 +166,7 @@ class PadDetectorNode(Node):
         self.optical_frame = p("optical_frame")
         self.base_frame = p("base_frame")
         self.ground_z = float(p("ground_z"))
+        self.project_position = bool(p("project_position"))
         self.publish_debug = bool(p("publish_debug"))
         self.max_pose_age = float(p("max_pose_age_s"))
         rate = float(p("max_rate_hz"))
@@ -144,8 +176,10 @@ class PadDetectorNode(Node):
             blue_hsv_low=tuple(int(v) for v in p("blue_hsv_low")),
             blue_hsv_high=tuple(int(v) for v in p("blue_hsv_high")),
             field_mode=str(p("field_mode")),
-            dark_hsv_low=tuple(int(v) for v in p("dark_hsv_low")),
-            dark_hsv_high=tuple(int(v) for v in p("dark_hsv_high")),
+            mark_delta=float(p("mark_delta")),
+            mark_window_frac=float(p("mark_window_frac")),
+            mark_contrast_mult=float(p("mark_contrast_mult")),
+            real_min_radius_px=float(p("real_min_radius_px")),
             yellow_hsv_low=tuple(int(v) for v in p("yellow_hsv_low")),
             yellow_hsv_high=tuple(int(v) for v in p("yellow_hsv_high")),
             min_area_px=float(p("min_area_px")),
@@ -177,22 +211,28 @@ class PadDetectorNode(Node):
             self.pub_debug = self.create_publisher(
                 Image, f"/hydrone/pads/{self.camera}/debug_image", sensor_qos)
 
-        self.create_subscription(CameraInfo, p("camera_info_topic"),
-                                 self._cb_info, sensor_qos)
-        # MAVROS publishes local_position/pose BEST_EFFORT; a RELIABLE
-        # subscriber would never receive it.
-        self.create_subscription(PoseStamped, p("pose_topic"),
-                                 self._cb_pose, sensor_qos)
-        depth_topic = p("depth_topic")
-        if depth_topic:
-            self.create_subscription(Image, depth_topic,
-                                     self._cb_depth, sensor_qos)
+        # Intrinsics, vehicle pose and depth exist only to place a pixel in the
+        # world. A camera that does not project subscribes to none of them.
+        depth_topic = p("depth_topic") if self.project_position else ""
+        if self.project_position:
+            self.create_subscription(CameraInfo, p("camera_info_topic"),
+                                     self._cb_info, sensor_qos)
+            # MAVROS publishes local_position/pose BEST_EFFORT; a RELIABLE
+            # subscriber would never receive it.
+            self.create_subscription(PoseStamped, p("pose_topic"),
+                                     self._cb_pose, sensor_qos)
+            if depth_topic:
+                self.create_subscription(Image, depth_topic,
+                                         self._cb_depth, sensor_qos)
         self.create_subscription(Image, p("image_topic"),
                                  self._cb_image, sensor_qos)
 
+        how = ("depth=" + depth_topic if depth_topic
+               else "ground-plane projection" if self.project_position
+               else "DETECTION ONLY — publishes no position")
         self.get_logger().info(
             f"pad_detector[{self.camera}] up — image={p('image_topic')} "
-            f"depth={depth_topic or 'none (ground-plane projection)'}")
+            f"{how} -> {p('out_topic')}")
 
     # ────────────────────────────────────────────────────────────────────────
     # Inputs
@@ -238,6 +278,13 @@ class PadDetectorNode(Node):
         msg.v = float(det.v)
         msg.radius_px = float(det.radius_px)
         msg.confidence = float(det.confidence)
+
+        if not self.project_position:
+            # Deliberate, not a failure. u/v/radius/confidence above are the
+            # whole message: this camera says a pad is in view and stops there.
+            msg.position_valid = False
+            msg.source = PadDetection.SOURCE_NONE
+            return msg
 
         world = self._project(det.u, det.v)
         if world is None:

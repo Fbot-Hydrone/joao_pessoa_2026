@@ -199,11 +199,11 @@ MOT_BAT_VOLT_MAX 12.8
 # neither useful nor survivable indoors. 0.5 m/s puts a 2 m leg at ~4 s plus
 # ramps: slow enough to watch, slow enough that a bad position estimate produces
 # a slow wander rather than a dash into a wall.
-WP_SPD          0.5
+WP_SPD          1.5
 # Default 2.5 m/s/s. The acceleration is what the airframe feels when a new
 # setpoint appears, and BiguaSim's ~0.3-0.5 s actuation lag is what turns a
 # sharp demand into an oscillation (see ~/work/biguasim-problems.md, 2026-08-18).
-WP_ACC          0.5
+WP_ACC          1.5
 # Yaw slew rate, deg/s. Default 60 deg/s puts a 45 deg search turn at 0.75 s,
 # fast enough to smear the visual odometry through the whole step. 25 deg/s
 # makes it ~1.8 s, and the mission's settle pause then has something already

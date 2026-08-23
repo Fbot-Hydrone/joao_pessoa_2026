@@ -12,6 +12,8 @@
 #   ./scripts/jetson_up.sh takeoff_alt:=1.0 target_bases:=1
 #   ./scripts/jetson_up.sh --rebuild                # after a .msg/setup.py edit
 #   ./scripts/jetson_up.sh --build                  # rebuild the image first
+#   ./scripts/jetson_up.sh --wifi                   # publish over wifi instead
+#                                                   # of the direct cable
 #
 # This is the Jetson's answer to scripts/docker_up.sh. It is a plain `docker
 # run` and not compose because the board has neither `docker compose` nor
@@ -46,9 +48,33 @@
 # ZED SDK, pyzed) all sit ABOVE the `COPY src/` line, so they stay cached and
 # only the colcon layer is redone.
 #
-# Overridable by environment: IMAGE, CONTAINER, FCU_URL.
+# ── WHICH LINK THE TOPICS GO OUT ON ─────────────────────────────────────────
+# The board is on two networks: the shared wifi, and a direct gigabit cable to
+# the workstation on 10.10.0.0/24 (this end is 10.10.0.2, statically assigned).
+# Fast DDS announces a locator for EVERY interface it can see and then uses
+# whichever the peer answers on, so without pinning, camera topics go out over
+# the wifi the drone is also flying MAVLink on -- ~110 Mbit/s for one 640x480
+# BGR stream at 15 Hz.
+#
+#   --cable  (default)  pin DDS to the direct cable, leaving the wifi for
+#                       MAVLink. Match it with view_remote.sh / rviz_remote.sh,
+#                       which default to --cable too.
+#   --wifi              pin DDS to wlan0. Use when the cable is unplugged --
+#                       e.g. an actual flight with nothing tethered.
+#   --any               no pinning; whatever DDS negotiates (old behaviour).
+#
+# IMPORTANT: --cable with the cable unplugged fails loudly here, but --cable on
+# one end and --wifi on the other does NOT. That combination looks exactly like
+# a domain-id mismatch: the viewer sits there with an empty window, no error.
+#
+# Shared memory is kept in all modes, so nodes inside this container still talk
+# to each other over SHM rather than the network stack. Only the OFF-BOARD path
+# is pinned. See scripts/dds_iface.sh.
+#
+# Overridable by environment: IMAGE, CONTAINER, FCU_URL, CABLE_SUBNET.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+. "$(dirname "$0")/dds_iface.sh"
 
 IMAGE="${IMAGE:-hydrone-jetson:humble}"
 CONTAINER="${CONTAINER:-hydrone-jetson}"
@@ -59,6 +85,7 @@ DO_REBUILD=false
 SHELL_MODE=false
 CALIBRATE=false
 NO_DEV=false
+MODE=cable
 launch_args=()
 
 # The belly camera's ChArUco target. Defaults are the calib.io board in use
@@ -80,11 +107,21 @@ for arg in "$@"; do
         --build)         DO_BUILD=true ;;
         --rebuild)       DO_REBUILD=true ;;
         --no-dev)        NO_DEV=true ;;
+        --cable)         MODE=cable ;;
+        --wifi)          MODE=wifi ;;
+        --any)           MODE=any ;;
         *:=*)            launch_args+=("$arg") ;;
-        -h|--help)       sed -n '2,50p' "$0"; exit 0 ;;
+        -h|--help)       sed -n '2,72p' "$0"; exit 0 ;;
         *) echo "unknown argument: $arg" >&2; exit 2 ;;
     esac
 done
+
+dds_iface_setup "$MODE"
+if [ -n "$DDS_PROFILE" ]; then
+    echo "link: $MODE  ($DDS_IFACE $DDS_ADDR)  -- viewers must match"
+else
+    echo "link: any (DDS picks; may use the wifi)"
+fi
 
 # ── Preflight ───────────────────────────────────────────────────────────────
 # Each of these turns a confusing runtime failure into a sentence. The
@@ -175,6 +212,13 @@ fi
 # checkout, so without this every run salts the working tree with root-owned
 # __pycache__ directories that the normal user then cannot delete.
 run_args+=(-e PYTHONDONTWRITEBYTECODE=1)
+
+# The DDS profile is generated on the host, so it is mounted in; Fast DDS reads
+# it from the path FASTRTPS_DEFAULT_PROFILES_FILE names.
+if [ -n "$DDS_PROFILE" ]; then
+    run_args+=(-v "$DDS_PROFILE:/tmp/dds_profile.xml:ro"
+               -e FASTRTPS_DEFAULT_PROFILES_FILE=/tmp/dds_profile.xml)
+fi
 
 # scripts/ read-only at a fixed path. These are the tools you reach for while
 # something is already running -- view_topic.py, charuco_probe.py -- and

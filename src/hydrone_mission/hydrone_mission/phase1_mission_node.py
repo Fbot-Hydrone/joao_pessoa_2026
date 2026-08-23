@@ -75,7 +75,7 @@ stack. Takeoff speed is deliberately NOT touched; the existing climb is fine.
 Interfaces
 ----------
 in:   /hydrone/pads/map           hydrone_msgs/PadMap        (what to fly to)
-      /hydrone/pads/detections    hydrone_msgs/PadDetection  (down cam confirms)
+      /hydrone/pads/down/…        hydrone_msgs/PadDetection  (down cam confirms)
       /mavros/state, /mavros/local_position/pose
 out:  /mavros/setpoint_position/local
       /hydrone/mission/status     std_msgs/String
@@ -210,7 +210,6 @@ class Phase1MissionNode(Node):
 
         # ── Flying to a candidate ───────────────────────────────────────────
         self.declare_parameter("arrive_tol_m", 0.35)
-        self.declare_parameter("travel_timeout_s", 60.0)
 
         # ── Confirming it on the belly camera ───────────────────────────────
         # The forward camera IDENTIFIES (it sees across the arena, at ranges
@@ -218,6 +217,13 @@ class Phase1MissionNode(Node):
         # the down camera VALIDATES from directly above, where they are. A
         # candidate has to earn `confirm_detections` fresh looks above
         # `confirm_confidence` or it is not a landing site.
+        # The belly camera's detection topic. Its own, separate from the
+        # /hydrone/pads/detections bus pad_map_node fuses: the down camera does
+        # not project (competition bases are raised, and a flat-floor cast from
+        # overhead lands past the pad), so its detections have no position and
+        # have no business in the map.
+        self.declare_parameter("detections_topic",
+                               "/hydrone/pads/down/detections")
         self.declare_parameter("confirm_detections", 3)
         self.declare_parameter("confirm_confidence", 0.60)
         self.declare_parameter("confirm_timeout_s", 25.0)
@@ -227,6 +233,24 @@ class Phase1MissionNode(Node):
         self.declare_parameter("dwell_s", 4.0)
         self.declare_parameter("land_timeout_s", 60.0)
         self.declare_parameter("land_settle_s", 2.0)
+        # Touchdown = the reported altitude STOPS CHANGING. How much movement
+        # still counts as stopped, m, measured peak-to-peak over land_settle_s.
+        # A descending vehicle covers far more than this in that window (even a
+        # slow 0.05 m/s descent moves 0.10 m in 2 s), a resting one covers only
+        # estimator noise. Raise it if a landing is never declared; lower it if
+        # one is declared while still visibly descending.
+        self.declare_parameter("land_still_tol_m", 0.05)
+        # Stillness ALONE is not touchdown: a hover is perfectly still too, and
+        # between the LAND mode command and ArduPilot actually starting the
+        # descent there is a gap long enough to fill the window. On 2026-08-23
+        # that gap declared LANDED 2.1 s after CONFIRM, at z=1.50 m — the full
+        # hover altitude, having descended nothing — and then wrote that 1.50 m
+        # into the pad's height as if the drone were resting on it.
+        #
+        # So the vehicle must also have GONE DOWN. The confirmation hover sits
+        # takeoff_alt above the pad, so a real landing covers far more than
+        # this; a hover covers none of it.
+        self.declare_parameter("min_descent_m", 0.30)
         self.declare_parameter("takeoff_timeout_s", 45.0)
         self.declare_parameter("service_timeout_s", 30.0)
         self.declare_parameter("setpoint_hz", 10.0)
@@ -245,7 +269,6 @@ class Phase1MissionNode(Node):
         self.yaw_tol = math.radians(float(p("yaw_tol_deg")))
         self.rotate_timeout = float(p("rotate_timeout_s"))
         self.arrive_tol = float(p("arrive_tol_m"))
-        self.travel_timeout = float(p("travel_timeout_s"))
         self.confirm_detections = int(p("confirm_detections"))
         self.confirm_conf = float(p("confirm_confidence"))
         self.confirm_timeout = float(p("confirm_timeout_s"))
@@ -253,6 +276,8 @@ class Phase1MissionNode(Node):
         self.dwell_s = float(p("dwell_s"))
         self.land_timeout = float(p("land_timeout_s"))
         self.land_settle = float(p("land_settle_s"))
+        self.land_still_tol = float(p("land_still_tol_m"))
+        self.min_descent = float(p("min_descent_m"))
         self.takeoff_timeout = float(p("takeoff_timeout_s"))
         self.svc_timeout = float(p("service_timeout_s"))
         self.auto_start = bool(p("auto_start"))
@@ -287,13 +312,15 @@ class Phase1MissionNode(Node):
         # the very thing the search is made of.
         self.setpoint: list[float] = [0.0, 0.0, 0.0, 0.0]
         self.stream_setpoint = False
-        self._settle_since: float | None = None
         self._call: _Call | None = None
         self._pending: str | None = None    # what _call is for
         self._last_cmd_t = 0.0              # when the last command went out
         self._takeoff_tries = 0
         # Down-camera looks accepted during the current CONFIRM.
         self._confirm_hits = 0
+        self._z_hist: list[tuple[float, float]] = []
+        self._land_entry_z: float | None = None
+        self._takeoff_start_z = 0.0
         self._last_down: PadDetection | None = None
         self._last_down_t = 0.0
         # Last refusal ArduPilot gave us, and when. See _cb_statustext.
@@ -316,7 +343,12 @@ class Phase1MissionNode(Node):
         self.create_subscription(PoseStamped, "/mavros/local_position/pose",
                                  self._cb_pose, sensor_qos)
         self.create_subscription(PadMap, "/hydrone/pads/map", self._cb_map, 10)
-        self.create_subscription(PadDetection, "/hydrone/pads/detections",
+        # The belly camera's OWN topic, not the shared /hydrone/pads/detections
+        # the map is built from. Those detections carry no position — see
+        # _cb_detection — so they must not reach pad_map_node, and keeping them
+        # off its bus is what guarantees it.
+        self.create_subscription(PadDetection,
+                                 self.get_parameter("detections_topic").value,
                                  self._cb_detection, 20)
         # ArduPilot explains its refusals in STATUSTEXT ("Arm: Throttle too
         # high", "PreArm: VisOdom: not healthy", ...). MAVROS publishes
@@ -363,6 +395,11 @@ class Phase1MissionNode(Node):
 
     def _cb_detection(self, msg: PadDetection):
         """Keep the freshest belly-camera look.
+
+        CONFIDENCE ONLY. `msg.position` is not read here and is not populated
+        by the down detector at all: this camera answers "is there a base under
+        me", and the answer to "where is it" comes from the ZED, through the
+        map, which is the estimate the drone was flown here on.
 
         Only the down camera is kept HERE, and only for confirmation. The
         forward camera is not ignored by the mission — it is the thing that
@@ -594,13 +631,23 @@ class Phase1MissionNode(Node):
         setpoint stream only starts once we are up. The first setpoint holds the
         position and heading we reached, so nothing moves at the handover.
         """
-        if (self.pose is not None
-                and self.pose.pose.position.z >= self.takeoff_alt - 0.15):
+        # CLIMBED, not absolute altitude. takeoff_alt is a height above the
+        # surface we are leaving; pose.z is measured from the plane of the FIRST
+        # takeoff. On any pad at a different height the two disagree by exactly
+        # that difference, and comparing them directly is why the mission hung
+        # here on 2026-08-23: after landing on a pad 0.76 m below the start
+        # plane, a perfect 1.5 m climb reached z=0.74 while this test wanted
+        # 1.35, so the mission re-sent takeoff forever — and ArduPilot rejected
+        # every one of them, because the vehicle was already flying.
+        climbed = (self.pose.pose.position.z - self._takeoff_start_z
+                   if self.pose is not None else 0.0)
+        if self.pose is not None and climbed >= self.takeoff_alt - 0.15:
             x = self.pose.pose.position.x
             y = self.pose.pose.position.y
             yaw = yaw_of(self.pose)
             self.get_logger().info(
-                f"airborne at {self.pose.pose.position.z:.2f} m, "
+                f"airborne — climbed {climbed:.2f} m to z="
+                f"{self.pose.pose.position.z:.2f} m, "
                 f"heading {math.degrees(yaw):.0f} deg.")
             self._goto(x, y, self.takeoff_alt, yaw)
             self.rotations_done = 0
@@ -793,6 +840,11 @@ class Phase1MissionNode(Node):
         detector's geometry and the position controller's demand in motion at
         the same time, and there is nothing to gain — the belly camera looks
         straight down and does not care which way the nose points.
+
+        There is no time budget. The leg ends when the vehicle arrives. A 60 s
+        one used to blacklist candidates that were still closing — pad 4 on
+        2026-08-23 was 0.70 m away when it fired — and every run is supervised,
+        so a slow leg is a human's call to abort, not this node's.
         """
         if self.pose is None:
             return
@@ -812,21 +864,6 @@ class Phase1MissionNode(Node):
                 self._confirm_hits = 0
                 self._enter(self.CONFIRM)
             return
-
-        if self._since_entered() > self.travel_timeout:
-            if self.landing_for == self.LAND_FINAL:
-                self.get_logger().warn(
-                    f"could not reach the takeoff base in "
-                    f"{self.travel_timeout:.0f} s ({d:.2f} m short) — landing "
-                    "where we are rather than pushing a setpoint we cannot "
-                    "hold.")
-                self._begin_landing()
-                return
-            self.get_logger().warn(
-                f"could not reach pad {self.target_id} in "
-                f"{self.travel_timeout:.0f} s ({d:.2f} m short) — blacklisting "
-                "it and searching again.")
-            self._reject_target()
 
     # ── CONFIRM ──────────────────────────────────────────────────────────────
 
@@ -893,7 +930,11 @@ class Phase1MissionNode(Node):
         mid-descent is at best ignored and at worst fights it.
         """
         self.stream_setpoint = False
-        self._settle_since = None
+        self._z_hist = []
+        # The altitude the descent starts from, so touchdown can require that
+        # the vehicle actually left it.
+        self._land_entry_z = (self.pose.pose.position.z
+                              if self.pose is not None else None)
         self._enter(self.LAND)
         self._set_mode("LAND")
 
@@ -909,35 +950,77 @@ class Phase1MissionNode(Node):
             self._set_mode("LAND")
             return
 
-        # Landed = the FCU disarmed us, or we are sitting near the takeoff
-        # plane. Everything in this arena is at ground level for now, so 0.5 m
-        # is comfortably below any hover and above any resting altitude.
+        # Landed = the FCU disarmed us, or the reported altitude has STOPPED
+        # CHANGING.
+        #
+        # It used to be "z <= 0.5 m", an absolute height above the takeoff
+        # plane, and that is what made the vehicle bail out of LAND just before
+        # touchdown: descending through 0.5 m satisfied it, land_settle_s later
+        # the mission called it landed and moved on to DWELL and TAKEOFF while
+        # the vehicle was still in the air — and ArduPilot then rejected the
+        # takeoff because it had never landed. The threshold was also wrong for
+        # the competition outright: it is measured from the takeoff plane, so a
+        # pad higher than the one we left never reaches 0.5 m at all.
+        #
+        # Stillness has neither problem. It is relative, so it does not care
+        # what height the pad is at, and it cannot be satisfied on the way down:
+        # a descending vehicle moves far more than land_still_tol_m across the
+        # window, a resting one moves only estimator noise.
         disarmed = not self.mav_state.armed
-        low = self.pose is not None and self.pose.pose.position.z <= 0.5
+        still = self._z_is_still()
+        descended = (self._land_entry_z is not None
+                     and self.pose is not None
+                     and (self._land_entry_z - self.pose.pose.position.z)
+                     >= self.min_descent)
 
-        if disarmed or low:
-            if self._settle_since is None:
-                self._settle_since = self._now()
-            elif self._now() - self._settle_since >= self.land_settle:
-                z = self.pose.pose.position.z if self.pose else 0.0
-                if self.landing_for == self.LAND_PAD:
-                    self.landed_count += 1
-                    self.get_logger().info(
-                        f"LANDED on base #{self.landed_count} of "
-                        f"{self.target_bases} — resting at z={z:.2f} m.")
-                    self._mark_visited(z)
-                else:
-                    self.get_logger().info(
-                        f"LANDED ({self.landing_for}) at z={z:.2f} m.")
-                self._enter(self.DWELL)
-        else:
-            self._settle_since = None
+        # No extra debounce: _z_is_still already demands a FULL land_settle_s
+        # window of stillness before it returns true, and a disarm is definitive.
+        if disarmed or (still and descended):
+            z = self.pose.pose.position.z if self.pose else 0.0
+            why = "disarmed" if disarmed else "descended and stopped"
+            if self.landing_for == self.LAND_PAD:
+                self.landed_count += 1
+                self.get_logger().info(
+                    f"LANDED on base #{self.landed_count} of "
+                    f"{self.target_bases} — resting at z={z:.2f} m ({why}).")
+                self._mark_visited(z)
+            else:
+                self.get_logger().info(
+                    f"LANDED ({self.landing_for}) at z={z:.2f} m ({why}).")
+            self._enter(self.DWELL)
+            return
 
         if self._since_entered() > self.land_timeout:
             self.get_logger().warn(
                 f"no touchdown within {self.land_timeout:.0f} s — carrying on "
                 "anyway so the mission does not stall here.")
             self._enter(self.DWELL)
+
+    def _z_is_still(self) -> bool:
+        """Has the reported altitude stopped moving?
+
+        Peak-to-peak z over the last `land_settle_s`, compared against
+        `land_still_tol_m`. Returns False until the window is actually full, so
+        entering LAND cannot read as "already stopped".
+        """
+        if self.pose is None:
+            return False
+        now = self._now()
+        self._z_hist.append((now, self.pose.pose.position.z))
+
+        # Drop what has aged out, but KEEP the first sample at or before the
+        # cutoff — trimming to exactly the window would leave a span of
+        # land_settle minus one sample period, which never reaches the length
+        # the check below asks for.
+        cutoff = now - self.land_settle
+        while len(self._z_hist) > 1 and self._z_hist[1][0] <= cutoff:
+            self._z_hist.pop(0)
+
+        if now - self._z_hist[0][0] < self.land_settle:
+            # Not a full window yet: entering LAND must not read as stopped.
+            return False
+        zs = [z for _, z in self._z_hist]
+        return (max(zs) - min(zs)) <= self.land_still_tol
 
     def _mark_visited(self, height: float):
         """Tell the pad map we landed, so it stops offering this pad."""
@@ -1042,6 +1125,13 @@ class Phase1MissionNode(Node):
     def _enter(self, state: str):
         if state != self.state:
             self.get_logger().info(f"[{self.state} -> {state}]")
+        if state == self.TAKEOFF:
+            # The altitude this climb starts from. takeoff_alt is a height ABOVE
+            # WHATEVER WE ARE STANDING ON, and pose.z is absolute in the FCU's
+            # local frame (zeroed at the FIRST takeoff plane), so the two are
+            # only comparable on the first climb of a run. See _do_takeoff.
+            self._takeoff_start_z = (self.pose.pose.position.z
+                                     if self.pose is not None else 0.0)
         self.state = state
         self._state_since = self._now()
         self._call = None

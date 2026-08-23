@@ -295,56 +295,94 @@ def test_handles_degenerate_input():
 
 
 # ── The REAL pad ────────────────────────────────────────────────────────────
-# Photographed 2026-08-23. It is NOT the simulated pad recoloured: its field is
-# blue of the SAME HUE as the foam floor it lies on, separated only by being
-# darker and less saturated, and it carries a yellow square border the
-# simulated one does not have.
+# Photographed 2026-08-22 in the arena, and grabbed off the ZED the same
+# evening. It is NOT the simulated pad recoloured:
 #
-# Both failure modes below were observed before field_mode/roi_erode_frac
-# existed, and both are silent -- the detector simply returns nothing:
+#   its field is blue of the SAME HUE as the foam floor it lies on
+#   it carries a yellow square border the simulated one does not have
+#   the ZED renders its paint GREEN and washed out, not yellow
 #
-#   the sim blue band swallows floor and pad together, so the pad is not a
-#   region at all (one 306081 px contour spanning the frame)
+# The last of those is what silently killed the first version. The yellow HSV
+# band admitted ZERO pixels of a real ZED frame, and since every structural
+# check reaches the image only through the yellow mask, the detector returned
+# nothing and reported nothing. `field_mode="dark_blue"` therefore stopped
+# using hue at all — see the pad_detector module docstring.
 #
-#   the yellow border, which lies outside the field but bleeds a thread inside
-#   it, becomes "the ring" for _polar_checks, and the mid-radius probe then
-#   lands on the real circle instead of the cross arms: mid_occ 0.000, 0 arms
+# Two renderings below, both from measurements rather than invention:
+# render_real_pad() is the pad as the phone camera saw it, and
+# render_real_pad_as_zed() is the same pad in the colours the ZED actually
+# produced. A detector that only handles the first one is the detector that
+# already failed in the arena.
 
 REAL_FLOOR_BGR = (190, 110, 70)     # H~105 S~161 V~190
 REAL_FIELD_BGR = (90, 70, 55)       # H~105 S~ 99 V~ 90
-REAL_MARK_BGR = (45, 200, 240)
+REAL_MARK_BGR = (45, 200, 240)      # H~ 25 S~218 V~254, saturated yellow
+
+# The same three surfaces as the ZED rendered them, converted straight from the
+# HSV medians measured on its frames: floor 103/220/190, field 101/172/146,
+# paint 58/44/196. Note the paint: hue 58 is GREEN, saturation 44 is almost
+# none. It is 30 hue degrees away from anything a yellow band would accept.
+ZED_FLOOR_BGR = (190, 119, 26)
+ZED_FIELD_BGR = (146, 110, 48)
+ZED_MARK_BGR = (162, 196, 164)
 
 
-def render_real_pad(side=260, w=640, h=480, cx=320, cy=240):
+def render_real_pad(side=260, w=640, h=480, cx=320, cy=240,
+                    floor=REAL_FLOOR_BGR, field=REAL_FIELD_BGR,
+                    mark=REAL_MARK_BGR, seam=(205, 125, 85)):
     """The real pad on its real floor. Proportions taken off the photographs."""
-    img = np.full((h, w, 3), REAL_FLOOR_BGR, np.uint8)
+    img = np.full((h, w, 3), floor, np.uint8)
     for x in range(0, w, 150):
-        cv2.line(img, (x, 0), (x, h), (205, 125, 85), 2)
+        cv2.line(img, (x, 0), (x, h), seam, 2)
     for y in range(0, h, 150):
-        cv2.line(img, (0, y), (w, y), (205, 125, 85), 2)
+        cv2.line(img, (0, y), (w, y), seam, 2)
     half = side // 2
     tl, br = (cx - half, cy - half), (cx + half, cy + half)
-    cv2.rectangle(img, tl, br, REAL_FIELD_BGR, -1)
+    cv2.rectangle(img, tl, br, field, -1)
     bt = max(2, side // 26)
-    cv2.rectangle(img, tl, br, REAL_MARK_BGR, bt)
-    cv2.circle(img, (cx, cy), int(side * 0.375), REAL_MARK_BGR, bt)
+    cv2.rectangle(img, tl, br, mark, bt)
+    cv2.circle(img, (cx, cy), int(side * 0.375), mark, bt)
     arm = int(side * 0.275)
-    cv2.line(img, (cx - arm, cy), (cx + arm, cy), REAL_MARK_BGR, bt)
-    cv2.line(img, (cx, cy - arm), (cx, cy + arm), REAL_MARK_BGR, bt)
+    cv2.line(img, (cx - arm, cy), (cx + arm, cy), mark, bt)
+    cv2.line(img, (cx, cy - arm), (cx, cy + arm), mark, bt)
     return cv2.GaussianBlur(img, (3, 3), 0)
 
 
-def test_real_pad_is_found_in_dark_blue_mode():
-    dets = PadDetector(field_mode="dark_blue").detect(render_real_pad())
+def render_real_pad_as_zed(**kw):
+    """The same pad in the colours the ZED actually delivered in the arena."""
+    kw.setdefault("floor", ZED_FLOOR_BGR)
+    kw.setdefault("field", ZED_FIELD_BGR)
+    kw.setdefault("mark", ZED_MARK_BGR)
+    kw.setdefault("seam", (200, 130, 40))
+    return render_real_pad(**kw)
+
+
+def real(**kw):
+    return PadDetector(field_mode="dark_blue", **kw)
+
+
+# ── The real pad is found, in both cameras' colours ──────────────────────────
+
+@pytest.mark.parametrize("render", [render_real_pad, render_real_pad_as_zed],
+                         ids=["phone_colours", "zed_colours"])
+def test_real_pad_is_found_in_dark_blue_mode(render):
+    dets = real().detect(render())
     assert dets, "the real pad was not detected at all"
     best = dets[0]
     assert best.confidence >= 0.60, f"confidence {best.confidence:.3f} too low"
     assert abs(best.u - 320) < 20 and abs(best.v - 240) < 20
 
 
-def test_real_pad_cross_is_actually_resolved():
-    """Four arms, not the eight the yellow border produced before erosion."""
-    dets = PadDetector(field_mode="dark_blue").detect(render_real_pad())
+@pytest.mark.parametrize("render", [render_real_pad, render_real_pad_as_zed],
+                         ids=["phone_colours", "zed_colours"])
+def test_real_pad_cross_is_actually_resolved(render):
+    """Four arms, not the zero the yellow border produced before the shrink.
+
+    An isotropic erosion deep enough to clear the border along the square's
+    edges still leaves its corners, and _polar_checks then takes a corner for
+    the ring and probes the circle instead of the arms.
+    """
+    dets = real().detect(render())
     assert dets
     scores = dets[0].scores
     assert scores["arms"] == 4, f"arms={scores['arms']}, expected the cross's 4"
@@ -353,14 +391,159 @@ def test_real_pad_cross_is_actually_resolved():
         "which is what happens when the border is taken for the ring")
 
 
+def test_the_zed_colours_really_are_outside_the_yellow_band():
+    """Guards the premise of every test above it.
+
+    If someone widens the yellow band far enough to swallow hue 58, this stops
+    failing and the ZED renderings quietly stop testing anything.
+    """
+    hsv = cv2.cvtColor(np.uint8([[ZED_MARK_BGR]]), cv2.COLOR_BGR2HSV)[0, 0]
+    lo, hi = np.array([18, 110, 90]), np.array([38, 255, 255])
+    assert not (np.all(hsv >= lo) and np.all(hsv <= hi)), (
+        f"ZED paint {tuple(int(v) for v in hsv)} is inside the yellow band; "
+        "these renderings no longer reproduce the arena failure")
+
+
+# ── What the mode is for, pinned from both sides ─────────────────────────────
+
 def test_sim_mode_does_not_find_the_real_pad():
     """Pins the bug this whole mode exists for, so it cannot regress quietly."""
-    assert not PadDetector(field_mode="blue").detect(render_real_pad())
+    assert not PadDetector().detect(render_real_pad())
+    assert not PadDetector().detect(render_real_pad_as_zed())
 
 
-def test_dark_blue_mode_does_not_find_the_sim_pad():
-    """The two modes are genuinely different masks, not a cosmetic switch."""
-    assert not PadDetector(field_mode="dark_blue").detect(render_pad())
+def test_sim_mode_finds_no_yellow_at_all_in_zed_colours():
+    """The exact failure measured in the arena: an EMPTY yellow mask.
+
+    Worth pinning separately from the detection result, because it is the
+    reason nothing was detected AND the reason nothing was reported — with no
+    yellow there is no candidate for any check to reject or explain.
+    """
+    _, yellow = PadDetector().color_masks(render_real_pad_as_zed())
+    assert cv2.countNonZero(yellow) == 0
+
+
+def test_real_mode_needs_the_blue_mat():
+    """The markings alone are not a pad: they have to be lying on the floor.
+
+    This is what keeps the walls, the ceiling and everything hanging on them
+    out of a mask that accepts any local contrast.
+    """
+    scene = render_real_pad(floor=(70, 90, 95), field=(60, 80, 85),
+                            seam=(75, 95, 100))
+    assert real().detect(scene) == []
+
+
+def test_real_mode_rejects_a_scuff_on_the_mat():
+    """A pale mark of pad size, with no ring and no cross."""
+    scene = np.full((480, 640, 3), REAL_FLOOR_BGR, np.uint8)
+    cv2.ellipse(scene, (320, 240), (90, 70), 20, 0, 360, REAL_MARK_BGR, -1)
+    assert real().detect(scene) == []
+
+
+def test_real_mode_rejects_a_faint_stain_that_looks_structured():
+    """The mask is a yes/no; how far a marking cleared it is a second signal.
+
+    A low-contrast blotch the apparent size of a distant pad can put four lobes
+    on the mid-radius probe by accident. One in the arena photographs did, at
+    confidence 0.85 — above phase1_mission's commit threshold. Real paint
+    clears mark_delta by a wide margin; a stain only just clears it.
+    """
+    scene = np.full((480, 640, 3), REAL_FLOOR_BGR, np.uint8)
+    # Contrast 11.5 against the mat, squarely inside the 9-13 band every false
+    # positive in the arena photographs fell into.
+    faint = (REAL_FLOOR_BGR[0], REAL_FLOOR_BGR[1] + 10, REAL_FLOOR_BGR[2] + 20)
+    cv2.rectangle(scene, (240, 160), (400, 320), faint, 6)
+    cv2.circle(scene, (320, 240), 58, faint, 6)
+    cv2.line(scene, (278, 240), (362, 240), faint, 6)
+    cv2.line(scene, (320, 198), (320, 282), faint, 6)
+    scene = cv2.GaussianBlur(scene, (5, 5), 0)
+
+    assert real().detect(scene) == [], "a faint look-alike was reported as a pad"
+    # Without the gate this very shape scores 0.90, so the test is about
+    # CONTRAST and not about the geometry it happens to draw.
+    ungated = real(mark_contrast_mult=0.0).detect(scene)
+    assert ungated and ungated[0].confidence > 0.80
+
+
+def test_real_pad_clears_the_contrast_gate_with_margin():
+    """Both cameras' colours, so the margin is not an artefact of one of them."""
+    for render in (render_real_pad, render_real_pad_as_zed):
+        det = real().detect(render())[0]
+        assert det.scores["contrast"] >= 2 * 2.5 * 8.0, (
+            f"contrast {det.scores['contrast']} leaves no headroom over the "
+            "gate; a slightly dimmer arena would lose the pad")
+
+
+def test_real_mode_rejects_a_ring_with_no_cross():
+    scene = np.full((480, 640, 3), REAL_FLOOR_BGR, np.uint8)
+    cv2.rectangle(scene, (190, 110), (450, 370), REAL_FIELD_BGR, -1)
+    cv2.rectangle(scene, (190, 110), (450, 370), REAL_MARK_BGR, 10)
+    cv2.circle(scene, (320, 240), 97, REAL_MARK_BGR, 10)
+    assert real().detect(scene) == []
+
+
+def test_real_mode_on_bare_mat_is_quiet():
+    assert real().detect(np.full((480, 640, 3), REAL_FLOOR_BGR, np.uint8)) == []
+
+
+# ── Why it survives the ZED, and the sim mode did not ────────────────────────
+
+@pytest.mark.parametrize("gains", [(1.0, 1.15, 0.85), (0.85, 1.0, 1.2),
+                                   (1.2, 1.2, 0.75)])
+def test_real_mode_survives_white_balance_shifts(gains):
+    """Per-channel gain is what auto white balance does, and it is what moved
+    the arena's paint from hue 25 to hue 58. The opponent channel is read
+    against its own local mean, so a gain moves signal and reference together.
+    """
+    scene = render_real_pad_as_zed().astype(np.float32) * np.array(gains)
+    scene = np.clip(scene, 0, 255).astype(np.uint8)
+    dets = real().detect(scene)
+    assert dets, f"gains={gains}: lost the pad"
+    assert abs(dets[0].u - 320) < 25 and abs(dets[0].v - 240) < 25
+
+
+@pytest.mark.parametrize("amplitude", [12, 25, 40])
+def test_real_mode_survives_rolling_shutter_banding(amplitude):
+    """The ZED shows slow horizontal bands under the arena's lights — the
+    'waving' of an old CRT. They scale all three channels together, so a colour
+    DIFFERENCE barely moves and its local mean absorbs the rest.
+    """
+    scene = render_real_pad_as_zed().astype(np.float32)
+    rows = np.arange(scene.shape[0], dtype=np.float32)
+    band = amplitude * np.sin(2 * math.pi * rows / 90.0)
+    scene *= (1.0 + band / 255.0)[:, None, None]
+    scene = np.clip(scene, 0, 255).astype(np.uint8)
+    assert real().detect(scene), f"amplitude={amplitude}: lost the pad"
+
+
+def test_real_mode_survives_a_vignette():
+    """A slow brightness ramp across the frame — the other thing a fixed value
+    threshold cannot take."""
+    scene = render_real_pad_as_zed().astype(np.float32)
+    cols = np.linspace(0.65, 1.25, scene.shape[1], dtype=np.float32)
+    scene *= cols[None, :, None]
+    scene = np.clip(scene, 0, 255).astype(np.uint8)
+    assert real().detect(scene)
+
+
+@pytest.mark.parametrize("side", [340, 260, 180, 120, 90])
+def test_real_pad_across_apparent_sizes(side):
+    dets = real().detect(render_real_pad_as_zed(side=side))
+    assert dets, f"side={side}: lost the pad"
+    assert abs(dets[0].u - 320) < 0.12 * side
+
+
+def test_real_mode_reports_the_mat_and_the_markings_for_debugging():
+    """real_masks is the first thing to look at when the arena light changes,
+    so it stays part of the public surface."""
+    det = real()
+    mat, mark = det.real_masks(render_real_pad_as_zed())
+    assert cv2.countNonZero(mat) > 0 and cv2.countNonZero(mark) > 0
+    assert cv2.countNonZero(cv2.bitwise_and(mark, cv2.bitwise_not(mat))) == 0, \
+        "markings were accepted outside the mat"
+    det.detect(render_real_pad_as_zed())
+    assert det.last_field_mask is not None and det.last_yellow_mask is not None
 
 
 def test_field_mode_rejects_nonsense():

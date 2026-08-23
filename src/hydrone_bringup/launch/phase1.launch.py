@@ -16,8 +16,8 @@ one.
 Nodes
 -----
   pad_detector (forward)  ZED RGB+depth  -> /hydrone/pads/detections
-  pad_detector (down)     belly RGB      -> /hydrone/pads/detections
-  pad_map                 detections     -> /hydrone/pads/map + RViz markers
+  pad_detector (down)     belly RGB      -> /hydrone/pads/down/detections
+  pad_map                 forward dets   -> /hydrone/pads/map + RViz markers
   feature_map             ZED point cloud-> /hydrone/map/cloud + coverage
   map_odom_tf             measured map -> odom (joins TF's two trees)
   phase1_mission          map + MAVROS   -> the flight itself
@@ -31,10 +31,21 @@ should not be forked. What changes is above it.
   * `phase1_mission_node` replaces `pad_mission_node`. The old one flies +X in
     steps and lands on whatever the belly camera happens to see; this one never
     translates without a target and searches by turning in place.
-  * **Both cameras now feed the decision.** The old mission threw away every
-    forward-camera detection. This one takes its leads from the MAP, which fuses
-    both, so the ZED identifies bases across the arena and the belly camera
-    validates them from overhead.
+  * **Both cameras now feed the decision, in different currencies.** The old
+    mission threw away every forward-camera detection. This one takes its leads
+    from the MAP — built from the ZED alone — and the belly camera votes yes/no
+    on what it finds there.
+
+    The belly camera contributes NO POSITION, and that is the point. It runs
+    with `project_position: False` and on its own topic, so pad_map_node never
+    sees it. Its old ground-plane cast assumed a flat floor at `ground_z`, which
+    the competition's RAISED bases break: from overhead the ray crosses the
+    assumed plane past the pad it actually hit. And pad_map weights projections
+    by `confidence / max(range, 1)`, so a confirmation hover — hundreds of
+    close-range frames — would have outvoted the ZED and rewritten the very map
+    entry the drone was flown there on. The ZED is the position estimate for
+    everything; the belly camera answers one question, "is a base under me".
+    A simpler pipeline has fewer ways to be wrong.
   * `pad_map` maps nothing until the vehicle first arms, and the base the drone
     starts on is REGISTERED rather than detected — see docs/PHASE1-MISSION.md.
   * Altitude is 1 m, not 2.5 m. This is test code and a fall from 1 m is cheap.
@@ -55,11 +66,16 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
+# The belly camera's private detection topic. Deliberately NOT the
+# /hydrone/pads/detections bus pad_map_node fuses: these detections carry no
+# position, and the map must not be able to consume one by accident.
+DOWN_DETECTIONS = "/hydrone/pads/down/detections"
+
 
 def generate_launch_description():
     args = [
         DeclareLaunchArgument(
-            "takeoff_alt", default_value="1.0",
+            "takeoff_alt", default_value="1.5",
             description="Altitude for everything: takeoff, turning, travelling "
                         "and the confirmation hover, m above the top of the "
                         "base the drone starts on. Low on purpose — this is "
@@ -76,18 +92,19 @@ def generate_launch_description():
                         "clear at the new height."),
         DeclareLaunchArgument(
             "field_mode", default_value="blue",
-            description="Which pad the detector is looking at. 'blue' is "
-                        "BiguaSim's: a bright saturated blue field. "
-                        "'dark_blue' is the REAL arena's, whose field is the "
-                        "same HUE as the foam floor it lies on and is "
-                        "separated only by being darker and less saturated "
-                        "(floor V~190, field V~90). Run 'blue' against the "
-                        "real pad and the mask swallows floor and pad "
-                        "together, so the pad stops being a region at all "
-                        "and nothing is detected. phase1_real.launch.py sets "
-                        "this; see docs/LANDING-SITES.md."),
+            description="Which pad the detector is looking at, and so how it "
+                        "is found. 'blue' is BiguaSim's: a bright saturated "
+                        "blue field on brown ground, found by hue. "
+                        "'dark_blue' is the REAL arena's, which lies on foam "
+                        "of its own hue and whose paint the ZED renders GREEN "
+                        "and washed out (H 58, S 44) -- found by local "
+                        "contrast, with no HSV band involved. Run 'blue' "
+                        "against the real pad and the yellow mask comes back "
+                        "empty, so no check ever runs and nothing is detected "
+                        "or explained. phase1_real.launch.py sets this; see "
+                        "docs/LANDING-SITES.md."),
         DeclareLaunchArgument(
-            "target_bases", default_value="1",
+            "target_bases", default_value="2",
             description="How many landing sites to visit before returning to "
                         "the takeoff base. The takeoff base is not one of "
                         "them. ONE while the mission has never been flown: the "
@@ -107,7 +124,7 @@ def generate_launch_description():
                         "the drone is re-examining scenery it already "
                         "rejected."),
         DeclareLaunchArgument(
-            "settle_s", default_value="10.0",
+            "settle_s", default_value="5.0",
             description="Time held stationary after each turn before the map "
                         "is believed, s. Detections taken while yaw is slewing "
                         "are projected through a moving estimate and land in "
@@ -119,7 +136,7 @@ def generate_launch_description():
                         "before committing to a landing. One frame can be a "
                         "glint on something blue."),
         DeclareLaunchArgument(
-            "confirm_confidence", default_value="0.20",
+            "confirm_confidence", default_value="0.40",
             description="Confidence that counts as a look. Raise it if the "
                         "drone lands on things that are merely blue."),
         DeclareLaunchArgument(
@@ -162,15 +179,17 @@ def generate_launch_description():
                         "MAVROS publishes it from the VL53L1X on real, and "
                         "rangefinder_bridge mimics that publication in sim."),
         DeclareLaunchArgument(
-            "ground_z", default_value="0.0",
+            "ground_z", default_value="-0.7",
             description="Height of the arena FLOOR above the takeoff plane, m. "
+                        "FORWARD CAMERA ONLY, and only as a fallback: the ZED "
+                        "places pads with depth, and casts a ray onto this "
+                        "plane just for the pixels where depth came back "
+                        "empty. The belly camera no longer projects at all, so "
+                        "getting this wrong can no longer bias a confirmation. "
                         "The takeoff plane is the top of the base the drone "
-                        "starts on, so if that base is raised this is negative "
-                        "— every belly-camera projection intersects this plane "
-                        "and is biased by getting it wrong. 0.0 is correct "
-                        "while everything in the arena is at ground level; set "
-                        "it to minus the start base's height once that stops "
-                        "being true."),
+                        "starts on, so if that base is raised this is "
+                        "negative. 0.0 is correct while everything else in the "
+                        "arena is at ground level."),
     ]
 
     takeoff_alt = LaunchConfiguration("takeoff_alt")
@@ -184,7 +203,10 @@ def generate_launch_description():
     # 2026-08-18, against a library floor of S >= 110 that admitted zero pixels
     # of either) is written out in full there and in docs/LANDING-SITES.md §3.
     #
-    # SIM VALUES. Retune against the real arena's light before flying it.
+    # SIM VALUES, and they apply to field_mode:="blue" ONLY. The real arena
+    # runs field_mode:="dark_blue", which uses no HSV band at all — retuning
+    # these would not move it. Its knobs are mark_delta / mark_window_frac /
+    # real_min_radius_px on pad_detector_node; docs/LANDING-SITES.md 3.
     blue_hsv_low = [95, 30, 50]
     yellow_hsv_low = [18, 30, 90]
     field_mode = LaunchConfiguration("field_mode")
@@ -192,7 +214,9 @@ def generate_launch_description():
     # ── Detectors: one per camera, same algorithm, different geometry ───────
     # The forward ZED sees pads across the arena and has depth to place them
     # with. In this mission it is the IDENTIFIER: everything the search finds,
-    # it finds here first.
+    # it finds here first — and it is the SOLE source of the map's positions,
+    # because it is the only camera that measures range rather than assuming a
+    # floor height.
     forward_detector = Node(
         package="hydrone_vision",
         executable="pad_detector_node",
@@ -212,11 +236,18 @@ def generate_launch_description():
         }],
     )
 
-    # The belly camera has no depth — it does not need any. It looks almost
-    # straight down at a flat floor, so the ground-plane intersection is the
-    # more accurate of the two routes at that geometry. In this mission it is
-    # the VALIDATOR: nothing is landed on until this camera has seen it from
-    # directly above, where the ring and cross are hundreds of pixels across.
+    # The belly camera is the VALIDATOR and NOTHING ELSE: nothing is landed on
+    # until it has seen the pad from directly above, where the ring and cross
+    # are hundreds of pixels across — and that is the entire contribution.
+    #
+    # It publishes no position. `project_position: False` because its only
+    # route was a cast onto a flat floor at ground_z, and the competition's
+    # bases are RAISED: from overhead that ray crosses the assumed plane past
+    # the pad it actually hit, by (base height / altitude) x the lateral offset.
+    # `out_topic` off the shared bus because pad_map weights by
+    # confidence / max(range, 1), so a hover's worth of close-range looks would
+    # have outvoted the ZED even when they were right. No ground_z parameter
+    # here any more: nothing in this node consumes it once the cast is gone.
     down_detector = Node(
         package="hydrone_vision",
         executable="pad_detector_node",
@@ -228,11 +259,12 @@ def generate_launch_description():
             "camera_info_topic": "/down_cam/camera_info",
             "depth_topic": "",
             "optical_frame": "down_cam_optical_frame",
+            "project_position": False,
+            "out_topic": DOWN_DETECTIONS,
             "publish_debug": ParameterValue(debug_images, value_type=bool),
             "blue_hsv_low": blue_hsv_low,
             "yellow_hsv_low": yellow_hsv_low,
             "field_mode": field_mode,
-            "ground_z": ParameterValue(ground_z, value_type=float),
         }],
     )
 
@@ -302,6 +334,9 @@ def generate_launch_description():
                 LaunchConfiguration("confirm_timeout_s"), value_type=float),
             "auto_start": ParameterValue(
                 LaunchConfiguration("auto_start"), value_type=bool),
+            # Confirmation comes off the belly camera's own topic. The mission
+            # reads only `confidence` from it; there is no position to read.
+            "detections_topic": DOWN_DETECTIONS,
         }],
     )
 

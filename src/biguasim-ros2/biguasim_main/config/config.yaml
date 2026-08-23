@@ -123,6 +123,6 @@
           dynamics:
             batch_size : 1
           control_abstraction : 'accel'
-          # location: [3, 3.4, 0.78]
-          location: [3, -9.4, 0.22]
-          rotation: [0, 0, 135]
+          location: [3, 3.4, 0.78]
+          # location: [3, -9.4, 0.22]
+          rotation: [0, 0, -90]
