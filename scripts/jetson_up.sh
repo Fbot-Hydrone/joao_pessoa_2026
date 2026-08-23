@@ -176,6 +176,13 @@ fi
 # __pycache__ directories that the normal user then cannot delete.
 run_args+=(-e PYTHONDONTWRITEBYTECODE=1)
 
+# scripts/ read-only at a fixed path. These are the tools you reach for while
+# something is already running -- view_topic.py, charuco_probe.py -- and
+# without this they are simply not inside the container, which meant
+# `docker cp`-ing them in mid-session. Read-only because nothing in here should
+# be writing to the checkout.
+run_args+=(-v "$PWD/scripts:/scripts:ro")
+
 # ── X, for the calibration GUI ──────────────────────────────────────────────
 # Two display routes, and they need different plumbing:
 #   the Jetson's own screen  -> DISPLAY=:0, a unix socket in /tmp/.X11-unix
