@@ -140,6 +140,14 @@ def test_the_wrapper_forwards_nothing_to_the_autonomy_layer(wrapper_name,
         if os.path.basename(source.location) != inner_name:
             continue
         forwarded = [name for name, _ in entity.launch_arguments]
+        # field_mode is allowed through phase1_real: it states which PAD is in
+        # front of the camera, which is exactly what a hardware wrapper knows
+        # and the shared autonomy file cannot. It is forwarded without being
+        # declared there, so a command-line value still wins. Nothing else may
+        # be added here without the same argument.
+        forwarded = [n for n in forwarded
+                     if not (wrapper_name == "phase1_real.launch.py"
+                             and n == "field_mode")]
         assert not forwarded, (
             f"{wrapper_name} forwards {forwarded} into {inner_name}. Forwarding "
             "a configuration the wrapper declared overrides the inner file's "

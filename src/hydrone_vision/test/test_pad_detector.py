@@ -292,3 +292,77 @@ def test_handles_degenerate_input():
     assert d.detect(None) == []
     assert d.detect(np.zeros((0, 0, 3), np.uint8)) == []
     assert d.detect(np.zeros((8, 8, 3), np.uint8)) == []
+
+
+# ── The REAL pad ────────────────────────────────────────────────────────────
+# Photographed 2026-08-23. It is NOT the simulated pad recoloured: its field is
+# blue of the SAME HUE as the foam floor it lies on, separated only by being
+# darker and less saturated, and it carries a yellow square border the
+# simulated one does not have.
+#
+# Both failure modes below were observed before field_mode/roi_erode_frac
+# existed, and both are silent -- the detector simply returns nothing:
+#
+#   the sim blue band swallows floor and pad together, so the pad is not a
+#   region at all (one 306081 px contour spanning the frame)
+#
+#   the yellow border, which lies outside the field but bleeds a thread inside
+#   it, becomes "the ring" for _polar_checks, and the mid-radius probe then
+#   lands on the real circle instead of the cross arms: mid_occ 0.000, 0 arms
+
+REAL_FLOOR_BGR = (190, 110, 70)     # H~105 S~161 V~190
+REAL_FIELD_BGR = (90, 70, 55)       # H~105 S~ 99 V~ 90
+REAL_MARK_BGR = (45, 200, 240)
+
+
+def render_real_pad(side=260, w=640, h=480, cx=320, cy=240):
+    """The real pad on its real floor. Proportions taken off the photographs."""
+    img = np.full((h, w, 3), REAL_FLOOR_BGR, np.uint8)
+    for x in range(0, w, 150):
+        cv2.line(img, (x, 0), (x, h), (205, 125, 85), 2)
+    for y in range(0, h, 150):
+        cv2.line(img, (0, y), (w, y), (205, 125, 85), 2)
+    half = side // 2
+    tl, br = (cx - half, cy - half), (cx + half, cy + half)
+    cv2.rectangle(img, tl, br, REAL_FIELD_BGR, -1)
+    bt = max(2, side // 26)
+    cv2.rectangle(img, tl, br, REAL_MARK_BGR, bt)
+    cv2.circle(img, (cx, cy), int(side * 0.375), REAL_MARK_BGR, bt)
+    arm = int(side * 0.275)
+    cv2.line(img, (cx - arm, cy), (cx + arm, cy), REAL_MARK_BGR, bt)
+    cv2.line(img, (cx, cy - arm), (cx, cy + arm), REAL_MARK_BGR, bt)
+    return cv2.GaussianBlur(img, (3, 3), 0)
+
+
+def test_real_pad_is_found_in_dark_blue_mode():
+    dets = PadDetector(field_mode="dark_blue").detect(render_real_pad())
+    assert dets, "the real pad was not detected at all"
+    best = dets[0]
+    assert best.confidence >= 0.60, f"confidence {best.confidence:.3f} too low"
+    assert abs(best.u - 320) < 20 and abs(best.v - 240) < 20
+
+
+def test_real_pad_cross_is_actually_resolved():
+    """Four arms, not the eight the yellow border produced before erosion."""
+    dets = PadDetector(field_mode="dark_blue").detect(render_real_pad())
+    assert dets
+    scores = dets[0].scores
+    assert scores["arms"] == 4, f"arms={scores['arms']}, expected the cross's 4"
+    assert scores["mid_occ"] > 0.02, (
+        f"mid_occ={scores['mid_occ']:.3f}: the mid-radius probe found no cross, "
+        "which is what happens when the border is taken for the ring")
+
+
+def test_sim_mode_does_not_find_the_real_pad():
+    """Pins the bug this whole mode exists for, so it cannot regress quietly."""
+    assert not PadDetector(field_mode="blue").detect(render_real_pad())
+
+
+def test_dark_blue_mode_does_not_find_the_sim_pad():
+    """The two modes are genuinely different masks, not a cosmetic switch."""
+    assert not PadDetector(field_mode="dark_blue").detect(render_pad())
+
+
+def test_field_mode_rejects_nonsense():
+    with pytest.raises(ValueError):
+        PadDetector(field_mode="purple")

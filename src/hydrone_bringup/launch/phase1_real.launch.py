@@ -82,9 +82,21 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(
             os.path.join(launch_dir, "sources_real.launch.py")),
     )
+    # ONE exception to "declares nothing", and it is not a mission setting:
+    # field_mode is a fact about the PAD IN FRONT OF THE CAMERA, which is the
+    # one thing a real-hardware wrapper knows and phase1.launch.py cannot.
+    # The real arena's pad field is the same hue as the foam floor and differs
+    # only in brightness; the simulator's is a bright saturated blue on a
+    # different-coloured floor. Running the wrong one detects NOTHING.
+    #
+    # It is forwarded WITHOUT being declared here, so `field_mode:=blue` on
+    # this file's command line still wins — which is what you want when
+    # replaying a sim bag against the real launch. Every other argument still
+    # comes from the file that documents it.
     autonomy = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(launch_dir, "phase1.launch.py")),
+        launch_arguments={"field_mode": "dark_blue"}.items(),
     )
 
     return LaunchDescription([sources, autonomy])

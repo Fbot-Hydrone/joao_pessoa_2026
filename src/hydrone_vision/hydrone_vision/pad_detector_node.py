@@ -117,6 +117,14 @@ class PadDetectorNode(Node):
         # dialled in from a launch file / YAML without touching the algorithm.
         self.declare_parameter("blue_hsv_low", [95, 110, 50])
         self.declare_parameter("blue_hsv_high", [135, 255, 255])
+        # Which colour is the pad's FIELD -- the surface the ring and cross are
+        # drawn on. "blue" is BiguaSim's pad. "dark" is the real one, whose
+        # field is near-black and which sits ON a blue floor: with "blue" the
+        # detector locks onto the FLOOR and the pad becomes a hole in it.
+        # docs/LANDING-SITES.md 3.
+        self.declare_parameter("field_mode", "blue")
+        self.declare_parameter("dark_hsv_low", [0, 0, 0])
+        self.declare_parameter("dark_hsv_high", [179, 190, 105])
         self.declare_parameter("yellow_hsv_low", [18, 110, 90])
         self.declare_parameter("yellow_hsv_high", [38, 255, 255])
         self.declare_parameter("min_area_px", 150.0)
@@ -135,6 +143,9 @@ class PadDetectorNode(Node):
         self.detector = PadDetector(
             blue_hsv_low=tuple(int(v) for v in p("blue_hsv_low")),
             blue_hsv_high=tuple(int(v) for v in p("blue_hsv_high")),
+            field_mode=str(p("field_mode")),
+            dark_hsv_low=tuple(int(v) for v in p("dark_hsv_low")),
+            dark_hsv_high=tuple(int(v) for v in p("dark_hsv_high")),
             yellow_hsv_low=tuple(int(v) for v in p("yellow_hsv_low")),
             yellow_hsv_high=tuple(int(v) for v in p("yellow_hsv_high")),
             min_area_px=float(p("min_area_px")),
