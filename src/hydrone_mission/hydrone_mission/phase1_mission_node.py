@@ -126,6 +126,7 @@ from std_srvs.srv import Trigger
 from mavros_msgs.msg import State, StatusText
 from mavros_msgs.srv import CommandBool, CommandTOL, SetMode
 
+from hydrone_nav import route
 from hydrone_msgs.msg import PadDetection, PadMap
 from hydrone_msgs.srv import MarkPadVisited, RegisterTakeoffBase
 
@@ -847,48 +848,29 @@ class Phase1MissionNode(Node):
     def _best_candidate(self):
         """The nearest pad worth flying to, or None.
 
-        Worth flying to = confirmed by the map (three fused sightings, so not
-        one frame of noise), not already landed on, not the base we took off
-        from, and not one the belly camera has already refused. Nearest wins:
-        in a 5x5 m arena the differences are small, and the shortest leg is the
-        least drift.
+        The rule lives in hydrone_nav.route, so a later phase can reuse it (or
+        swap the nearest-first choice for a real tour) without reaching into a
+        mission node. This stays as the node's way of asking with its own state.
         """
         if self.pad_map is None or self.pose is None:
             return None
-        px = self.pose.pose.position.x
-        py = self.pose.pose.position.y
-        best, best_d = None, float("inf")
-        for pad in self.pad_map.pads:
-            if not self._is_candidate(pad):
-                continue
-            d = math.hypot(pad.position.x - px, pad.position.y - py)
-            if d < best_d:
-                best, best_d = pad, d
-        return best
+        return route.nearest_candidate(
+            self.pad_map.pads,
+            self.pose.pose.position.x,
+            self.pose.pose.position.y,
+            blacklist=self.blacklist,
+            home=self.home,
+        )
 
     def _is_candidate(self, pad) -> bool:
-        if pad.is_takeoff_base or pad.visited:
-            return False
-        if int(pad.id) in self.blacklist:
-            return False
-        if pad.observations < 3:
-            return False
-        # Belt and braces for the case where registration failed: never treat
-        # anything sitting where we armed as a landing site.
-        if self.home is not None:
-            if math.hypot(pad.position.x - self.home[0],
-                          pad.position.y - self.home[1]) < 1.0:
-                return False
-        return True
+        return route.is_candidate(pad, blacklist=self.blacklist, home=self.home)
 
     def _takeoff_base_xy(self) -> tuple[float, float]:
         """Where home is. The map's registered entry if there is one, else the
         position we armed at."""
-        if self.pad_map is not None:
-            for pad in self.pad_map.pads:
-                if pad.is_takeoff_base:
-                    return (pad.position.x, pad.position.y)
-        return self.home if self.home is not None else (0.0, 0.0)
+        pads = self.pad_map.pads if self.pad_map is not None else ()
+        return route.takeoff_base_xy(
+            pads, fallback=self.home if self.home is not None else (0.0, 0.0))
 
     # ── SETTLE ───────────────────────────────────────────────────────────────
 

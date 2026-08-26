@@ -13,6 +13,7 @@
   <depend>std_srvs</depend>
   <depend>mavros_msgs</depend>
   <depend>hydrone_msgs</depend>
+  <depend>hydrone_nav</depend>
   <export>
     <build_type>ament_python</build_type>
   </export>
