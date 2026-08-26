@@ -175,11 +175,11 @@ def generate_launch_description():
             description="Run the world/coverage mapper over the ZED's point "
                         "cloud. Pure observer — turn it off to save CPU."),
         DeclareLaunchArgument(
-            "octomap", default_value="false",
+            "octomap", default_value="true",
             description="Run the 3-D occupancy map (cloud_filter_node + "
-                        "octomap_server). OFF by default: it is new, it costs "
-                        "CPU on a render budget that is already tight, and "
-                        "nothing in this mission reads it yet."),
+                        "octomap_server). Read it from /octomap_binary — the "
+                        "whole tree, ~3 KB, which is also what fits over a "
+                        "radio to the real drone."),
         DeclareLaunchArgument(
             "octomap_free_space", default_value="false",
             description="Also publish /free_cells_vis_array. A DEBUGGING view: "
@@ -193,11 +193,13 @@ def generate_launch_description():
                         "frames, so 2 Hz maps the same thing for a fifth of the "
                         "CPU and a fifth of the marker traffic."),
         DeclareLaunchArgument(
-            "octomap_res", default_value="0.10",
-            description="OctoMap leaf size in metres. 0.10 gives ~96k voxels "
-                        "for the 8x8x1.5 m arena and 8 cells across a Phase 4 "
-                        "window (0.8 m), which is what a planner needs to see "
-                        "the gap at all."),
+            "octomap_res", default_value="0.15",
+            description="OctoMap leaf size in metres. MEASURED on a 6x6 m "
+                        "floor plus a wall: 0.10 -> 111 KB per marker update, "
+                        "0.15 -> 52 KB, 0.20 -> 31 KB. 0.15 halves the traffic "
+                        "of 0.10 and still leaves ~5 cells across a Phase 4 "
+                        "window (0.8 m); 0.20 leaves 4, too coarse to trust a "
+                        "330 mm drone through."),
         DeclareLaunchArgument(
             "map_odom_tf", default_value="true",
             description="Publish the measured map -> odom that joins TF's two "
@@ -426,7 +428,14 @@ def generate_launch_description():
             "sensor_model.hit": 0.7,
             "sensor_model.miss": 0.4,
             "filter_ground_plane": False,
-            "latch": False,
+            # TRUE, and this is the fix for the display that goes red and
+            # empties. With latch False octomap_server publishes ONLY ON
+            # CHANGE, so a viewer that connects later — or reconnects after a
+            # dropped message — gets nothing at all until the map next changes,
+            # and rviz draws an empty, failed display in the meantime. Latched
+            # (TRANSIENT_LOCAL) every new subscriber is handed the current map
+            # immediately. It costs one retained message per topic.
+            "latch": True,
             # The single most expensive thing octomap publishes, and OFF by
             # default here for that reason. MEASURED on a 6x6 m floor plus one
             # wall, resolution 0.10: 172 KB per update of free cells and 111 KB
