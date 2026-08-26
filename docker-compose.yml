@@ -10,10 +10,12 @@ services:
       # Private DDS domain so other ROS 2 apps on this host (default domain 0)
       # can't reach the micro-ROS agent. Match this on the host via env.sh.
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-63}
-      # Keep DDS on loopback. Discovery over the LAN stalls the physics thread
-      # and the sim freezes a few seconds into bringup; confining it to
-      # localhost is what fixed that. Everything in this stack is on this host.
-      - ROS_LOCALHOST_ONLY=1
+      # OFF, and do not turn it on while ROS_DOMAIN_ID is set above: the two
+      # together isolate this container's DDS from the host, so rviz2 on the
+      # host lists no topics at all while the stack inside is publishing ~176.
+      # It was briefly enabled here (the LAN-discovery stall it fixes is real)
+      # and that is exactly what broke rviz. Pick one.
+      #- ROS_LOCALHOST_ONLY=1
       # Asset backend used by `biguasim.install(...)`; set on the host if used.
       - BS_WORLDS_URL=${BS_WORLDS_URL:-}
     volumes:
@@ -43,4 +45,10 @@ services:
     # ODOM_SOURCE selects what the EKF navigates on (docker_up.sh --ground-truth
     # sets it to ground_truth). Default vo — the estimator the real drone will
     # fly on; ground_truth is a debugging aid only. See sources_sim.launch.py.
-    command: ros2 launch hydrone_bringup ${HYDRONE_LAUNCH:-hydrone_sim.launch.py} odom_error_print:=${ODOM_ERROR_PRINT:-true} odom_source:=${ODOM_SOURCE:-vo}
+    # HYDRONE_LAUNCH_ARGS is whatever `name:=value` pairs were passed to
+    # docker_up.sh, joined with spaces, and is normally empty. It is
+    # deliberately UNQUOTED below: compose interpolates it into this string and
+    # then splits shell-style, which is how several pairs become several
+    # arguments — and how an empty value adds nothing at all. Drop it and every
+    # `name:=value` given to docker_up.sh is discarded without a word.
+    command: ros2 launch hydrone_bringup ${HYDRONE_LAUNCH:-hydrone_sim.launch.py} odom_error_print:=${ODOM_ERROR_PRINT:-true} odom_source:=${ODOM_SOURCE:-vo} ${HYDRONE_LAUNCH_ARGS}
