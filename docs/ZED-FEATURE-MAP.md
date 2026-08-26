@@ -16,7 +16,7 @@ what to set in RViz to actually see it.
 > *what the drone has seen*. They read the same camera topics and are otherwise
 > unrelated — see [§6](#6-why-this-is-not-in-the-vo-node).
 
-Source: `src/hydrone_nav/hydrone_nav/feature_map_node.py`.
+Source: `src/hydrone_map/hydrone_map/feature_map_node.py`.
 
 ---
 

@@ -42,7 +42,7 @@ BiguaSim DynamicsSensor ──> /biguasim/.../DynamicsSensor/Odom
 - Add `ros-humble-mavros-extras` (alongside `mavros` + `mavros-msgs`). The
   **`vision_pose` plugin lives in mavros-extras** and won't load without it.
 
-### 2. `src/hydrone_bringup/hydrone_bringup/vision_odom_bridge.py` (new node)
+### 2. `src/hydrone_localization/hydrone_localization/vision_odom_bridge.py` (new node)
 The heart of the branch. It:
 - Subscribes `/zed/zed_node/odom`, publishes `/mavros/vision_pose/pose`
   (**RELIABLE QoS** — the plugin subscribes reliable; a best-effort publisher is

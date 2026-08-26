@@ -118,8 +118,8 @@ Stop it early: `ros2 service call /hydrone/mission/abort std_srvs/srv/Trigger`
 | node | package | role |
 |---|---|---|
 | `pad_detector_node` | `hydrone_vision` | one per camera: detect pads, place them in the world |
-| `pad_map_node` | `hydrone_nav` | fuse detections into a persistent map; track `visited` |
-| `feature_map_node` | `hydrone_nav` | accumulates the ZED's point cloud into a world map + observation-coverage grid — see [`ZED-FEATURE-MAP.md`](ZED-FEATURE-MAP.md) |
+| `pad_map_node` | `hydrone_map` | fuse detections into a persistent map; track `visited` |
+| `feature_map_node` | `hydrone_map` | accumulates the ZED's point cloud into a world map + observation-coverage grid — see [`ZED-FEATURE-MAP.md`](ZED-FEATURE-MAP.md) |
 | `pad_mission_node` | `hydrone_mission` | the flight: search, land, take off, repeat |
 | `down_cam_mimic_node` | `hydrone_bringup` | **sim only**: BiguaSim's belly camera → `/down_cam/*` + TF |
 
