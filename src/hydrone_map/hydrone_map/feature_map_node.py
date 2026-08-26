@@ -52,9 +52,10 @@ they are why the old cloud looked like noise rather than a wall.
 
 Depth pixels have the opposite bias — they are dense exactly where surfaces are
 — so the map now samples the ZED's cloud on a stride grid and explicitly REJECTS
-the discontinuities that ORB used to seek out. See `_edge_mask`. That rejection
-is why the cloud has to arrive ORGANIZED (height x width, one point per pixel):
-a flattened cloud has no pixel neighbours left to compare against.
+the discontinuities that ORB used to seek out. That rejection lives in
+`hydrone_map.cloud_filter`, shared with anything else mapping the same cloud,
+and is why the cloud has to arrive ORGANIZED (height x width, one point per
+pixel): a flattened cloud has no pixel neighbours left to compare against.
 
 Why this and not the VO node
 ----------------------------
@@ -96,16 +97,17 @@ import math
 from collections import deque
 
 import numpy as np
+
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 
-import cv2
-
 from geometry_msgs.msg import Pose
 from nav_msgs.msg import OccupancyGrid, Odometry
 from sensor_msgs.msg import PointCloud2, PointField
+
+from hydrone_map import cloud_filter
 
 import tf2_ros
 
@@ -360,100 +362,34 @@ class FeatureMapNode(Node):
     # Geometry
     # ────────────────────────────────────────────────────────────────────────
 
-    def _xyz(self, msg: PointCloud2) -> np.ndarray | None:
-        """The cloud's x/y/z as an (H, W, 3) float32 view, or None.
-
-        Deliberately narrow: FLOAT32 x/y/z at 4-byte-aligned offsets in a
-        4-byte-aligned point. That is what the ZED publishes (x, y, z, rgb —
-        four floats, point_step 16) and what zed_mimic_node publishes, and a
-        cloud shaped otherwise is a cloud this node has not been told about.
-        Guessing at it would put silently wrong geometry into the map, so it
-        says so and drops the frame instead.
-        """
-        fields = {f.name: f for f in msg.fields}
-        try:
-            xyz = [fields[n] for n in ("x", "y", "z")]
-        except KeyError:
-            self.get_logger().error(
-                f"{self._cloud_topic} has no x/y/z fields; not mapping it",
-                throttle_duration_sec=30.0)
-            return None
-        if any(f.datatype != PointField.FLOAT32 or f.count != 1 or f.offset % 4
-               for f in xyz) or msg.point_step % 4:
-            self.get_logger().error(
-                f"{self._cloud_topic} is not float32 x/y/z on a 4-byte grid "
-                f"(point_step {msg.point_step}); not mapping it",
-                throttle_duration_sec=30.0)
-            return None
-
-        floats = np.frombuffer(msg.data, dtype=np.float32)
-        stride = msg.point_step // 4
-        n = msg.width * msg.height
-        if floats.size < n * stride:
-            return None
-        cols = [f.offset // 4 for f in xyz]
-        pts = floats[:n * stride].reshape(n, stride)[:, cols]
-        return pts.reshape(msg.height, msg.width, 3)
-
-    def _edge_mask(self, rng: np.ndarray, valid: np.ndarray) -> np.ndarray:
-        """True where range is locally smooth enough to trust.
-
-        A 3x3 min and max filter bracket each pixel's neighbourhood; a spread
-        wider than `max_edge_step` means the pixel straddles a silhouette and
-        its value is a foreground/background blend rather than a surface.
-
-        Invalid neighbours are pushed to opposite sentinels, so a pixel next to
-        a hole (the sky, mostly) also fails. That deliberately shaves the wall's
-        outline off the map — the outline is the part whose depth cannot be
-        trusted, and the face behind it survives intact.
-        """
-        kernel = np.ones((3, 3), np.uint8)
-        lo = np.where(valid, rng, np.float32(1e6))
-        hi = np.where(valid, rng, np.float32(-1e6))
-        local_min = cv2.erode(lo, kernel)
-        local_max = cv2.dilate(hi, kernel)
-        return (local_max - local_min) <= self.max_edge_step
-
     def _sample(self, msg: PointCloud2) -> np.ndarray | None:
-        """Cloud -> Mx3 camera-frame points, dropping holes and silhouettes."""
-        pts = self._xyz(msg)
-        if pts is None or pts.size == 0:
-            return None
-        h, w, _ = pts.shape
+        """Cloud -> Mx3 camera-frame points, dropping holes and silhouettes.
 
-        # Range, not one axis: the cloud's frame convention is the wrapper's
-        # business, and the distance from the camera is the same number in any
-        # of them. NaN (no return) fails every comparison, which is the answer.
-        rng = np.sqrt((pts.astype(np.float32) ** 2).sum(axis=2))
-        with np.errstate(invalid="ignore"):
-            valid = np.isfinite(rng) & (rng >= self.min_depth) & \
-                (rng <= self.max_depth)
-        if not valid.any():
+        The filtering itself lives in hydrone_map.cloud_filter, so an occupancy
+        map can reject the same flying pixels from the same cloud without a
+        second copy of the rule. What stays here is this node's reaction to a
+        cloud it cannot use: say so once, on a throttle, and drop the frame.
+        """
+        problem = cloud_filter.layout_problem(msg)
+        if problem is not None:
+            self.get_logger().error(
+                f"{self._cloud_topic} {problem}; not mapping it",
+                throttle_duration_sec=30.0)
             return None
 
-        if h > 1:
-            keep = valid & self._edge_mask(rng, valid)
-        else:
-            # An unorganized cloud has no neighbours to compare against, so the
-            # flying pixels stay in. Usable, but visibly noisier — the real
-            # wrapper publishes an organized cloud, so this is a fallback for a
-            # cloud that has been through a filter that flattened it.
-            keep = valid
-            if not self._unorganized_warned:
-                self.get_logger().warn(
-                    f"{self._cloud_topic} is unorganized (height 1); "
-                    "flying-pixel rejection needs pixel neighbours and is off.")
-                self._unorganized_warned = True
-
-        # Subsample AFTER filtering: the edge test needs full-resolution
-        # neighbours to see a discontinuity at all. On an organized cloud this
-        # takes one pixel in stride^2; on a flat one there is a single axis to
-        # stride along, so it thins by stride. Both are just density.
-        s = self.stride
-        keep = keep[::s, ::s]
-        if not keep.any():
-            return None
-        return pts[::s, ::s][keep].astype(np.float64)
+        points, unorganized = cloud_filter.sample(
+            cloud_filter.xyz_view(msg),
+            min_depth=self.min_depth,
+            max_depth=self.max_depth,
+            max_edge_step=self.max_edge_step,
+            stride=self.stride,
+        )
+        if unorganized and not self._unorganized_warned:
+            self.get_logger().warn(
+                f"{self._cloud_topic} is unorganized (height 1); "
+                "flying-pixel rejection needs pixel neighbours and is off.")
+            self._unorganized_warned = True
+        return points
 
     def _to_world(self, points: np.ndarray,
                   mount: tuple[np.ndarray, np.ndarray]) -> np.ndarray | None:
