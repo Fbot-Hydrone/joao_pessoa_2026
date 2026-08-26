@@ -54,21 +54,27 @@ class BiguaSimInterface():
 
         #TODO: make sure dynamics sensor is enabled 
         # 'bases' não faz parte do schema do BiguaSim — sai daqui antes do make.
-        bases_cfg = scenario.pop('bases', None)
+        # Com init=False quem cria o env é o ardubridge_node, e é ele que chama
+        # spawn_bases() depois; por isso a config fica guardada.
+        self.bases_cfg = scenario.pop('bases', None)
 
         if init:
             self.env = biguasim.make(scenario_cfg=scenario)
             self.scenario = self.env._scenario
-            if bases_cfg:
-                self.spawn_bases(bases_cfg)
+            if self.bases_cfg:
+                self.spawn_bases(self.bases_cfg)
             self.initialized = True
             self.sensors = self.create_sensor_list()
         else:
             self.scenario = scenario
             self.initialized = False
 
-    def spawn_bases(self, cfg):
+    def spawn_bases(self, cfg=None):
         """Sorteia e spawna as bases móveis antes do primeiro tick."""
+        cfg = cfg or self.bases_cfg
+        if not cfg:
+            return
+
         positions = sample_bases(
             count=cfg['count'],
             seed=cfg['seed'],

@@ -86,6 +86,12 @@ class ArduBridgeNode(Node):
 
         self.interface.scenario = runner_scenario
         self.interface.initialized = True
+
+        # Bases móveis da Fase 1: sorteadas por seed (bloco 'bases' do
+        # config.yaml). Aqui, e não na interface, porque com init=False quem
+        # cria o env é o runner acima — e o spawn precisa do env pronto e do
+        # bridge ainda parado.
+        self.interface.spawn_bases()
         self.interface.sensors = self.interface.create_sensor_list()
 
         # 5. Cria publishers e subscribers ROS2
