@@ -71,6 +71,16 @@ class CloudFilterNode(Node):
         self.declare_parameter("max_edge_step", 0.30)
         # ON here, off in feature_map_node — see the module docstring.
         self.declare_parameter("reject_hole_borders", True)
+        # Throttle. The camera runs at 10 Hz and octomap does not need every
+        # frame: the drone moves centimetres between them, so consecutive
+        # clouds carry almost the same rays. It IS the CPU dial (ray casting
+        # is per point) and the bandwidth dial — octomap republishes its whole
+        # visualisation on every insert, and MEASURED on a 6x6 m floor plus one
+        # wall that is 111 KB of occupied cells and 172 KB of free cells per
+        # update. At 10 Hz that is 2.8 MB/s of markers for a scene far smaller
+        # than the arena; at 2 Hz it is 0.6. feature_map_node throttles the
+        # same way and for the same reason (its process_hz is 4.0).
+        self.declare_parameter("process_hz", 2.0)
 
         p = lambda n: self.get_parameter(n).value  # noqa: E731
         self._in = p("in_cloud")
@@ -79,6 +89,9 @@ class CloudFilterNode(Node):
         self.max_depth = float(p("max_depth"))
         self.max_edge_step = float(p("max_edge_step"))
         self.reject_hole_borders = bool(p("reject_hole_borders"))
+        hz = float(p("process_hz"))
+        self._min_period_ns = int(1e9 / hz) if hz > 0 else 0
+        self._last_ns = 0
 
         # Best effort, depth 1: a cloud is worth publishing only while it is
         # the current one. Matches how the camera publishes it.
@@ -91,9 +104,17 @@ class CloudFilterNode(Node):
         self.get_logger().info(
             f"filtering {self._in} -> {p('out_cloud')} "
             f"(stride {self.stride}, {self.min_depth}-{self.max_depth} m, "
+            f"{hz:g} Hz, "
             f"hole borders {'rejected' if self.reject_hole_borders else 'kept'})")
 
     def _cb(self, msg: PointCloud2):
+        # Drop before doing any work: the filtering and the ray casting it
+        # feeds are the expensive parts, not the subscription.
+        now = self.get_clock().now().nanoseconds
+        if self._min_period_ns and now - self._last_ns < self._min_period_ns:
+            return
+        self._last_ns = now
+
         problem = cloud_filter.layout_problem(msg)
         if problem is not None:
             self.get_logger().error(f"{self._in} {problem}; not filtering it",

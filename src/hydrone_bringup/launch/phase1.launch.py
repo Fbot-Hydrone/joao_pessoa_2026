@@ -181,6 +181,18 @@ def generate_launch_description():
                         "CPU on a render budget that is already tight, and "
                         "nothing in this mission reads it yet."),
         DeclareLaunchArgument(
+            "octomap_free_space", default_value="false",
+            description="Also publish /free_cells_vis_array. A DEBUGGING view: "
+                        "it is 172 KB per update on a small scene and grows "
+                        "with the flight. Turn it on to inspect the map, not "
+                        "to fly with it."),
+        DeclareLaunchArgument(
+            "octomap_hz", default_value="2.0",
+            description="How often the cloud is handed to octomap. The camera "
+                        "runs at 10 Hz and the drone moves centimetres between "
+                        "frames, so 2 Hz maps the same thing for a fifth of the "
+                        "CPU and a fifth of the marker traffic."),
+        DeclareLaunchArgument(
             "octomap_res", default_value="0.10",
             description="OctoMap leaf size in metres. 0.10 gives ~96k voxels "
                         "for the 8x8x1.5 m arena and 8 cells across a Phase 4 "
@@ -372,6 +384,10 @@ def generate_launch_description():
         name="cloud_filter",
         output="screen",
         condition=IfCondition(LaunchConfiguration("octomap")),
+        parameters=[{
+            "process_hz": ParameterValue(
+                LaunchConfiguration("octomap_hz"), value_type=float),
+        }],
     )
 
     octomap = Node(
@@ -411,18 +427,19 @@ def generate_launch_description():
             "sensor_model.miss": 0.4,
             "filter_ground_plane": False,
             "latch": False,
-            # OFF by default in octomap_server, and it is the difference
-            # between an octree and a point cloud. With it off the only thing
-            # published about geometry is /occupied_cells_vis_array and
-            # /octomap_point_cloud_centers — occupied voxels, which look
-            # exactly like the voxel map we already had. Free space is what a
-            # planner needs and what an accumulated cloud cannot express:
-            # MEASURED on a synthetic 2x2 m wall at 3 m, resolution 0.10 —
-            # 231 occupied cubes at 10 cm, and 736 free cells across THREE
-            # tree depths (16 cubes of 40 cm, 132 of 20 cm, 588 of 10 cm).
-            # That collapse of empty volume into bigger cubes is the octree
-            # doing its job, and it is only visible with this on.
-            "publish_free_space": True,
+            # The single most expensive thing octomap publishes, and OFF by
+            # default here for that reason. MEASURED on a 6x6 m floor plus one
+            # wall, resolution 0.10: 172 KB per update of free cells and 111 KB
+            # of occupied cells, against 6 KB for the whole tree on
+            # /octomap_binary — the marker arrays republish EVERY voxel ever
+            # seen on every insert, so they grow for the length of the flight
+            # and are what makes rviz stutter and drop them.
+            #
+            # Turn it on to LOOK at the map (octomap_free_space:=true); leave
+            # it off to fly, and read the tree from /octomap_binary, which is
+            # what a planner wants anyway and what fits over a radio link.
+            "publish_free_space": ParameterValue(
+                LaunchConfiguration("octomap_free_space"), value_type=bool),
         }],
         remappings=[("cloud_in", "/hydrone/map/cloud_filtered")],
     )
