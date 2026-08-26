@@ -359,6 +359,13 @@ def generate_launch_description():
     # The cloud stays in the SENSOR's frame — octomap_server finds the ray
     # origin by looking the frame_id up in TF, and map_odom (below) is what
     # makes that lookup reach the world.
+    # What it publishes, and what to put in rviz2:
+    #   /occupied_cells_vis_array  MarkerArray    the octree's cubes
+    #   /free_cells_vis_array      MarkerArray    ray-cast free space
+    #   /projected_map             OccupancyGrid  2-D projection
+    #   /octomap_full|_binary      Octomap        the serialized tree
+    # The two MarkerArrays render in stock rviz2; the Octomap topics need
+    # octomap-rviz-plugins, which the Dockerfile installs.
     cloud_filter = Node(
         package="hydrone_map",
         executable="cloud_filter_node",
@@ -404,6 +411,18 @@ def generate_launch_description():
             "sensor_model.miss": 0.4,
             "filter_ground_plane": False,
             "latch": False,
+            # OFF by default in octomap_server, and it is the difference
+            # between an octree and a point cloud. With it off the only thing
+            # published about geometry is /occupied_cells_vis_array and
+            # /octomap_point_cloud_centers — occupied voxels, which look
+            # exactly like the voxel map we already had. Free space is what a
+            # planner needs and what an accumulated cloud cannot express:
+            # MEASURED on a synthetic 2x2 m wall at 3 m, resolution 0.10 —
+            # 231 occupied cubes at 10 cm, and 736 free cells across THREE
+            # tree depths (16 cubes of 40 cm, 132 of 20 cm, 588 of 10 cm).
+            # That collapse of empty volume into bigger cubes is the octree
+            # doing its job, and it is only visible with this on.
+            "publish_free_space": True,
         }],
         remappings=[("cloud_in", "/hydrone/map/cloud_filtered")],
     )

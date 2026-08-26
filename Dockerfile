@@ -61,8 +61,17 @@ RUN apt-get update && apt-get install -y \
 # part is what a planner needs and what our voxel hash cannot give it. Fed by
 # hydrone_map/cloud_filter_node, NOT by the raw cloud (see that node's
 # docstring: a flying pixel's ray carves free space through a real wall).
+# octomap-rviz-plugins is NOT optional for actually looking at the map: rviz2
+# cannot draw an octomap_msgs/Octomap without it, so /octomap_full and
+# /octomap_binary are invisible and the only thing left to add is
+# /octomap_point_cloud_centers — a plain PointCloud2 of occupied voxel centres
+# that looks exactly like the voxel map we already had, which is precisely how
+# a real octree gets mistaken for a copy of the old one. The plugin adds the
+# OccupancyGrid/OccupancyMap displays that render the tree itself, with its
+# probabilities and its free space.
 RUN apt-get update && apt-get install -y \
       ros-humble-octomap-server ros-humble-octomap-msgs \
+      ros-humble-octomap-rviz-plugins \
     && rm -rf /var/lib/apt/lists/*
 
 # ─────────────────────────────────────────────────────────────────────────────
