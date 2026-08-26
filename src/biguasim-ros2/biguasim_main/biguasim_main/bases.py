@@ -1,9 +1,10 @@
 """Sorteio determinístico das bases de pouso móveis da Fase 1.
 
 As regras (CBR 2026, Fase 1 / Obs. 2 e 3) colocam 6 bases móveis em qualquer
-lugar da arena, a pelo menos 0,5 m das paredes e a uma altura de 0 a 1,5 m.
-Aqui o sorteio é por seed: a mesma seed dá sempre a mesma arena, o que permite
-repetir uma corrida de teste tantas vezes quanto necessário.
+lugar da arena, inclusive em cima da casinha da Fase 4, a pelo menos 0,5 m das
+paredes e a uma altura de 0 a 1,5 m. Aqui o sorteio é por seed: a mesma seed dá
+sempre a mesma arena, o que permite repetir uma corrida de teste tantas vezes
+quanto necessário.
 
 Geometria, em coordenadas de mundo do CompetionMap (centro da arena = 0,0,0),
 lida da Figura 3 das regras. O canto onde ficam a base de decolagem e a casinha
@@ -15,46 +16,81 @@ import random
 
 ARENA_HALF = 4.0        # arena 8 x 8 m
 WALL_MARGIN = 0.5       # regra: bases a >= 0,5 m das paredes
-
-# (x_min, x_max, y_min, y_max) das regiões proibidas.
-KEEP_OUT = [
-    (-4.0, 2.0, 2.0, 4.0),   # casinha (ambiente confinado da Fase 4), 6 x 2 m
-    (2.0, 4.0, 2.5, 4.0),    # base de decolagem, 2 x 1,5 m
-]
-
 BASE_HALF = 0.5         # base de pouso 1 x 1 m
+
+# Casinha (ambiente confinado da Fase 4), 6 x 2 m e 1,5 m de altura, encostada
+# no mesmo canto da base de decolagem.
+HOUSE = (-4.0, 2.0, 2.0, 4.0)
+HOUSE_HEIGHT = 1.5
+
+# Base de decolagem, 2 x 1,5 m. Nada spawna em cima dela.
+TAKEOFF = (2.0, 4.0, 2.5, 4.0)
 
 
 def sample_bases(count, seed, z_min=0.0, z_max=1.5, min_spacing=1.5):
-    """Sorteia `count` posições [x, y, z] válidas para as bases móveis."""
+    """Sorteia `count` posições [x, y, z] válidas para as bases móveis.
+
+    A casinha não é um buraco no sorteio: um ponto que cai sobre ela vale, desde
+    que a base caiba inteira no telhado — e aí z é a altura da casinha, não um
+    valor sorteado.
+    """
     rng = random.Random(seed)
+
+    # O sorteio é ganancioso ponto a ponto, então um arranjo pode se fechar
+    # antes da última base caber. Nesse caso vale mais recomeçar o sorteio do
+    # que insistir no arranjo travado — o rng segue de onde parou, então o
+    # resultado continua determinístico para a seed.
+    for _layout in range(100):
+        chosen = _one_layout(rng, count, z_min, z_max, min_spacing)
+        if chosen is not None:
+            return chosen
+
+    raise RuntimeError(
+        f"não foi possível posicionar {count} bases com "
+        f"min_spacing={min_spacing} m na área livre da arena"
+    )
+
+
+def _one_layout(rng, count, z_min, z_max, min_spacing):
+    """Uma tentativa de arranjo completo. None se alguma base não coube."""
     limit = ARENA_HALF - WALL_MARGIN
     chosen = []
 
     for _ in range(count):
-        for _attempt in range(1000):
+        for _attempt in range(200):
             x = rng.uniform(-limit, limit)
             y = rng.uniform(-limit, limit)
-            if _blocked(x, y) or _too_close(x, y, chosen, min_spacing):
+            z = rng.uniform(z_min, z_max)
+
+            if _overlaps(x, y, TAKEOFF):
                 continue
-            chosen.append([x, y, rng.uniform(z_min, z_max)])
+            if _overlaps(x, y, HOUSE):
+                # Encostou na casinha: só vale em cima dela, inteira no telhado.
+                if not _inside(x, y, HOUSE, inset=BASE_HALF):
+                    continue
+                z = HOUSE_HEIGHT
+            if _too_close(x, y, chosen, min_spacing):
+                continue
+
+            chosen.append([x, y, z])
             break
         else:
-            raise RuntimeError(
-                f"não foi possível posicionar {count} bases com "
-                f"min_spacing={min_spacing} m na área livre da arena"
-            )
+            return None
 
     return chosen
 
 
-def _blocked(x, y):
-    """A base inteira (1 x 1 m) tem que ficar fora das regiões proibidas."""
-    return any(
-        x_min - BASE_HALF < x < x_max + BASE_HALF
-        and y_min - BASE_HALF < y < y_max + BASE_HALF
-        for x_min, x_max, y_min, y_max in KEEP_OUT
-    )
+def _overlaps(x, y, region):
+    """A base de 1 x 1 m encosta na região?"""
+    x_min, x_max, y_min, y_max = region
+    return (x_min - BASE_HALF < x < x_max + BASE_HALF
+            and y_min - BASE_HALF < y < y_max + BASE_HALF)
+
+
+def _inside(x, y, region, inset):
+    x_min, x_max, y_min, y_max = region
+    return (x_min + inset <= x <= x_max - inset
+            and y_min + inset <= y <= y_max - inset)
 
 
 def _too_close(x, y, chosen, min_spacing):
