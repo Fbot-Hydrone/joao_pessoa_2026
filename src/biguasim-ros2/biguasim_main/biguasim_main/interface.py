@@ -6,6 +6,7 @@ import numpy as np
 
 from pathlib import Path
 
+from biguasim_main.bases import sample_bases
 from biguasim_main.sensor_data_encode import encoders, multi_publisher_sensors
 
 #TODO: Maybe add sensor data encode to this file
@@ -52,14 +53,44 @@ class BiguaSimInterface():
         self.command = dict()
 
         #TODO: make sure dynamics sensor is enabled 
+        # 'bases' não faz parte do schema do BiguaSim — sai daqui antes do make.
+        bases_cfg = scenario.pop('bases', None)
+
         if init:
             self.env = biguasim.make(scenario_cfg=scenario)
             self.scenario = self.env._scenario
+            if bases_cfg:
+                self.spawn_bases(bases_cfg)
             self.initialized = True
             self.sensors = self.create_sensor_list()
         else:
             self.scenario = scenario
             self.initialized = False
+
+    def spawn_bases(self, cfg):
+        """Sorteia e spawna as bases móveis antes do primeiro tick."""
+        positions = sample_bases(
+            count=cfg['count'],
+            seed=cfg['seed'],
+            z_min=cfg.get('z_min', 0.0),
+            z_max=cfg.get('z_max', 1.5),
+            min_spacing=cfg.get('min_spacing', 1.5),
+        )
+
+        for position in positions:
+            self.env.send_world_command(
+                "CustomCommand",
+                string_params=["SpawnMesh", cfg['blueprint']],
+                num_params=position,
+            )
+
+        self.env.tick()
+
+        if self.node is not None:
+            self.node.get_logger().info(
+                f"{len(positions)} bases spawnadas (seed {cfg['seed']}): "
+                + ", ".join(f"[{x:.2f}, {y:.2f}, {z:.2f}]" for x, y, z in positions)
+            )
 
     def _get_agent_id(self, agent_name : str):
         split = agent_name.find('_')

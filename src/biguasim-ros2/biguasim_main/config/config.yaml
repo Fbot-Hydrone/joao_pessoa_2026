@@ -13,6 +13,16 @@
       octree_max: 5
       draw_arrow: true
       show_viewport: true
+      # Bases de pouso móveis da Fase 1: sorteadas por seed antes do primeiro
+      # tick (biguasim_main/bases.py). Mesma seed -> mesma arena, sempre.
+      # Remova o bloco inteiro para não spawnar base nenhuma.
+      bases:
+        seed: 42
+        count: 6
+        blueprint: "Blueprint'/Game/Maps/arena__2_/BP_base.BP_base_C'"
+        z_min: 0.0
+        z_max: 1.5          # regra: base móvel entre 0 e 1,5 m do solo
+        min_spacing: 1.5    # distância mínima entre centros, em metros
       agents:
         - agent_name: uav0
           agent_type: HolybroX500
