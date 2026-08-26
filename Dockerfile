@@ -98,11 +98,11 @@ RUN chmod +x /entrypoint.sh
 #    `--symlink-install` chains install/ -> build/ -> src/, which is what makes
 #    docker-compose.dev.yml's bind mounts live without any rebuild at all.
 COPY src/ src/
+# --base-paths instead of a hand-written --packages-select list: colcon
+# discovers every package under src/hydrone_* and src/biguasim-ros2, and a new
+# package needs no edit here. src/ardupilot is left out by not being named.
 RUN . /opt/ros/humble/setup.sh && \
-    colcon build --symlink-install \
-      --packages-select hydrone_msgs biguasim_interfaces biguasim_main \
-        hydrone_bringup hydrone_vision hydrone_controller hydrone_nav \
-        hydrone_map hydrone_localization hydrone_mission
+    colcon build --symlink-install --base-paths src/hydrone_* src/biguasim-ros2
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["ros2", "launch", "hydrone_bringup", "hydrone_sim.launch.py"]
