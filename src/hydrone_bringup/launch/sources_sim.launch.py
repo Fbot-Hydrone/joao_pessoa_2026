@@ -361,7 +361,7 @@ def generate_launch_description():
     # stereo-VO core. SIM-ONLY: on the real drone zed_wrapper (ZED SDK) publishes
     # /zed/zed_node/odom natively, so this node is not launched there.
     visual_odometry = Node(
-        package='hydrone_bringup',
+        package="hydrone_localization",
         executable='visual_odometry_node',
         output='screen',
         parameters=[{
@@ -407,7 +407,7 @@ def generate_launch_description():
     # /mavros/vision_pose/pose (VISION_POSITION_ESTIMATE). Consumes the agnostic
     # /zed odom, produces the agnostic /mavros pose — no sim assumption.
     vision_odom = Node(
-        package="hydrone_bringup",
+        package="hydrone_localization",
         executable="vision_odom_bridge",
         output="screen",
         parameters=[os.path.join(bringup_pkg, "config", "timeouts.yaml")],

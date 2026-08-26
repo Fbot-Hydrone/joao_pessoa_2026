@@ -271,7 +271,7 @@ def generate_launch_description():
     # nobody publishes would leave the EKF waiting on vision that never comes,
     # which looks exactly like a bad estimate rather than a missing one.
     vision_odom = Node(
-        package="hydrone_bringup",
+        package="hydrone_localization",
         executable="vision_odom_bridge",
         output="screen",
         condition=IfCondition(LaunchConfiguration("zed_odom")),

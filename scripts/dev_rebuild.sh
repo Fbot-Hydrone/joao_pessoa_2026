@@ -23,7 +23,7 @@ cd "$(dirname "$0")/.."
 
 ALL_PKGS=(hydrone_msgs biguasim_interfaces biguasim_main hydrone_bringup
           hydrone_vision hydrone_controller hydrone_nav hydrone_map
-          hydrone_mission)
+          hydrone_localization hydrone_mission)
 
 RESTART=false
 pkgs=()
@@ -54,8 +54,9 @@ docker compose exec -w /ws -e PYTHONDONTWRITEBYTECODE=1 hydrone bash -c \
 # Only the bind-mounted project trees — never /ws/src/ardupilot & friends,
 # which are image-internal and legitimately root-owned.
 MOUNTED_SRC=(/ws/src/hydrone_bringup /ws/src/hydrone_controller
-             /ws/src/hydrone_map /ws/src/hydrone_mission /ws/src/hydrone_msgs
-             /ws/src/hydrone_nav /ws/src/hydrone_vision /ws/src/biguasim-ros2)
+             /ws/src/hydrone_localization /ws/src/hydrone_map
+             /ws/src/hydrone_mission /ws/src/hydrone_msgs /ws/src/hydrone_nav
+             /ws/src/hydrone_vision /ws/src/biguasim-ros2)
 docker compose exec -w /ws hydrone bash -c \
     "find ${MOUNTED_SRC[*]} ! -uid $(id -u) -exec chown $(id -u):$(id -g) {} + 2>/dev/null; true"
 

@@ -341,7 +341,7 @@ def generate_launch_description():
     # wrong by 90 degrees, is in landing_sites.launch.py — it is the same node
     # doing the same job here.
     map_odom_tf = Node(
-        package="hydrone_bringup",
+        package="hydrone_localization",
         executable="map_odom_node",
         name="map_odom",
         output="screen",

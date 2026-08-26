@@ -243,7 +243,7 @@ def generate_launch_description():
     # different meanings — set publish_map_tf:=false there, or set this argument
     # false and let the ZED own it. See sources_real.launch.py.
     map_odom_tf = Node(
-        package="hydrone_bringup",
+        package="hydrone_localization",
         executable="map_odom_node",
         name="map_odom",
         output="screen",
