@@ -18,16 +18,16 @@ ARENA_HALF = 4.0        # arena 8 x 8 m
 WALL_MARGIN = 0.5       # regra: bases a >= 0,5 m das paredes
 BASE_HALF = 0.5         # base de pouso 1 x 1 m
 
-# Casinha (ambiente confinado da Fase 4), 6 x 2 m e 1,5 m de altura, encostada
-# no mesmo canto da base de decolagem.
-HOUSE = (-4.0, 2.0, 2.0, 4.0)
-HOUSE_HEIGHT = 1.5
-
-# Base de decolagem, 2 x 1,5 m. Nada spawna em cima dela.
-TAKEOFF = (2.0, 4.0, 2.5, 4.0)
+# A casinha e a base de decolagem vêm do config.yaml, como
+# [x_min, x_max, y_min, y_max] em metros. Estes são só os defaults.
+DEFAULT_HOUSE = (-4.0, 2.0, 2.0, 4.0)
+DEFAULT_HOUSE_HEIGHT = 1.5
+DEFAULT_TAKEOFF = (2.0, 4.0, 2.0, 4.0)
 
 
-def sample_bases(count, seed, z_min=0.0, z_max=1.5, min_spacing=1.5):
+def sample_bases(count, seed, z_min=0.0, z_max=1.5, min_spacing=1.5,
+                 house=DEFAULT_HOUSE, house_height=DEFAULT_HOUSE_HEIGHT,
+                 takeoff=DEFAULT_TAKEOFF):
     """Sorteia `count` posições [x, y, z] válidas para as bases móveis.
 
     A casinha não é um buraco no sorteio: um ponto que cai sobre ela vale, desde
@@ -41,7 +41,8 @@ def sample_bases(count, seed, z_min=0.0, z_max=1.5, min_spacing=1.5):
     # que insistir no arranjo travado — o rng segue de onde parou, então o
     # resultado continua determinístico para a seed.
     for _layout in range(100):
-        chosen = _one_layout(rng, count, z_min, z_max, min_spacing)
+        chosen = _one_layout(rng, count, z_min, z_max, min_spacing,
+                             house, house_height, takeoff)
         if chosen is not None:
             return chosen
 
@@ -51,7 +52,8 @@ def sample_bases(count, seed, z_min=0.0, z_max=1.5, min_spacing=1.5):
     )
 
 
-def _one_layout(rng, count, z_min, z_max, min_spacing):
+def _one_layout(rng, count, z_min, z_max, min_spacing, house, house_height,
+                takeoff):
     """Uma tentativa de arranjo completo. None se alguma base não coube."""
     limit = ARENA_HALF - WALL_MARGIN
     chosen = []
@@ -62,13 +64,13 @@ def _one_layout(rng, count, z_min, z_max, min_spacing):
             y = rng.uniform(-limit, limit)
             z = rng.uniform(z_min, z_max)
 
-            if _overlaps(x, y, TAKEOFF):
+            if _overlaps(x, y, takeoff):
                 continue
-            if _overlaps(x, y, HOUSE):
+            if _overlaps(x, y, house):
                 # Encostou na casinha: só vale em cima dela, inteira no telhado.
-                if not _inside(x, y, HOUSE, inset=BASE_HALF):
+                if not _inside(x, y, house, inset=BASE_HALF):
                     continue
-                z = HOUSE_HEIGHT
+                z = house_height
             if _too_close(x, y, chosen, min_spacing):
                 continue
 

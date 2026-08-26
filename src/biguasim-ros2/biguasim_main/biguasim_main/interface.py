@@ -81,6 +81,9 @@ class BiguaSimInterface():
             z_min=cfg.get('z_min', 0.0),
             z_max=cfg.get('z_max', 1.5),
             min_spacing=cfg.get('min_spacing', 1.5),
+            house=cfg['house'],
+            house_height=cfg['house_height'],
+            takeoff=cfg['takeoff'],
         )
 
         for position in positions:

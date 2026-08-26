@@ -23,6 +23,12 @@
         z_min: 0.0
         z_max: 1.5          # regra: base móvel entre 0 e 1,5 m do solo
         min_spacing: 1.5    # distância mínima entre centros, em metros
+        # Regiões da arena, como [x_min, x_max, y_min, y_max] em metros.
+        # Medidas no viewport. Na casinha só spawna em cima, a house_height;
+        # na base de decolagem não spawna nada.
+        house: [-4.0, 2.0, 2.0, 4.0]
+        house_height: 1.5   # altura do telhado, onde a base pousa
+        takeoff: [2.0, 4.0, 2.0, 4.0]
       agents:
         - agent_name: uav0
           agent_type: HolybroX500
