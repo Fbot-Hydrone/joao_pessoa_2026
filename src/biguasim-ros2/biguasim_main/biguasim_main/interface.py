@@ -86,11 +86,18 @@ class BiguaSimInterface():
             takeoff=cfg['takeoff'],
         )
 
-        for position in positions:
+        for x, y, z in positions:
+            # Y INVERTIDO: o SpawnMesh do mapa usa o eixo Y com sinal oposto ao
+            # do 'location' do agente, que é o frame em que a arena foi medida
+            # (casinha x[-4,2] y[2,4], takeoff x[2,4] y[2,4]). Sem o sinal, uma
+            # base sorteada em y=-2.89 aparecia em +2.89, ou seja, em cima da
+            # base de decolagem — enquanto o keep-out, que trabalha no frame
+            # medido, a considerava livre. Diagnosticado espelhando as
+            # coordenadas do log contra o viewport (2026-08-26).
             self.env.send_world_command(
                 "CustomCommand",
                 string_params=["SpawnMesh", cfg['blueprint']],
-                num_params=position,
+                num_params=[x, -y, z],
             )
 
         self.env.tick()
