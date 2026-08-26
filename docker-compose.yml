@@ -10,6 +10,10 @@ services:
       # Private DDS domain so other ROS 2 apps on this host (default domain 0)
       # can't reach the micro-ROS agent. Match this on the host via env.sh.
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-63}
+      # Keep DDS on loopback. Discovery over the LAN stalls the physics thread
+      # and the sim freezes a few seconds into bringup; confining it to
+      # localhost is what fixed that. Everything in this stack is on this host.
+      - ROS_LOCALHOST_ONLY=1
       # Asset backend used by `biguasim.install(...)`; set on the host if used.
       - BS_WORLDS_URL=${BS_WORLDS_URL:-}
     volumes:

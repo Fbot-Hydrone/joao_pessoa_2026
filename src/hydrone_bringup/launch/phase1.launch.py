@@ -19,6 +19,7 @@ Nodes
   pad_detector (down)     belly RGB      -> /hydrone/pads/down/detections
   pad_map                 forward dets   -> /hydrone/pads/map + RViz markers
   feature_map             ZED point cloud-> /hydrone/map/cloud + coverage
+  cloud_filter+octomap    ZED cloud      -> 3-D occupancy map      [opt-in: octomap:=true]
   map_odom_tf             measured map -> odom (joins TF's two trees)
   phase1_mission          map + MAVROS   -> the flight itself
 
@@ -173,6 +174,18 @@ def generate_launch_description():
             "feature_map", default_value="true",
             description="Run the world/coverage mapper over the ZED's point "
                         "cloud. Pure observer — turn it off to save CPU."),
+        DeclareLaunchArgument(
+            "octomap", default_value="false",
+            description="Run the 3-D occupancy map (cloud_filter_node + "
+                        "octomap_server). OFF by default: it is new, it costs "
+                        "CPU on a render budget that is already tight, and "
+                        "nothing in this mission reads it yet."),
+        DeclareLaunchArgument(
+            "octomap_res", default_value="0.10",
+            description="OctoMap leaf size in metres. 0.10 gives ~96k voxels "
+                        "for the 8x8x1.5 m arena and 8 cells across a Phase 4 "
+                        "window (0.8 m), which is what a planner needs to see "
+                        "the gap at all."),
         DeclareLaunchArgument(
             "map_odom_tf", default_value="true",
             description="Publish the measured map -> odom that joins TF's two "
@@ -335,6 +348,66 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration("feature_map")),
     )
 
+    # ── 3-D occupancy map (opt-in) ───────────────────────────────────────────
+    #
+    # Two nodes, and the split matters. cloud_filter_node removes the points
+    # that would lie to a ray; octomap_server casts the rays. Pointing
+    # octomap_server straight at the camera is the obvious wiring and the wrong
+    # one: a flying pixel at 18 m carves free space through the wall at 4.86 m
+    # that it actually belongs to. See hydrone_map/cloud_filter_node.py.
+    #
+    # The cloud stays in the SENSOR's frame — octomap_server finds the ray
+    # origin by looking the frame_id up in TF, and map_odom (below) is what
+    # makes that lookup reach the world.
+    cloud_filter = Node(
+        package="hydrone_map",
+        executable="cloud_filter_node",
+        name="cloud_filter",
+        output="screen",
+        condition=IfCondition(LaunchConfiguration("octomap")),
+    )
+
+    octomap = Node(
+        package="octomap_server",
+        executable="octomap_server_node",
+        name="octomap_server",
+        output="screen",
+        condition=IfCondition(LaunchConfiguration("octomap")),
+        parameters=[{
+            "resolution": ParameterValue(
+                LaunchConfiguration("octomap_res"), value_type=float),
+            # The frame the map is built in. `odom` is continuous; `map` steps
+            # whenever the EKF corrects, and a stepped frame tears an occupancy
+            # map exactly like it tears a cloud. feature_map_node publishes in
+            # `odom` for the same reason.
+            "frame_id": "odom",
+            # Ray origin. Must be the vehicle, not the map: octomap uses it to
+            # decide what a ray passed THROUGH.
+            "base_frame_id": "base_link",
+            # The arena's ceiling is the net at ~2.5 m and its floor is flat.
+            # Clamping keeps the sky (and any reflection off the white floor)
+            # out of the tree instead of paying to ray-cast it. VERIFIED
+            # against `ros2 param list` on octomap_server 2.3.1: the names are
+            # point_cloud_min_z / point_cloud_max_z. `pointcloud_*_z` (no
+            # underscore) is the name in a lot of older docs and it does NOT
+            # exist here — the node accepts it as an undeclared override and
+            # ignores it, so the clamp would silently never happen.
+            "point_cloud_min_z": -0.5,
+            "point_cloud_max_z": 3.0,
+            # Same cap as cloud_filter_node's max_depth, for the same reason:
+            # past the arena's 11.3 m diagonal there is nothing real to map.
+            "sensor_model.max_range": 12.0,
+            # Occupancy is a competition-critical judgement, so make it slow to
+            # believe and slow to forget: defaults (0.7/0.4) flip a cell on one
+            # frame. Phase 4 flies through gaps this map defines.
+            "sensor_model.hit": 0.7,
+            "sensor_model.miss": 0.4,
+            "filter_ground_plane": False,
+            "latch": False,
+        }],
+        remappings=[("cloud_in", "/hydrone/map/cloud_filtered")],
+    )
+
     # Joins TF's two disconnected trees, by MEASURING map -> odom rather than
     # assuming identity: map_T_odom = map_T_base . (odom_T_base)^-1. The full
     # argument, including the 2026-08-20 measurement that showed identity to be
@@ -384,6 +457,8 @@ def generate_launch_description():
         down_detector,
         pad_map,
         feature_map,
+        cloud_filter,
+        octomap,
         map_odom_tf,
         mission,
     ])

@@ -17,6 +17,7 @@
   <depend>tf2_ros</depend>
   <depend>mavros_msgs</depend>
   <depend>hydrone_msgs</depend>
+  <exec_depend>octomap_server</exec_depend>
   <export>
     <build_type>ament_python</build_type>
   </export>

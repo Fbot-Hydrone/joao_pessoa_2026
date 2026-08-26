@@ -56,6 +56,15 @@ RUN apt-get update && apt-get install -y \
     && (geographiclib-get-geoids egm96-5 || true) \
     && rm -rf /var/lib/apt/lists/*
 
+# OctoMap: the 3-D occupancy map. octomap_server turns a PointCloud2 plus TF
+# into occupied/free/unknown by casting a ray to every point — the free/unknown
+# part is what a planner needs and what our voxel hash cannot give it. Fed by
+# hydrone_map/cloud_filter_node, NOT by the raw cloud (see that node's
+# docstring: a flying pixel's ray carves free space through a real wall).
+RUN apt-get update && apt-get install -y \
+      ros-humble-octomap-server ros-humble-octomap-msgs \
+    && rm -rf /var/lib/apt/lists/*
+
 # ─────────────────────────────────────────────────────────────────────────────
 # LAYER ORDER MATTERS BELOW THIS LINE.
 #

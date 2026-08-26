@@ -73,8 +73,8 @@ def xyz_view(msg) -> np.ndarray | None:
     return pts.reshape(msg.height, msg.width, 3)
 
 
-def edge_mask(rng: np.ndarray, valid: np.ndarray,
-              max_edge_step: float) -> np.ndarray:
+def edge_mask(rng: np.ndarray, valid: np.ndarray, max_edge_step: float,
+              reject_hole_borders: bool = False) -> np.ndarray:
     """True where range is locally smooth enough to trust.
 
     A 3x3 min and max filter bracket each pixel's neighbourhood; a spread wider
@@ -86,26 +86,33 @@ def edge_mask(rng: np.ndarray, valid: np.ndarray,
     -1e6 is below every one, so the dilate never picks it. A pixel bordering a
     hole is therefore judged only on its valid neighbours, and survives.
 
-    NOTE (2026-08-26): this contradicts what the docstring in feature_map_node
-    claimed before the code moved here — it said a pixel next to a hole "also
-    fails", which would need the sentinels the other way round (lo = -1e6,
-    hi = +1e6). The behaviour below is what has been flying and mapping, so it
-    is what is kept and what test_cloud_filter pins. Whether a hole's border
-    SHOULD be shaved is a real question for the occupancy map — the sky border
-    is exactly where a ray would otherwise carve through a wall's outline — but
-    it is a change in what gets mapped, not a fix, and it belongs in its own
-    commit with a look at the resulting cloud.
+    `reject_hole_borders` flips those sentinels, so a pixel touching a hole
+    fails and the wall's outline is shaved off. It is OFF by default because
+    that is the behaviour feature_map_node has been mapping with, and turning
+    it on there would silently change the map. It is ON for occupancy mapping,
+    where the sky border is the worst place to be wrong: a ray to a
+    foreground/background blend carves free space straight through the outline
+    of the wall it belongs to.
+
+    NOTE (2026-08-26): the default contradicts what feature_map_node's
+    docstring claimed before this code moved here — it said a pixel next to a
+    hole "also fails". It never did. The claim is now the opt-in.
     """
     kernel = np.ones((3, 3), np.uint8)
-    lo = np.where(valid, rng, np.float32(1e6))
-    hi = np.where(valid, rng, np.float32(-1e6))
+    # Inert sentinels (+1e6 never wins a min, -1e6 never wins a max) leave a
+    # hole's neighbours judged only on their valid neighbours; swapping them
+    # makes any hole in the 3x3 blow the spread wide open.
+    miss_lo, miss_hi = ((-1e6, 1e6) if reject_hole_borders else (1e6, -1e6))
+    lo = np.where(valid, rng, np.float32(miss_lo))
+    hi = np.where(valid, rng, np.float32(miss_hi))
     local_min = cv2.erode(lo, kernel)
     local_max = cv2.dilate(hi, kernel)
     return (local_max - local_min) <= max_edge_step
 
 
 def sample(pts: np.ndarray, *, min_depth: float, max_depth: float,
-           max_edge_step: float, stride: int) -> tuple[np.ndarray | None, bool]:
+           max_edge_step: float, stride: int,
+           reject_hole_borders: bool = False) -> tuple[np.ndarray | None, bool]:
     """(H, W, 3) camera-frame cloud -> (Mx3 points, was_unorganized).
 
     Drops holes and silhouettes, then thins. `points` is None when nothing
@@ -127,7 +134,8 @@ def sample(pts: np.ndarray, *, min_depth: float, max_depth: float,
 
     unorganized = h <= 1
     if not unorganized:
-        keep = valid & edge_mask(rng, valid, max_edge_step)
+        keep = valid & edge_mask(rng, valid, max_edge_step,
+                                 reject_hole_borders)
     else:
         # An unorganized cloud has no neighbours to compare against, so the
         # flying pixels stay in. Usable, but visibly noisier — the real wrapper
