@@ -33,6 +33,7 @@ services:
       - ./src/hydrone_controller:/ws/src/hydrone_controller
       - ./src/hydrone_mission:/ws/src/hydrone_mission
       - ./src/hydrone_msgs:/ws/src/hydrone_msgs
+      - ./src/hydrone_map:/ws/src/hydrone_map
       - ./src/hydrone_nav:/ws/src/hydrone_nav
       - ./src/hydrone_vision:/ws/src/hydrone_vision
       # Note the path: these live under src/biguasim-ros2/ in the image too,

@@ -167,7 +167,7 @@ def generate_launch_description():
     )
 
     pad_map = Node(
-        package="hydrone_nav",
+        package="hydrone_map",
         executable="pad_map_node",
         name="pad_map",
         output="screen",
@@ -189,7 +189,7 @@ def generate_launch_description():
     # where back-projection belongs. Coverage has no counterpart on the ZED, so
     # it lives here.
     feature_map = Node(
-        package="hydrone_nav",
+        package="hydrone_map",
         executable="feature_map_node",
         name="feature_map",
         output="screen",

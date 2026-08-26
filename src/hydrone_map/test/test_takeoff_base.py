@@ -15,7 +15,7 @@ Run inside the stack container, with the workspace built:
 
     docker run --rm -v $PWD:/repo -w /repo joao_pessoa_2026-hydrone:latest bash -c \
       '. /ws/install/setup.sh && python3 -m pytest \
-       src/hydrone_nav/test/test_takeoff_base.py -q'
+       src/hydrone_map/test/test_takeoff_base.py -q'
 """
 
 import pytest
@@ -28,7 +28,7 @@ from mavros_msgs.msg import State
 
 from hydrone_msgs.msg import PadDetection
 from hydrone_msgs.srv import MarkPadVisited, RegisterTakeoffBase
-from hydrone_nav.pad_map_node import PadMapNode
+from hydrone_map.pad_map_node import PadMapNode
 
 
 @pytest.fixture(scope="module", autouse=True)

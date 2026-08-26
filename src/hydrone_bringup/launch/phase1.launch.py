@@ -75,7 +75,7 @@ DOWN_DETECTIONS = "/hydrone/pads/down/detections"
 def generate_launch_description():
     args = [
         DeclareLaunchArgument(
-            "takeoff_alt", default_value="1.5",
+            "takeoff_alt", default_value="3",
             description="Altitude for everything: takeoff, turning, travelling "
                         "and the confirmation hover, m above the top of the "
                         "base the drone starts on. Low on purpose — this is "
@@ -104,7 +104,7 @@ def generate_launch_description():
                         "or explained. phase1_real.launch.py sets this; see "
                         "docs/LANDING-SITES.md."),
         DeclareLaunchArgument(
-            "target_bases", default_value="2",
+            "target_bases", default_value="6",
             description="How many landing sites to visit before returning to "
                         "the takeoff base. The takeoff base is not one of "
                         "them. ONE while the mission has never been flown: the "
@@ -306,7 +306,7 @@ def generate_launch_description():
     )
 
     pad_map = Node(
-        package="hydrone_nav",
+        package="hydrone_map",
         executable="pad_map_node",
         name="pad_map",
         output="screen",
@@ -328,7 +328,7 @@ def generate_launch_description():
     # Accumulates the ZED's own point cloud into a persistent voxel map plus a
     # coverage grid. Pure observer; nothing in this mission reads it.
     feature_map = Node(
-        package="hydrone_nav",
+        package="hydrone_map",
         executable="feature_map_node",
         name="feature_map",
         output="screen",

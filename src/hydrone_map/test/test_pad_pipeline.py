@@ -21,7 +21,7 @@ Run inside the stack container, with the workspace built:
 
     docker run --rm -v $PWD:/repo -w /repo joao_pessoa_2026-hydrone:latest bash -c \
       '. /ws/install/setup.sh && python3 -m pytest \
-       src/hydrone_nav/test/test_pad_pipeline.py -q'
+       src/hydrone_map/test/test_pad_pipeline.py -q'
 """
 
 import os
@@ -46,7 +46,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..",
 from hydrone_bringup.down_cam_mimic_node import DownCamMimicNode  # noqa: E402
 from hydrone_msgs.msg import PadMap  # noqa: E402
 from hydrone_msgs.srv import MarkPadVisited  # noqa: E402
-from hydrone_nav.pad_map_node import PadMapNode  # noqa: E402
+from hydrone_map.pad_map_node import PadMapNode  # noqa: E402
 from hydrone_vision.pad_detector_node import PadDetectorNode  # noqa: E402
 
 from test_pad_detector import ground, paste_pad, render_pad, square_quad  # noqa: E402

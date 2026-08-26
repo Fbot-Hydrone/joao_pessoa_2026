@@ -1,8 +1,6 @@
 from setuptools import setup, find_packages
-import os
-from glob import glob
 
-package_name = 'hydrone_nav'
+package_name = 'hydrone_map'
 
 setup(
     name=package_name,
@@ -17,11 +15,12 @@ setup(
     zip_safe=True,
     maintainer='Hydrone Team',
     maintainer_email='team@hydrone.com',
-    description='Navigation: route planning, precision landing, maze traversal',
+    description='What the drone remembers about the world: the pad map and the accumulated point-cloud map',
     license='MIT',
     entry_points={
         'console_scripts': [
-            'nav_node = hydrone_nav.nav_node:main',
+            'pad_map_node = hydrone_map.pad_map_node:main',
+            'feature_map_node = hydrone_map.feature_map_node:main',
         ],
     },
 )
