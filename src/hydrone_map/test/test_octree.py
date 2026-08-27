@@ -6,6 +6,7 @@ actual serialization it publishes — not a fixture someone wrote by hand.
     python3 -m pytest src/hydrone_map/test/test_octree.py -q
 """
 
+import os
 import struct
 import time
 
@@ -245,3 +246,33 @@ def test_a_leg_into_the_wall_hits_an_obstacle(tree):
 
 def test_a_leg_through_open_air_hits_nothing(tree):
     assert not path_hits_obstacle(tree, (2.0, -1.0, 0.6), (2.0, 1.0, 0.6))
+
+
+def test_decoding_does_not_print_to_stderr(tree, capfd):
+    """readBinary complains "Tree size mismatch" on every call, from C++, at
+    the file-descriptor level. A caller that decodes on a timer buries its own
+    log in it — MEASURED at 2 Hz for a flight, ~600 copies, hiding the mission
+    state lines that explained a hang."""
+    import tempfile as tf
+    from octomap_msgs.msg import Octomap
+
+    fd, path = tf.mkstemp(suffix=".bt")
+    os.close(fd)
+    tree.writeBinary(path.encode())
+    with open(path, "rb") as f:
+        blob = f.read()
+    os.unlink(path)
+
+    msg = Octomap()
+    msg.binary = True
+    msg.id = "OcTree"
+    msg.resolution = tree.getResolution()
+    # The message's `data` is int8, so the payload has to be signed.
+    payload = blob[blob.index(b"data\n") + 5:]
+    msg.data = [b - 256 if b > 127 else b for b in payload]
+
+    capfd.readouterr()                       # discard anything already buffered
+    assert tree_from_msg(msg).size() > 0     # it still has to WORK
+    out, err = capfd.readouterr()
+    assert "Tree size mismatch" not in err
+    assert "Tree size mismatch" not in out

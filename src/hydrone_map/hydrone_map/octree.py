@@ -30,11 +30,39 @@ returns False and still populates the tree correctly (VERIFIED: 6439 nodes,
 value and check tree.size() instead, which is the honest test of success.
 """
 
+import contextlib
 import os
 import tempfile
 
 import numpy as np
 import octomap
+
+
+@contextlib.contextmanager
+def _quiet_stderr():
+    """Swallow readBinary's expected "Tree size mismatch" line.
+
+    The header's `size` cannot be known before reading, so it is written as 1
+    and the C++ reader complains on every call — see the module docstring: it
+    is EXPECTED, the tree is populated correctly, and tree.size() is what
+    actually reports success. But the complaint goes to the process's stderr
+    at the file-descriptor level, under Python, so no logging filter reaches
+    it. A caller that decodes on a timer therefore buries its own log in it.
+    MEASURED: 2 Hz for a whole flight, ~600 copies, and it hid the mission
+    state lines that explained a hang.
+
+    Redirects fd 2 rather than sys.stderr for that reason. Restored in a
+    finally, so an exception inside does not leave the process mute.
+    """
+    saved = os.dup(2)
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    try:
+        os.dup2(devnull, 2)
+        yield
+    finally:
+        os.dup2(saved, 2)
+        os.close(devnull)
+        os.close(saved)
 
 
 class State:
@@ -65,7 +93,8 @@ def tree_from_msg(msg) -> octomap.OcTree:
             f.write(bytes(msg.data))
 
         tree = octomap.OcTree(msg.resolution)
-        tree.readBinary(path.encode())              # return value is unreliable
+        with _quiet_stderr():
+            tree.readBinary(path.encode())          # return value is unreliable
     finally:
         os.unlink(path)
 

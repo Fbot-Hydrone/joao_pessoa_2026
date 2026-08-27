@@ -389,7 +389,8 @@ class Phase1MissionNode(Node):
         # empty, which is exactly what every leg was before there was a
         # planner.
         self._leg: list[tuple[float, float, float, float]] = []
-        self.octree_tree = None         # decoded on demand, see _cb_octomap
+        self._octomap_msg = None        # raw and latched; see _cb_octomap
+        self.octree_tree = None         # decoded per leg, in _goto_via_map
         b = [float(v) for v in self.get_parameter("plan_bounds").value]
         self.plan_bounds = (tuple(b[:3]), tuple(b[3:]))
         self.plan_allow_unknown = bool(
@@ -520,19 +521,36 @@ class Phase1MissionNode(Node):
         self.pose = msg
 
     def _cb_octomap(self, msg: Octomap):
-        """Keep the newest tree, decoded.
+        """Keep the newest tree as BYTES. Decoding happens when a leg is planned.
 
-        Decoding writes a temp file (octomap-python only reads from disk), so
-        it is not free — but the map updates at 2 Hz and a leg is planned far
-        less often than that, so doing it here costs less than the alternative
-        of decoding inside a state handler and stalling the setpoint stream at
-        the moment a leg begins.
+        This decoded eagerly until it was flown and watched. Two things were
+        wrong with that, both measured on a 5.5 minute run:
+
+        * the arena's tree reaches ~86000 nodes, and decoding it at the map's
+          2 Hz means paying for a full deserialize 660 times a flight to answer
+          the two questions a mission actually asks
+        * octomap-python's readBinary prints "Tree size mismatch" to stderr on
+          every call — expected and harmless (see hydrone_map.octree), but at
+          2 Hz it buried the mission's own log. Finding out WHY this run hung
+          meant digging the state lines out from under 600 copies of it.
+
+        The map is latched, so a message kept here is always the current one.
         """
+        self._octomap_msg = msg
+
+    def _tree(self):
+        """The current tree, decoded now, or None.
+
+        Called at the top of a leg — twice a mission, not twice a second.
+        """
+        if self._octomap_msg is None:
+            return None
         try:
-            self.octree_tree = octree.tree_from_msg(msg)
+            return octree.tree_from_msg(self._octomap_msg)
         except ValueError as exc:
             self.get_logger().warn(f"octomap: {exc}",
                                    throttle_duration_sec=20.0)
+            return None
 
     def _cb_map(self, msg: PadMap):
         self.pad_map = msg
@@ -657,6 +675,8 @@ class Phase1MissionNode(Node):
         """
         self._leg = []
         target = (x, y, z)
+        # Decoded once, here, and used for every question this leg asks.
+        self.octree_tree = self._tree()
         occ = self._occupancy()
         if occ is None:
             self.get_logger().warn(
