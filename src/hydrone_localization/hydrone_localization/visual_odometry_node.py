@@ -31,6 +31,8 @@ and map optical motion into base via the constant optical<->base rotation:
     T_odom_base(t) = C · T_optical(t) · C⁻¹,   C = base_from_optical.
 """
 
+from collections import deque
+
 import numpy as np
 import rclpy
 from rclpy.executors import ExternalShutdownException
@@ -39,7 +41,7 @@ from rclpy.node import Node
 import cv2
 from cv_bridge import CvBridge
 
-from sensor_msgs.msg import Image, CameraInfo
+from sensor_msgs.msg import Image, CameraInfo, Imu
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import TransformStamped
 from tf2_ros import TransformBroadcaster
@@ -122,6 +124,29 @@ class VisualOdometryNode(Node):
         # Below this the feature is effectively at infinity and contributes
         # nothing but noise to PnP.
         self.declare_parameter("min_disparity", 4.0)
+        # ── INERTIAL ────────────────────────────────────────────────────────
+        # What makes this VIO instead of VO, and it is what the ZED SDK
+        # actually runs: positional tracking there is visual-INERTIAL, the IMU
+        # carrying the motion between frames and the images correcting it.
+        # Vision alone has two failure modes the gyro simply does not share —
+        # it goes blind on a blank wall, and it has no idea how far it turned
+        # when every feature leaves the frame at once. Phase 1 searches by
+        # rotating on the spot, which is exactly that case.
+        #
+        # Empty disables the fusion and the node is plain VO again.
+        self.declare_parameter("in_imu", "/zed/zed_node/imu/data")
+        # How far apart a camera frame and the gyro integration may be before
+        # the prediction is refused, in seconds. The IMU runs far faster than
+        # the camera, so a gap this large means samples were dropped.
+        self.declare_parameter("imu_max_gap", 0.25)
+        # How much PnP may disagree with the gyro, in degrees, before its
+        # answer is thrown away. The gyro is very good over the ~0.1 s between
+        # frames — its drift is a slow bias, not a per-frame error — so a
+        # visual solution that rotates far more than the gyro says did not see
+        # rotation, it saw a bad match. This is the gate the old code had no
+        # way to build: `max_step_deg` could only ask whether a rotation was
+        # physically possible, never whether it actually happened.
+        self.declare_parameter("imu_rotation_tol_deg", 8.0)
         # Largest disparity worth searching, in pixels. fx * B / d at d = 128
         # is 0.30 m, closer than anything the drone can be to a wall without
         # having hit it, and it bounds the per-feature search.
@@ -247,6 +272,10 @@ class VisualOdometryNode(Node):
         self.last_right = None        # latest right-eye frame, for stereo
         self.baseline = None          # metres, from the right camera_info
         self.n_stereo_empty = 0       # frames where matching found nothing
+        self.imu_buf = deque(maxlen=2000)   # (t_seconds, gyro_xyz) in base frame
+        self.prev_stamp_s = None            # camera stamp of the last frame
+        self.n_imu_rejected = 0             # PnP answers the gyro contradicted
+        self.n_imu_carried = 0              # frames the gyro carried alone
         self.prev_depth = None        # depth aligned with prev_kp/prev_des
         self.prev_pts = None          # Nx2 keypoint pixel coords of prev frame
         self.prev_des = None
@@ -261,6 +290,13 @@ class VisualOdometryNode(Node):
         self.create_subscription(Image, p("in_depth"), self._cb_depth, 10)
         self.create_subscription(Image, p("in_rgb"), self._cb_rgb, 10)
 
+        self._in_imu = p("in_imu")
+        if self._in_imu:
+            # Depth 200: the IMU runs much faster than the camera and every
+            # sample between two frames is part of the rotation between them.
+            # Dropping them silently would understate every turn.
+            self.create_subscription(Imu, self._in_imu, self._cb_imu, 200)
+
         self._in_right = p("in_right")
         if self._in_right:
             self.create_subscription(Image, self._in_right, self._cb_right, 10)
@@ -269,6 +305,8 @@ class VisualOdometryNode(Node):
         self.stereo_row_tol = float(p("stereo_row_tol"))
         self.min_disparity = float(p("min_disparity"))
         self.max_disparity = float(p("max_disparity"))
+        self.imu_max_gap = float(p("imu_max_gap"))
+        self.imu_rotation_tol = np.radians(float(p("imu_rotation_tol_deg")))
 
         self.get_logger().info("Visual odometry ready — estimating /zed/zed_node/odom")
 
@@ -276,6 +314,46 @@ class VisualOdometryNode(Node):
 
     def _cb_info(self, msg: CameraInfo):
         self.K = np.array(msg.k, dtype=np.float64).reshape(3, 3)
+
+    def _cb_imu(self, msg: Imu):
+        t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        w = msg.angular_velocity
+        self.imu_buf.append((t, np.array([w.x, w.y, w.z], dtype=np.float64)))
+
+    def _imu_rotation(self, t0: float, t1: float) -> np.ndarray | None:
+        """Rotation the gyro measured between two camera stamps, as a 3x3 in
+        the OPTICAL frame. None when the interval is not covered.
+
+        Integrated as a product of small rotations rather than a single
+        axis-angle over the average rate: over 0.1 s that difference is small,
+        but it is not zero once the vehicle is yawing at speed, and the whole
+        reason to consult the gyro is the turn.
+
+        The IMU reports in the body frame (X forward, Y left, Z up) and the VO
+        accumulates in the camera's optical frame (Z forward, X right, Y down),
+        so the result is mapped through the same constant this node already
+        uses for its output: R_opt = C^-1 . R_base . C.
+        """
+        if not self.imu_buf or t1 <= t0:
+            return None
+        samples = [(t, w) for t, w in self.imu_buf if t0 <= t <= t1]
+        if len(samples) < 2:
+            return None
+        # Refuse a gap the IMU did not actually cover — otherwise a dropped
+        # stretch is silently reported as no rotation at all.
+        if samples[0][0] - t0 > self.imu_max_gap or t1 - samples[-1][0] > self.imu_max_gap:
+            return None
+
+        R = np.eye(3)
+        for (ta, wa), (tb, wb) in zip(samples, samples[1:]):
+            dt = tb - ta
+            if dt <= 0:
+                continue
+            theta = 0.5 * (wa + wb) * dt      # trapezoidal, in the body frame
+            R = R @ cv2.Rodrigues(theta)[0]
+
+        C = R_BASE_FROM_OPTICAL
+        return C.T @ R @ C
 
     def _cb_right(self, msg: Image):
         self.last_right = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
@@ -402,6 +480,13 @@ class VisualOdometryNode(Node):
         if self.K is None:
             return
 
+        stamp_s = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        # What the gyro says happened since the last frame. Computed before
+        # anything visual so it is available even when the image is useless —
+        # which is the case it exists for.
+        R_imu = (self._imu_rotation(self.prev_stamp_s, stamp_s)
+                 if self.prev_stamp_s is not None else None)
+
         gray = cv2.cvtColor(
             self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8"),
             cv2.COLOR_BGR2GRAY)
@@ -419,30 +504,58 @@ class VisualOdometryNode(Node):
         depth = self._stereo_match(kp, des, gray)
         if depth is None:
             if self.last_depth is None:
+                self.prev_stamp_s = stamp_s
                 return
             depth = self.last_depth
         elif not np.isfinite(depth).any():
             self.n_stereo_empty += 1
-            self.get_logger().warn(
-                f"VO: no feature matched in the right eye "
-                f"[{self.n_stereo_empty}]; holding pose",
-                throttle_duration_sec=10.0)
+            self._carry_on_imu(R_imu, "no feature matched in the right eye")
             self.prev_depth, self.prev_pts, self.prev_des = depth, pts, des
+            self.prev_stamp_s = stamp_s
             self._publish(msg.header.stamp)
             return
 
+        updated = False
         if des is not None and self.prev_des is not None and len(kp) >= self.min_inliers:
             # 3D points from PREVIOUS frame's depth; 2D from the current frame.
             prev_pts3d, valid = self._backproject(self.prev_pts, self.prev_depth)
-            self._match_and_update(pts, des, prev_pts3d, valid)
+            updated = self._match_and_update(pts, des, prev_pts3d, valid, R_imu)
 
-        # Roll the reference frame forward and publish (holds pose if no update).
+        # Vision had nothing to say. The gyro did — carrying the rotation is
+        # what keeps a turn on the spot from being invisible, and a turn on the
+        # spot is how Phase 1 searches.
+        if not updated:
+            self._carry_on_imu(R_imu)
+
+        # Roll the reference frame forward and publish.
         self.prev_depth = depth
         self.prev_pts = pts
         self.prev_des = des
+        self.prev_stamp_s = stamp_s
         self._publish(msg.header.stamp)
 
-    def _match_and_update(self, cur_pts, des, prev_pts3d, valid):
+    def _carry_on_imu(self, R_imu, why: str = "no visual update"):
+        """Apply the gyro's rotation when vision could not provide one.
+
+        Rotation only. Translation is deliberately NOT dead-reckoned from the
+        accelerometer: double-integrating it needs gravity removed to
+        milli-g accuracy and drifts to metres within seconds, which is worse
+        than admitting the vehicle's position is unknown for a frame. The gyro
+        integrates a rate directly and over 0.1 s is worth trusting.
+        """
+        if R_imu is None:
+            self.get_logger().warn(f"VO: {why}, and no IMU either; holding pose",
+                                   throttle_duration_sec=10.0)
+            return
+        self.n_imu_carried += 1
+        T = np.eye(4)
+        T[:3, :3] = R_imu
+        self.pose_opt = self.pose_opt @ T
+        self.get_logger().info(
+            f"VO: {why}; carried {np.degrees(np.linalg.norm(cv2.Rodrigues(R_imu)[0])):.1f} deg "
+            f"on the gyro [{self.n_imu_carried}]", throttle_duration_sec=10.0)
+
+    def _match_and_update(self, cur_pts, des, prev_pts3d, valid, R_imu=None):
         pairs = self.matcher.knnMatch(self.prev_des, des, k=2)
         obj, img = [], []
         for m_n in pairs:
@@ -459,24 +572,33 @@ class VisualOdometryNode(Node):
         if len(obj) < self.min_inliers:
             self.get_logger().warn(
                 f"VO: only {len(obj)} usable matches (<{self.min_inliers}); holding pose")
-            return
+            return False
 
         obj = np.asarray(obj, dtype=np.float64)
         img = np.asarray(img, dtype=np.float64)
+        # Seed PnP with the gyro's rotation. RANSAC starts from a solution
+        # that is already nearly right in 3 of its 6 degrees of freedom, which
+        # is what lets it find the inlier set on a frame where matching is
+        # thin — and thin matching on blank walls is this arena's normal.
+        rvec0 = tvec0 = None
+        if R_imu is not None:
+            rvec0 = cv2.Rodrigues(R_imu.T)[0]      # T_cur_prev is the inverse
+            tvec0 = np.zeros((3, 1))
         ok, rvec, tvec, inliers = cv2.solvePnPRansac(
             obj, img, self.K, None,
+            rvec=rvec0, tvec=tvec0, useExtrinsicGuess=rvec0 is not None,
             iterationsCount=100, reprojectionError=2.0, flags=cv2.SOLVEPNP_ITERATIVE)
         if not ok or inliers is None or len(inliers) < self.min_inliers:
             n = 0 if inliers is None else len(inliers)
             self.get_logger().warn(f"VO: PnP failed / {n} inliers; holding pose")
-            return
+            return False
 
         ratio = len(inliers) / len(obj)
         if ratio < self.min_inlier_ratio:
             self.get_logger().warn(
                 f"VO: inlier ratio {ratio:.2f} ({len(inliers)}/{len(obj)}) "
                 f"< {self.min_inlier_ratio:.2f}; holding pose")
-            return
+            return False
 
         # solvePnP gives T_cur_prev: p_cur = R·p_prev + t. The camera pose update
         # is the inverse of that relative motion.
@@ -486,26 +608,48 @@ class VisualOdometryNode(Node):
             self.get_logger().warn(
                 f"VO: implausible step {step_t:.2f} m / "
                 f"{np.degrees(step_r):.1f} deg in one frame; holding pose")
-            return
+            return False
 
         # Zero-velocity update: too small to be motion, so it is noise, and
         # noise integrated is invented distance. BOTH have to be small — a
         # vehicle turning on the spot translates by nothing and must still have
         # its rotation integrated, which is exactly what Phase 1's search does.
-        if step_t < self.min_step_m and step_r < self.min_step_rad:
+        imu_r = (float(np.linalg.norm(cv2.Rodrigues(R_imu)[0]))
+                 if R_imu is not None else 0.0)
+        if (step_t < self.min_step_m and step_r < self.min_step_rad
+                and imu_r < self.min_step_rad):
             self.n_static += 1
             self.get_logger().info(
                 f"VO: still ({step_t * 1000:.1f} mm / "
                 f"{np.degrees(step_r):.2f} deg); holding pose "
                 f"[{self.n_static} frames so far]",
                 throttle_duration_sec=30.0)
-            return
+            return False
 
         R, _ = cv2.Rodrigues(rvec)
+
+        # Does the gyro agree that this rotation happened? Over the ~0.1 s
+        # between frames the gyro's error is a slow bias, not a per-frame
+        # blunder, so a visual solution that disagrees by more than a few
+        # degrees is a bad set of matches, not motion. max_step_deg could only
+        # ask whether a rotation was POSSIBLE; this asks whether it OCCURRED.
+        if R_imu is not None:
+            disagreement = float(np.linalg.norm(cv2.Rodrigues(R_imu.T @ R)[0]))
+            if disagreement > self.imu_rotation_tol:
+                self.n_imu_rejected += 1
+                self.get_logger().warn(
+                    f"VO: PnP says {np.degrees(step_r):.1f} deg, gyro says "
+                    f"{np.degrees(imu_r):.1f} deg — {np.degrees(disagreement):.1f} deg "
+                    f"apart, rejecting the visual answer and using the gyro "
+                    f"[{self.n_imu_rejected}]", throttle_duration_sec=10.0)
+                self._carry_on_imu(R_imu, "PnP contradicted the gyro")
+                return True
+
         T_cur_prev = np.eye(4)
         T_cur_prev[:3, :3] = R
         T_cur_prev[:3, 3] = tvec.ravel()
         self.pose_opt = self.pose_opt @ np.linalg.inv(T_cur_prev)
+        return True
 
     def _publish(self, stamp):
         # Map the accumulated optical-frame pose into base_link (NWU-style):
