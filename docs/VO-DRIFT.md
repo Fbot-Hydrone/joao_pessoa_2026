@@ -91,6 +91,50 @@ compare — that comparison is what says whether the octomap can be trusted over
 a ten-minute attempt, and whether SLAM is worth building at all. See
 [`OCTOMAP.md`](OCTOMAP.md).
 
+## The other half: it kept losing the scene
+
+With the ZUPT in, the logs stopped being about noise and started being about
+tracking. Of 27 VO warnings in the next flight, **20 were lost tracking** —
+`only 0 usable matches`, `only 1`, `only 5` — against 1 from the ZUPT.
+
+The reason was already measured in this repo on 2026-08-20, in
+`feature_map_node`'s docstring: **46 ORB keypoints in an entire frame, all
+inside a 30-pixel band** on the horizon line. The arena is matte white wall on
+blown-out white floor under a smooth sky.
+
+The arena is not textureless. It is **low contrast**, which is a different
+problem with a standard answer, and the node was configured for neither:
+
+* `cv2.ORB_create(nfeatures=1000)` uses OpenCV's default FAST threshold of
+  **20**, tuned for ordinary scenes.
+* Nothing equalised the image first, so the faint gradients that do exist —
+  panel seams, scuffs, the shading in a corner — were flattened between a
+  bright floor and a bright sky.
+
+MEASURED on a synthetic frame built to match that description (white wall 214,
+floor 246, sky 232, seams 2-6 grey levels deep, sensor noise σ=1.2):
+
+```
+ORB default (fastThreshold=20), no CLAHE          0 keypoints
+fastThreshold=7, no CLAHE                         0 keypoints
+fastThreshold=20, with CLAHE                      1 keypoint
+fastThreshold=7 + CLAHE   <- new defaults       489 keypoints, spread 412 px
+```
+
+**Neither change works alone.** Lowering the corner threshold finds nothing
+when there is no gradient to find; equalising alone lifts the gradient but not
+past a threshold of 20. Together they recover the scene, and — as important —
+the keypoints spread across 412 of 480 rows instead of the 30-pixel band. A
+tracker cannot survive a turn on features that all sit on one line.
+
+`clahe_clip: 0` disables the equalisation for a camera on a textured scene,
+where it is cost without benefit.
+
+**NOT yet validated on a real sim frame.** The measurement above is synthetic,
+built from the description of the 2026-08-20 measurement rather than from that
+frame, which is no longer on disk. What the flight log should show is the
+`only N usable matches` warnings becoming rare.
+
 ## What this does NOT fix
 
 The 1.15x scale error while moving is untouched, and it is real: over 50 m of

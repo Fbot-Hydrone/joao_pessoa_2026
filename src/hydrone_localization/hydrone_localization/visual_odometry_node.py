@@ -90,8 +90,10 @@ def _quat_from_matrix(R):
 
 class VisualOdometryNode(Node):
 
-    def __init__(self):
-        super().__init__("visual_odometry")
+    def __init__(self, **kwargs):
+        # **kwargs so a test can pass parameter_overrides, like every other
+        # node in this stack does.
+        super().__init__("visual_odometry", **kwargs)
 
         # ── Parameters ─────────────────────────────────────────────────────
         self.declare_parameter("in_rgb", "/zed/zed_node/rgb/image_rect_color")
@@ -100,6 +102,24 @@ class VisualOdometryNode(Node):
         self.declare_parameter("out_odom", "/zed/zed_node/odom")
         # ORB budget. More features = steadier pose, more CPU.
         self.declare_parameter("max_features", 1000)
+        # FAST corner threshold. OpenCV's default is 20, which is tuned for
+        # ordinary textured scenes and is far too strict for this arena: matte
+        # white wall on blown-out white floor under a smooth sky. MEASURED on a
+        # live frame 2026-08-20 (see feature_map_node): 46 keypoints in the
+        # whole image, all of them inside a 30-pixel band on the horizon line,
+        # because the horizon is the only intensity gradient there is. With so
+        # few corners the tracker loses them the moment the drone turns, which
+        # is the "only 0 usable matches" in the logs.
+        self.declare_parameter("fast_threshold", 7)
+        # Contrast-limited adaptive histogram equalisation, applied before
+        # detection. The arena is not textureless — it is LOW CONTRAST, which
+        # is a different problem with a standard answer. CLAHE stretches
+        # contrast per tile, so the faint gradients on a white wall (panel
+        # seams, scuffs, the shading of a corner) rise above the corner
+        # threshold instead of being flattened by the bright floor and sky.
+        # clip_limit 0 disables it.
+        self.declare_parameter("clahe_clip", 3.0)
+        self.declare_parameter("clahe_grid", 8)
         # Lowe ratio for the 2-NN match filter (lower = stricter).
         self.declare_parameter("match_ratio", 0.75)
         # Depth gating (meters): reject back-projections outside a sane band.
@@ -155,6 +175,11 @@ class VisualOdometryNode(Node):
         self.declare_parameter("publish_tf", True)
 
         self.max_features = int(self.get_parameter("max_features").value)
+        self.fast_threshold = int(self.get_parameter("fast_threshold").value)
+        clip = float(self.get_parameter("clahe_clip").value)
+        grid = int(self.get_parameter("clahe_grid").value)
+        self.clahe = (cv2.createCLAHE(clipLimit=clip, tileGridSize=(grid, grid))
+                      if clip > 0 else None)
         self.match_ratio = float(self.get_parameter("match_ratio").value)
         self.min_depth = float(self.get_parameter("min_depth").value)
         self.max_depth = float(self.get_parameter("max_depth").value)
@@ -170,7 +195,8 @@ class VisualOdometryNode(Node):
         self.publish_tf = bool(self.get_parameter("publish_tf").value)
 
         self.bridge = CvBridge()
-        self.orb = cv2.ORB_create(nfeatures=self.max_features)
+        self.orb = cv2.ORB_create(nfeatures=self.max_features,
+                                  fastThreshold=self.fast_threshold)
         self.matcher = cv2.BFMatcher(cv2.NORM_HAMMING)
 
         # ── VO state ────────────────────────────────────────────────────────
@@ -225,6 +251,8 @@ class VisualOdometryNode(Node):
         gray = cv2.cvtColor(
             self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8"),
             cv2.COLOR_BGR2GRAY)
+        if self.clahe is not None:
+            gray = self.clahe.apply(gray)
         kp, des = self.orb.detectAndCompute(gray, None)
         depth = self.last_depth
         pts = (np.array([k.pt for k in kp], dtype=np.float64)
