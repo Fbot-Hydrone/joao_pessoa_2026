@@ -485,11 +485,15 @@ def generate_launch_description():
             'odom_error_print', default_value='false',
             description='Echo the VO drift to stdout at 1 Hz as well as the CSV.'),
         DeclareLaunchArgument(
-            'vo_stereo', default_value='true',
+            'vo_stereo', default_value='false',
             description='Triangulate depth from the stereo pair for odometry '
                         '(what the ZED does). false reads the depth image '
-                        'instead — the A/B switch for which one localises '
-                        'better. Mapping and odom_GT are unaffected either way.'),
+                        'instead. MEASURED 2026-08-27, same 41.4 m flight, '
+                        'IMU off in both: stereo gave 0.13x scale and 4.83 m '
+                        'median error, the depth image 1.14x and 1.80 m — '
+                        'hence the default. The sim pair is fx=320 B=0.12, so '
+                        'disparity resolves to ~0.23 m at 3 m; the real ZED is '
+                        'fx~700. Mapping and odom_GT are unaffected either way.'),
         DeclareLaunchArgument(
             'odom_error_dir', default_value='/ws/logs',
             description='Directory for the drift CSV. Defaults to /ws/logs, '
