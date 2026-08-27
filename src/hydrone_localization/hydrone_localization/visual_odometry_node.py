@@ -634,7 +634,15 @@ class VisualOdometryNode(Node):
         # degrees is a bad set of matches, not motion. max_step_deg could only
         # ask whether a rotation was POSSIBLE; this asks whether it OCCURRED.
         if R_imu is not None:
-            disagreement = float(np.linalg.norm(cv2.Rodrigues(R_imu.T @ R)[0]))
+            # R is the rotation of the POINTS (T_cur_prev); R_imu is the
+            # rotation of the CAMERA. They are inverses of each other, so
+            # agreement means R_imu @ R == I. Comparing R_imu.T @ R instead —
+            # which is what this line did until 2026-08-27 — yields DOUBLE the
+            # rotation whenever the two agree, so with an 8 deg tolerance every
+            # turn past ~4 deg tripped the veto and the CORRECT visual answer
+            # was thrown away in favour of gyro-only rotation. MEASURED: it
+            # took yaw error from 4.2 deg to 178.6 deg.
+            disagreement = float(np.linalg.norm(cv2.Rodrigues(R_imu @ R)[0]))
             if disagreement > self.imu_rotation_tol:
                 self.n_imu_rejected += 1
                 self.get_logger().warn(

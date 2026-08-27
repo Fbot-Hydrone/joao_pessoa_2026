@@ -117,3 +117,46 @@ def test_translation_is_never_dead_reckoned_from_the_accelerometer(node):
     src = inspect.getsource(node._carry_on_imu)
     assert "linear_acceleration" not in src
     assert "T[:3, :3] = R_imu" in src
+
+
+# ── the veto's algebra ───────────────────────────────────────────────────────
+#
+# Got this backwards once and it cost a flight: PnP returns the rotation of the
+# POINTS (T_cur_prev) while the gyro gives the rotation of the CAMERA, and they
+# are inverses. Comparing them the wrong way round reports DOUBLE the rotation
+# whenever they agree, so every real turn tripped the veto and the correct
+# visual answer was discarded. Yaw error went 4.2 deg -> 178.6 deg.
+
+def disagreement(R_imu, R_points):
+    """What the node computes: identity when the two describe the same turn."""
+    return float(np.linalg.norm(cv2.Rodrigues(R_imu @ R_points)[0]))
+
+
+def yaw(deg):
+    return cv2.Rodrigues(np.array([0.0, 0.0, np.radians(deg)]))[0]
+
+
+def test_agreement_reads_as_zero(node):
+    """A camera that turned +20 deg makes the points turn -20 deg."""
+    assert np.degrees(disagreement(yaw(20.0), yaw(20.0).T)) == pytest.approx(0.0, abs=1e-6)
+
+
+def test_agreement_reads_as_zero_at_every_angle(node):
+    """The old bug scaled with the turn, so a small-angle test would miss it."""
+    for a in (1.0, 5.0, 20.0, 60.0):
+        assert np.degrees(disagreement(yaw(a), yaw(a).T)) == pytest.approx(0.0, abs=1e-6)
+
+
+def test_real_disagreement_is_reported(node):
+    d = np.degrees(disagreement(yaw(20.0), yaw(5.0).T))
+    assert d == pytest.approx(15.0, abs=0.5)
+
+
+def test_the_veto_does_not_fire_on_an_honest_turn(node):
+    """The regression itself: a 20 deg turn both sensors agree on must pass."""
+    assert disagreement(yaw(20.0), yaw(20.0).T) < node.imu_rotation_tol
+
+
+def test_the_veto_fires_when_vision_misses_a_turn(node):
+    """The case it exists for: gyro saw 9.5 deg, PnP saw 0.1."""
+    assert disagreement(yaw(9.5), yaw(0.1).T) > node.imu_rotation_tol
