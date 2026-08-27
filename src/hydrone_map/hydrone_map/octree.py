@@ -112,3 +112,115 @@ def path_is_clear(tree, start, end, step=None) -> bool:
         if not is_free(tree, a + (b - a) * (i / n)):
             return False
     return True
+
+
+# The drone is 330 mm across. Half of that is the radius a path has to keep
+# clear of every occupied voxel, plus a margin for the fact that the pose
+# feeding this map is itself an estimate.
+DRONE_RADIUS_M = 0.165
+SAFETY_MARGIN_M = 0.10
+INFLATION_RADIUS_M = DRONE_RADIUS_M + SAFETY_MARGIN_M
+
+
+def inflated_state(tree, point, radius=INFLATION_RADIUS_M) -> str:
+    """State of the space a body of `radius` would occupy at `point`.
+
+    The map answers for a point. A drone is not a point, and the difference is
+    the difference between "a path exists" and "I fit through it": an occupancy
+    map will happily route a 330 mm airframe through a 150 mm voxel gap,
+    because nothing in the map knows the airframe has a size. Every serious
+    planner inflates obstacles by the robot's radius before planning, and this
+    is where that happens.
+
+    OCCUPIED if any voxel within `radius` is occupied — one wall voxel is
+    enough, no matter what surrounds it. Otherwise UNKNOWN if any is unknown,
+    and FREE only when the whole ball has been measured empty. The ordering is
+    deliberate: occupied is a fact that outranks ignorance, and ignorance
+    outranks a partial measurement of free.
+
+    Sampled on the tree's own grid — anything finer asks the same voxel twice
+    and anything coarser steps over one. A radius of 0.275 m on a 0.15 m tree
+    is 5x5x5 = 125 queries per call, which is why a planner should call this
+    once per grid cell and remember the answer, not once per edge.
+    """
+    p = np.asarray(point, dtype=float)
+    res = tree.getResolution()
+    n = int(np.ceil(radius / res))
+    r2 = radius * radius
+    saw_unknown = False
+    for i in range(-n, n + 1):
+        for j in range(-n, n + 1):
+            for k in range(-n, n + 1):
+                off = np.array([i, j, k], dtype=float) * res
+                if float(off @ off) > r2:
+                    continue            # the ball, not the box
+                s = query(tree, p + off)
+                if s == State.OCCUPIED:
+                    return State.OCCUPIED
+                if s == State.UNKNOWN:
+                    saw_unknown = True
+    return State.UNKNOWN if saw_unknown else State.FREE
+
+
+def is_free_inflated(tree, point, radius=INFLATION_RADIUS_M) -> bool:
+    """True only where a body of `radius` is measured to fit. Unknown is not.
+
+    Same refusal as is_free and for the same reason: flying a 330 mm drone
+    into space nothing has looked at, because nothing said otherwise, is how it
+    finds a wall it never mapped.
+    """
+    return inflated_state(tree, point, radius) == State.FREE
+
+
+def path_is_clear_inflated(tree, start, end, radius=INFLATION_RADIUS_M,
+                           step=None) -> bool:
+    """path_is_clear, but for a body of `radius` rather than a point.
+
+    This is the one a planner and a mission should call. `path_is_clear` asks
+    whether a ray fits; a drone is not a ray, and the difference decides
+    whether "clear" means anything.
+
+    Steps at the tree's resolution rather than half of it: each sample already
+    covers a ball of `radius`, which is wider than a voxel, so half-resolution
+    stepping would re-ask overlapping balls for nothing. Unknown counts as
+    blocked, for the reason in is_free.
+    """
+    a = np.asarray(start, dtype=float)
+    b = np.asarray(end, dtype=float)
+    dist = float(np.linalg.norm(b - a))
+    if dist == 0.0:
+        return is_free_inflated(tree, a, radius)
+
+    step = step or tree.getResolution()
+    n = max(1, int(np.ceil(dist / step)))
+    for i in range(n + 1):
+        if not is_free_inflated(tree, a + (b - a) * (i / n), radius):
+            return False
+    return True
+
+
+def path_hits_obstacle(tree, start, end, radius=INFLATION_RADIUS_M,
+                       step=None) -> bool:
+    """Does this leg run a body of `radius` into something MEASURED occupied?
+
+    The counterpart to path_is_clear_inflated, and the difference between them
+    is unknown space. "Clear" demands the whole leg be measured empty, which in
+    a half-explored arena is almost never true — early in a flight nearly every
+    leg crosses space no ray has reached, and treating that as blocked would
+    report an obstruction on every leg and mean nothing.
+
+    This asks the narrower question a mission actually needs: is there
+    something IN THE WAY. Unknown is not an obstacle here, it is an absence of
+    evidence — which is exactly the distinction the caller has to make, because
+    refusing to fly through unknown space would ground the vehicle at takeoff.
+    """
+    a = np.asarray(start, dtype=float)
+    b = np.asarray(end, dtype=float)
+    dist = float(np.linalg.norm(b - a))
+    step = step or tree.getResolution()
+    n = max(1, int(np.ceil(dist / step))) if dist > 0 else 0
+    for i in range(n + 1):
+        p = a if n == 0 else a + (b - a) * (i / n)
+        if inflated_state(tree, p, radius) == State.OCCUPIED:
+            return True
+    return False

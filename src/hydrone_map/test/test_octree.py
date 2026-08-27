@@ -18,8 +18,10 @@ from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
 from sensor_msgs.msg import PointCloud2, PointField
 from octomap_msgs.msg import Octomap
 
-from hydrone_map.octree import (State, is_free, path_is_clear, query,
-                                tree_from_msg)
+from hydrone_map.octree import (INFLATION_RADIUS_M, State, inflated_state,
+                                is_free, is_free_inflated, path_is_clear,
+                                path_hits_obstacle, path_is_clear_inflated,
+                                query, tree_from_msg)
 
 LATCHED = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
                      reliability=ReliabilityPolicy.RELIABLE,
@@ -158,3 +160,88 @@ def test_full_octomap_is_refused_with_a_clear_message():
     msg.binary = False
     with pytest.raises(ValueError, match="octomap_full"):
         tree_from_msg(msg)
+
+
+# ── obstacle inflation ──────────────────────────────────────────────────────
+#
+# The map answers for a POINT. The drone is 330 mm across, and the gap between
+# those two facts is the gap between "a path exists" and "I fit through it".
+
+def test_a_point_beside_the_wall_is_free_but_the_drone_does_not_fit(tree):
+    """The whole reason inflation exists, on the real tree: a spot the map
+    calls free, one voxel from masonry, that a 330 mm airframe cannot occupy."""
+    beside = (WALL_X - 0.15, 0.0, 0.6)
+    assert query(tree, beside) == State.FREE
+    assert inflated_state(tree, beside) == State.OCCUPIED
+    assert not is_free_inflated(tree, beside)
+
+
+def test_open_air_well_clear_of_the_wall_still_fits(tree):
+    """Inflation must not swallow the arena. A metre of clearance is a metre."""
+    assert is_free_inflated(tree, (4.0, 0.0, 0.6))
+
+
+def test_a_leg_down_the_measured_corridor_is_clear_for_the_drone_too(tree):
+    """Along the sensor's axis, where the cone of measured free space is
+    widest. Off to the side the ball reaches into space no ray covered, and
+    that is correctly NOT clear — see the unknown tests above."""
+    assert path_is_clear_inflated(tree, (2.0, 0.0, 0.6), (4.0, 0.0, 0.6))
+
+
+def test_the_wall_itself_is_occupied_when_inflated(tree):
+    assert inflated_state(tree, (WALL_X, 0.0, 0.6)) == State.OCCUPIED
+
+
+def test_inflating_near_unmapped_space_reports_unknown_not_free(tree):
+    """Occupied outranks unknown outranks free: a ball that is part measured
+    and part never looked at is not a place to fly."""
+    assert inflated_state(tree, (WALL_X + 1.0, 0.0, 0.6)) == State.UNKNOWN
+    assert not is_free_inflated(tree, (WALL_X + 1.0, 0.0, 0.6))
+
+
+def test_the_radius_covers_the_airframe_plus_a_margin(tree):
+    """330 mm across is 165 mm of radius, and the pose feeding this map is
+    itself an estimate. Shrinking this is a decision, not a tidy-up."""
+    assert INFLATION_RADIUS_M >= 0.165
+
+
+def test_a_smaller_radius_lets_the_same_point_through(tree):
+    """Pins that the radius is what does the work, not a hidden constant."""
+    beside = (WALL_X - 0.15, 0.0, 0.6)
+    assert inflated_state(tree, beside, radius=0.01) == State.FREE
+
+
+def test_a_leg_that_grazes_the_wall_is_clear_for_a_ray_and_not_for_the_drone(tree):
+    """The gate the mission actually needs. A straight line that a point could
+    fly and a 330 mm airframe could not."""
+    a = (2.0, -0.9, 0.6)
+    b = (WALL_X - 0.15, -0.9, 0.6)
+    assert path_is_clear(tree, a, b), "the ray should fit"
+    assert not path_is_clear_inflated(tree, a, b), "the drone should not"
+
+
+
+
+def test_unknown_space_is_not_an_obstacle():
+    """The distinction that decides whether the mission's gate means anything.
+    Early in a flight nearly every leg crosses space no ray has reached; if
+    that counted as an obstruction, every leg would report one."""
+    class FakeTree:
+        def getResolution(self):
+            return 0.15
+        def search(self, p):
+            return None            # octomap returns a null node for unknown
+        def isNodeOccupied(self, node):
+            raise RuntimeError     # and throws on it — that throw IS "unknown"
+    t = FakeTree()
+    assert not path_hits_obstacle(t, (0, 0, 1), (3, 0, 1))
+    assert not path_is_clear_inflated(t, (0, 0, 1), (3, 0, 1)), \
+        "unknown must still not count as CLEAR"
+
+
+def test_a_leg_into_the_wall_hits_an_obstacle(tree):
+    assert path_hits_obstacle(tree, (2.0, 0.0, 0.6), (WALL_X + 0.5, 0.0, 0.6))
+
+
+def test_a_leg_through_open_air_hits_nothing(tree):
+    assert not path_hits_obstacle(tree, (2.0, -1.0, 0.6), (2.0, 1.0, 0.6))
