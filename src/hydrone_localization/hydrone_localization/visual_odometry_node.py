@@ -122,6 +122,10 @@ class VisualOdometryNode(Node):
         # Below this the feature is effectively at infinity and contributes
         # nothing but noise to PnP.
         self.declare_parameter("min_disparity", 4.0)
+        # Largest disparity worth searching, in pixels. fx * B / d at d = 128
+        # is 0.30 m, closer than anything the drone can be to a wall without
+        # having hit it, and it bounds the per-feature search.
+        self.declare_parameter("max_disparity", 128.0)
         self.declare_parameter("in_info", "/zed/zed_node/rgb/camera_info")
         self.declare_parameter("out_odom", "/zed/zed_node/odom")
         # ORB budget. More features = steadier pose, more CPU.
@@ -264,6 +268,7 @@ class VisualOdometryNode(Node):
                                      self._cb_right_info, 10)
         self.stereo_row_tol = float(p("stereo_row_tol"))
         self.min_disparity = float(p("min_disparity"))
+        self.max_disparity = float(p("max_disparity"))
 
         self.get_logger().info("Visual odometry ready — estimating /zed/zed_node/odom")
 
@@ -350,73 +355,48 @@ class VisualOdometryNode(Node):
 
         kp_r, des_r = self.orb.detectAndCompute(right, None)
         depths = np.full(len(kp_left), np.nan, dtype=np.float64)
-        if des_r is None or len(kp_r) < 2:
+        if des_r is None or len(kp_r) < 1:
             return depths
 
-        matches = self.matcher.knnMatch(des_left, des_r, k=2)
+        # Bucket the right eye's features BY ROW, then search only the rows a
+        # partner can be on. Doing it the other way round — matching against
+        # the whole image and filtering by row afterwards — is what a naive
+        # implementation does, and on this arena it throws away most of the
+        # scene: MEASURED, 902 left keypoints against 901 right ones produced
+        # only 126 Lowe-surviving matches, because a white wall repeats and the
+        # second-best descriptor anywhere in the frame is nearly as good as the
+        # best. Once the candidates are restricted to the epipolar line, the
+        # runner-up is a genuinely different place and the ratio test means
+        # what it is supposed to mean.
+        rows = {}
+        for i, k in enumerate(kp_r):
+            rows.setdefault(int(round(k.pt[1])), []).append(i)
+
+        tol = int(np.ceil(self.stereo_row_tol))
         fx = float(self.K[0, 0])
-        for pair in matches:
-            if len(pair) < 2:
+        for i, k in enumerate(kp_left):
+            u, v = k.pt
+            cand = []
+            for r in range(int(round(v)) - tol, int(round(v)) + tol + 1):
+                cand.extend(rows.get(r, ()))
+            if not cand:
                 continue
-            m, second = pair
-            if m.distance > self.match_ratio * second.distance:
+            # A partner is always to the LEFT in the right image (positive
+            # disparity), and far enough over to be worth triangulating.
+            cand = [j for j in cand
+                    if self.min_disparity <= u - kp_r[j].pt[0] <= self.max_disparity]
+            if not cand:
                 continue
-            pl = kp_left[m.queryIdx].pt
-            pr = kp_r[m.trainIdx].pt
-            # Same row, within a tolerance for the detector's own jitter.
-            if abs(pl[1] - pr[1]) > self.stereo_row_tol:
-                continue
-            disparity = pl[0] - pr[0]
-            # Positive, and large enough that Z is not dominated by one pixel
-            # of error: dZ/Z = dd/d, so d < min_disparity is unusable range.
-            if disparity < self.min_disparity:
-                continue
-            depths[m.queryIdx] = fx * self.baseline / disparity
+
+            d = np.asarray([cv2.norm(des_left[i], des_r[j], cv2.NORM_HAMMING)
+                            for j in cand])
+            order = np.argsort(d)
+            best = order[0]
+            if len(order) > 1 and d[best] > self.match_ratio * d[order[1]]:
+                continue          # ambiguous ON THE LINE: genuinely unusable
+            disparity = u - kp_r[cand[best]].pt[0]
+            depths[i] = fx * self.baseline / disparity
         return depths
-
-    def _cb_rgb(self, msg: Image):
-        if self.K is None:
-            return
-
-        gray = cv2.cvtColor(
-            self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8"),
-            cv2.COLOR_BGR2GRAY)
-        if self.clahe is not None:
-            gray = self.clahe.apply(gray)
-
-        kp, des = self.orb.detectAndCompute(gray, None)
-        pts = (np.array([k.pt for k in kp], dtype=np.float64)
-               if kp else np.empty((0, 2)))
-
-        # Range for the features about to be tracked, from the RIGHT eye —
-        # one depth per keypoint, NaN where it could not be matched. Falls back
-        # to the depth image for a rig without a second eye, which is also how
-        # the real drone runs (zed_wrapper computes depth on the camera).
-        depth = self._stereo_match(kp, des, gray)
-        if depth is None:
-            if self.last_depth is None:
-                return
-            depth = self.last_depth
-        elif not np.isfinite(depth).any():
-            self.n_stereo_empty += 1
-            self.get_logger().warn(
-                f"VO: no feature matched in the right eye "
-                f"[{self.n_stereo_empty}]; holding pose",
-                throttle_duration_sec=10.0)
-            self.prev_depth, self.prev_pts, self.prev_des = depth, pts, des
-            self._publish(msg.header.stamp)
-            return
-
-        if des is not None and self.prev_des is not None and len(kp) >= self.min_inliers:
-            # 3D points from PREVIOUS frame's depth; 2D from the current frame.
-            prev_pts3d, valid = self._backproject(self.prev_pts, self.prev_depth)
-            self._match_and_update(pts, des, prev_pts3d, valid)
-
-        # Roll the reference frame forward and publish (holds pose if no update).
-        self.prev_depth = depth
-        self.prev_pts = pts
-        self.prev_des = des
-        self._publish(msg.header.stamp)
 
     def _match_and_update(self, cur_pts, des, prev_pts3d, valid):
         pairs = self.matcher.knnMatch(self.prev_des, des, k=2)
