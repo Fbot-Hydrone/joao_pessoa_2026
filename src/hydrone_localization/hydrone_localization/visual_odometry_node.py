@@ -133,8 +133,28 @@ class VisualOdometryNode(Node):
         # when every feature leaves the frame at once. Phase 1 searches by
         # rotating on the spot, which is exactly that case.
         #
-        # Empty disables the fusion and the node is plain VO again.
-        self.declare_parameter("in_imu", "/zed/zed_node/imu/data")
+        # EMPTY BY DEFAULT — the fusion is built and tested but the gyro's
+        # AXIS CONVENTION is not yet verified, and until it is this makes the
+        # pose worse rather than better.
+        #
+        # MEASURED 2026-08-27, same flight profile, stereo off in all three so
+        # only the fusion differs:
+        #     no IMU        yaw error max    4.2 deg,  inflation 1.02x
+        #     IMU on        yaw error max  178.6 deg,  inflation 0.82x
+        #     IMU on, veto algebra fixed   178.7 deg,  inflation 0.80x
+        #
+        # Fixing the veto (it compared the rotations the wrong way round) was a
+        # real bug and is fixed, but it was not the main one. ~180 deg of yaw
+        # error is the signature of an axis convention, and the suspect is
+        # located: zed_mimic_node only RENAMES the IMU frame to zed_imu_link,
+        # it applies no rotation, so the gyro arrives in whatever convention
+        # BiguaSim's IMUSocket uses — while _imu_rotation assumes the body's
+        # GLU (X forward, Y left, Z up) and maps it with R_BASE_FROM_OPTICAL.
+        #
+        # TO FIX: command a known yaw rate and log which gyro axis responds and
+        # with what sign. That single measurement settles it. Then set this
+        # parameter back to /zed/zed_node/imu/data.
+        self.declare_parameter("in_imu", "")
         # How far apart a camera frame and the gyro integration may be before
         # the prediction is refused, in seconds. The IMU runs far faster than
         # the camera, so a gap this large means samples were dropped.

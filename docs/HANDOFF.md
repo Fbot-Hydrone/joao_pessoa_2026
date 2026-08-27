@@ -107,15 +107,38 @@ Quatro mudanças, nesta ordem:
 
 **NÃO verificado:**
 
-- **O VIO nunca voou.** Foi implementado e testado unitariamente (integração do
-  giro, conversão de frame, ausência de dead reckoning), mas o sim caiu antes
-  de qualquer voo com ele. **Esta é a primeira coisa a fazer.**
+- **O VIO voou e PIOROU. Está DESLIGADO por padrão** (`in_imu` vazio).
+  MEDIDO no mesmo perfil de voo, estéreo fora em todos, só a fusão mudando:
+
+  ```
+  sem IMU                      yaw max    4,2°   inflação 1,02x   erro 1,58 m
+  IMU ligada                   yaw max  178,6°   inflação 0,82x   erro 8,49 m
+  IMU + veto corrigido         yaw max  178,7°   inflação 0,80x   erro 6,26 m
+  ```
+
+  O veto comparava as rotações ao contrário (`R` do PnP é a rotação dos PONTOS,
+  `R_imu` é a da CÂMERA — são inversas, então concordar é `R_imu @ R == I`).
+  Isso era bug real, está corrigido e tem 5 testes. **Mas não era o principal.**
+
+  **~180° de erro de yaw é assinatura de convenção de eixos**, e o suspeito
+  está localizado: o `zed_mimic_node` apenas RENOMEIA o frame da IMU para
+  `zed_imu_link`, sem aplicar rotação nenhuma — então o giro chega na convenção
+  do `IMUSocket` do BiguaSim, enquanto `_imu_rotation` assume o corpo GLU e
+  converte com `R_BASE_FROM_OPTICAL`.
+
+  **PARA CONSERTAR:** comandar uma taxa de yaw conhecida e logar qual eixo do
+  giro responde e com que sinal. Essa medição sozinha resolve. Depois é só
+  devolver `in_imu` para `/zed/zed_node/imu/data`.
 - **O estéreo, medido, ficou PIOR que a depth do sim** (7,68 m contra 1,58 m).
   A causa é geometria, não código: `fx=320` e `B=0,12` dão 0,23 m de erro por
   pixel de disparidade a 3 m e 0,94 m a 6 m — a faixa onde o drone voa. A ZED
   real tem `fx≈700`. Ver [`VO-DRIFT.md`](VO-DRIFT.md) para as três saídas.
-  **O VIO pode mudar esse número**, porque o giro veta justamente as soluções
-  ruins que a triangulação imprecisa produzia. Medir antes de decidir.
+
+  Fica LIGADO por padrão porque é limitação física conhecida, não defeito — e
+  porque é o que reproduz a ZED. `vo_stereo:=false` desliga e o nó lê a imagem
+  de profundidade. **Todas as medições do estéreo até aqui foram feitas com o
+  veto do giro quebrado no caminho**, então merecem ser refeitas agora que ele
+  está correto e a IMU desligada.
 - **`in_imu` pode estar no tópico errado.** O default é
   `/zed/zed_node/imu/data`; a fonte crua é
   `/biguasim/uav0_id0/DynamicsSensor/IMU`. Não deu para confirmar qual publica
@@ -125,7 +148,13 @@ Quatro mudanças, nesta ordem:
 
 ## Próximos passos, em ordem
 
-### 1. Voar o VIO e ler o CSV
+### 1. Medir a convenção de eixos do giroscópio
+
+É o que destrava o VIO, e é uma medição, não um projeto: comandar yaw conhecido,
+ver qual eixo de `angular_velocity` responde e com que sinal. Comparar com o
+`R_BASE_FROM_OPTICAL` que `_imu_rotation` usa hoje.
+
+### 2. Voar e ler o CSV
 
 ```
 BS_SIM_DIR=... ./scripts/docker_up.sh --phase1
@@ -138,7 +167,7 @@ fusão agindo. As colunas que importam: `err_norm` e `drift_pct`.
 
 Esse número decide os passos 2 e 3.
 
-### 2. Localização por landmark (o "SLAM" que faz sentido aqui)
+### 3. Localização por landmark (o "SLAM" que faz sentido aqui)
 
 Não é scan matching. O `pad_map` já fusiona detecções com `confidence`,
 `observations` e `is_takeoff_base`. A correção cai de graça:
@@ -158,7 +187,7 @@ com ele realimenta o erro. Defesa: só corrigir com landmarks de muitas
 observações cuja posição parou de mudar, e dar peso diferente à base de
 decolagem.
 
-### 3. Navegação sobre o octomap
+### 4. Navegação sobre o octomap
 
 O que falta, de [`OCTOMAP.md`](OCTOMAP.md):
 
@@ -170,7 +199,7 @@ O que falta, de [`OCTOMAP.md`](OCTOMAP.md):
 - **`path_is_clear` não é um planejador.** Falta o A*/RRT sobre a octree, e
   isso é trabalho do `hydrone_nav`.
 
-### 4. Limpeza pendente
+### 5. Limpeza pendente
 
 - ~2500 linhas da geração anterior (`vision_node`, `mission_node`,
   `pad_mission_node`, `nav_node`, `controller_node`) não estão no caminho do
