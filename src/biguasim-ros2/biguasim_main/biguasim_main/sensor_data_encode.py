@@ -323,10 +323,22 @@ class DynamicsIMUEncoder(SensorPublisher):
         msg.linear_acceleration.y = float(sensor_data[1])
         msg.linear_acceleration.z = float(sensor_data[2])
 
-        # Assign angular velocity
-        msg.angular_velocity.x = float(sensor_data[9])
-        msg.angular_velocity.y = float(sensor_data[10])
-        msg.angular_velocity.z = float(sensor_data[11])
+        # Assign angular velocity. Indices 12-14, NOT 9-11.
+        #
+        # DynamicsSensor returns, per its own docstring:
+        #   [acceleration, velocity, position, angular accel., angular vel., rpy]
+        #      0-2           3-5       6-8      9-11            12-14        15-18
+        #
+        # This read 9-11 until 2026-08-27, so every consumer of /DynamicsSensor/IMU
+        # was handed angular ACCELERATION in the angular_velocity field. Nothing
+        # noticed because both are small 3-vectors that go to zero when the
+        # vehicle is still. It surfaced when visual_odometry_node started
+        # integrating the field as a rate to fuse with vision: integrating an
+        # acceleration as if it were a velocity does not give an angle, and the
+        # VIO's yaw error came out at 178 deg against 4 deg without it.
+        msg.angular_velocity.x = float(sensor_data[12])
+        msg.angular_velocity.y = float(sensor_data[13])
+        msg.angular_velocity.z = float(sensor_data[14])
 
         if self.use_covariance:
             msg.orientation_covariance = self.orientation_covariance.flatten().tolist()

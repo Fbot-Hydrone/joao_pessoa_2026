@@ -45,14 +45,11 @@ def angle_of(R):
     return float(np.linalg.norm(cv2.Rodrigues(R)[0]))
 
 
-def test_the_fusion_is_off_by_default_until_the_axes_are_verified(node):
-    """MEASURED: turning it on takes yaw error from 4.2 deg to 178.7 deg. That
-    signature is an axis convention, and zed_mimic only RENAMES the IMU frame
-    without rotating it — so the gyro arrives in BiguaSim's IMUSocket
-    convention while _imu_rotation assumes the body's GLU. Everything else here
-    tests that the machinery is correct; this pins that it stays off until the
-    convention is measured."""
-    assert node.get_parameter("in_imu").value == ""
+def test_the_fusion_is_on_by_default(node):
+    """It was off for part of 2026-08-27 while the gyro looked broken. The
+    field was: biguasim's DynamicsIMUEncoder published angular ACCELERATION
+    (indices 9-11) as angular_velocity, where the rate lives at 12-14."""
+    assert node.get_parameter("in_imu").value.endswith("imu/data")
 
 
 def test_a_known_yaw_rate_integrates_to_the_right_angle(node):
