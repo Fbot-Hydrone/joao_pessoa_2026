@@ -373,13 +373,26 @@ def generate_launch_description():
     # The cloud stays in the SENSOR's frame — octomap_server finds the ray
     # origin by looking the frame_id up in TF, and map_odom (below) is what
     # makes that lookup reach the world.
-    # What it publishes, and what to put in rviz2:
-    #   /occupied_cells_vis_array  MarkerArray    the octree's cubes
-    #   /free_cells_vis_array      MarkerArray    ray-cast free space
-    #   /projected_map             OccupancyGrid  2-D projection
-    #   /octomap_full|_binary      Octomap        the serialized tree
-    # The two MarkerArrays render in stock rviz2; the Octomap topics need
-    # octomap-rviz-plugins, which the Dockerfile installs.
+    # Everything it publishes lands under /octomap/ (the node's namespace), so
+    # the whole 3-D map is one group in rviz2's topic tree instead of six names
+    # scattered through the root:
+    #
+    #   /octomap/octomap_binary            Octomap        the tree, ~3 KB
+    #   /octomap/octomap_full              Octomap        tree + probabilities
+    #   /octomap/projected_map             OccupancyGrid  2-D projection
+    #   /octomap/occupied_cells_vis_array  MarkerArray    cubes  [see below]
+    #   /octomap/free_cells_vis_array      MarkerArray    free space [opt-in]
+    #   /octomap/octomap_point_cloud_centers  PointCloud2
+    #
+    # `cloud_in` is remapped absolutely (leading /) so the namespace does not
+    # drag the subscription along with the publishers.
+    #
+    # WHICH ONE TO DISPLAY: the MarkerArrays are rebuilt and republished whole
+    # on every insert, and rviz2 redraws from scratch each time — which is what
+    # makes the cubes blink while everything else on the bus sits still. Use
+    # octomap_rviz_plugins' OccupancyGrid display on
+    # /octomap/octomap_binary instead: it is latched, ~3 KB, decoded locally,
+    # and there is nothing to redraw between updates.
     cloud_filter = Node(
         package="hydrone_map",
         executable="cloud_filter_node",
@@ -396,6 +409,7 @@ def generate_launch_description():
         package="octomap_server",
         executable="octomap_server_node",
         name="octomap_server",
+        namespace="octomap",
         output="screen",
         condition=IfCondition(LaunchConfiguration("octomap")),
         parameters=[{
@@ -463,7 +477,7 @@ def generate_launch_description():
             "publish_free_space": ParameterValue(
                 LaunchConfiguration("octomap_free_space"), value_type=bool),
         }],
-        remappings=[("cloud_in", "/hydrone/map/cloud_filtered")],
+        remappings=[("cloud_in", "/hydrone/map/cloud_filtered")],  # absolute: escapes the namespace
     )
 
     # Joins TF's two disconnected trees, by MEASURING map -> odom rather than
