@@ -60,6 +60,21 @@ R_BASE_FROM_OPTICAL = np.array([
 ])
 
 
+def _matrix_from_quat(x, y, z, w):
+    """Quaternion (x, y, z, w) -> rotation matrix (3x3).
+
+    Normalised first: a quaternion off the wire is only unit to float
+    precision, and over a flight's worth of products that drifts.
+    """
+    n = np.sqrt(x * x + y * y + z * z + w * w)
+    x, y, z, w = x / n, y / n, z / n, w / n
+    return np.array([
+        [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+        [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+        [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+    ])
+
+
 def _quat_from_matrix(R):
     """Rotation matrix (3x3) -> quaternion (x, y, z, w). Standard Shepperd method."""
     tr = np.trace(R)
@@ -280,7 +295,8 @@ class VisualOdometryNode(Node):
         self.last_right = None        # latest right-eye frame, for stereo
         self.baseline = None          # metres, from the right camera_info
         self.n_stereo_empty = 0       # frames where matching found nothing
-        self.imu_buf = deque(maxlen=2000)   # (t_seconds, gyro_xyz) in base frame
+        # (t_seconds, gyro_xyz, R_body_or_None) — see _cb_imu and _imu_rotation.
+        self.imu_buf = deque(maxlen=2000)
         self.prev_stamp_s = None            # camera stamp of the last frame
         self.n_imu_rejected = 0             # PnP answers the gyro contradicted
         self.n_imu_carried = 0              # frames the gyro carried alone
@@ -324,18 +340,68 @@ class VisualOdometryNode(Node):
         self.K = np.array(msg.k, dtype=np.float64).reshape(3, 3)
 
     def _cb_imu(self, msg: Imu):
+        """Buffer both of the IMU's answers about rotation.
+
+        The rate is the classic one. The ORIENTATION is the better one where it
+        exists: it is an angle already, so using it needs no integration, no dt
+        and no trust in the sender's units — and a rate that is wrong by a
+        constant factor is exactly the bug this node was carrying (see
+        _imu_rotation). The real ZED publishes a fused orientation on this same
+        topic, so preferring it is the hardware path, not a simulator shortcut.
+
+        The orientation is used only when its covariance is POSITIVE. Both of
+        REP 145's ways of disclaiming the field are otherwise indistinguishable
+        from a real measurement: -1 says "no orientation here", and all-zeros
+        says "covariance unknown" — and an unset quaternion is (0,0,0,1), the
+        identity, which is a perfectly plausible reading. So a sender that
+        fills in nothing would be believed to have measured "nothing turned",
+        forever, and the rate path would never run. Demanding a positive
+        variance is the one test that separates the two: BiguaSim's
+        DynamicsIMUEncoder publishes 0.01, and so does the real ZED wrapper.
+        """
         t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         w = msg.angular_velocity
-        self.imu_buf.append((t, np.array([w.x, w.y, w.z], dtype=np.float64)))
+        q = msg.orientation
+        R = (_matrix_from_quat(q.x, q.y, q.z, q.w)
+             if msg.orientation_covariance[0] > 0.0 else None)
+        self.imu_buf.append(
+            (t, np.array([w.x, w.y, w.z], dtype=np.float64), R))
 
     def _imu_rotation(self, t0: float, t1: float) -> np.ndarray | None:
-        """Rotation the gyro measured between two camera stamps, as a 3x3 in
+        """Rotation the IMU measured between two camera stamps, as a 3x3 in
         the OPTICAL frame. None when the interval is not covered.
 
-        Integrated as a product of small rotations rather than a single
-        axis-angle over the average rate: over 0.1 s that difference is small,
-        but it is not zero once the vehicle is yawing at speed, and the whole
-        reason to consult the gyro is the turn.
+        Prefers the IMU's ORIENTATION over its rate. Differencing two
+        orientations is exact — R(t0)^T . R(t1) — where integrating a rate
+        multiplies whatever the sender's scale error happens to be by the
+        length of the flight.
+
+        MEASURED 2026-08-27 against BiguaSim ground truth, 120 s of the Phase 1
+        search rotating on the spot:
+
+            gyro_z integrated   951.8 deg travelled, -672.3 signed
+            ground truth yaw    317.9 deg travelled, -225.9 signed
+            ratio               2.994 travelled, 2.976 signed
+
+        The gyro is 3.0x too fast. It is NOT an axis flip, which is what this
+        was assumed to be: gyro_z correlates with body yaw at +0.962 and the
+        other two axes carry nothing (26 and 46 deg of noise against 951), so
+        the convention is already body FLU and already the right sign. It is
+        also not a clock artifact — the IMU's stamps track wall time at a ratio
+        of 1.000. The scale error is in the simulator's angular-velocity field
+        itself: DynamicsEncoder (/Odom) and DynamicsIMUEncoder (/IMU) read the
+        SAME indices 12-14, so both carry it.
+
+        The orientation on the same message does not: MEASURED against ground
+        truth yaw over the same run, mean 0.00 deg, std 0.00, max 0.00.
+
+        A caveat to state out loud: in the simulator that orientation comes
+        from the same DynamicsSensor as the ground truth, so it is noise-free
+        truth and the rotation half of this VIO is being handed the answer. It
+        proves the FUSION works, not that it would survive a real gyro. On the
+        real drone the ZED SDK fuses this field from an actual IMU and it is
+        the honest input it looks like. The rate path below stays for a sender
+        that publishes no orientation.
 
         The IMU reports in the body frame (X forward, Y left, Z up) and the VO
         accumulates in the camera's optical frame (Z forward, X right, Y down),
@@ -344,21 +410,26 @@ class VisualOdometryNode(Node):
         """
         if not self.imu_buf or t1 <= t0:
             return None
-        samples = [(t, w) for t, w in self.imu_buf if t0 <= t <= t1]
+        samples = [s for s in self.imu_buf if t0 <= s[0] <= t1]
         if len(samples) < 2:
             return None
         # Refuse a gap the IMU did not actually cover — otherwise a dropped
         # stretch is silently reported as no rotation at all.
-        if samples[0][0] - t0 > self.imu_max_gap or t1 - samples[-1][0] > self.imu_max_gap:
+        if (samples[0][0] - t0 > self.imu_max_gap
+                or t1 - samples[-1][0] > self.imu_max_gap):
             return None
 
-        R = np.eye(3)
-        for (ta, wa), (tb, wb) in zip(samples, samples[1:]):
-            dt = tb - ta
-            if dt <= 0:
-                continue
-            theta = 0.5 * (wa + wb) * dt      # trapezoidal, in the body frame
-            R = R @ cv2.Rodrigues(theta)[0]
+        R_first, R_last = samples[0][2], samples[-1][2]
+        if R_first is not None and R_last is not None:
+            R = R_first.T @ R_last
+        else:
+            R = np.eye(3)
+            for (ta, wa, _), (tb, wb, _) in zip(samples, samples[1:]):
+                dt = tb - ta
+                if dt <= 0:
+                    continue
+                theta = 0.5 * (wa + wb) * dt   # trapezoidal, in the body frame
+                R = R @ cv2.Rodrigues(theta)[0]
 
         C = R_BASE_FROM_OPTICAL
         return C.T @ R @ C

@@ -163,3 +163,100 @@ def test_the_veto_does_not_fire_on_an_honest_turn(node):
 def test_the_veto_fires_when_vision_misses_a_turn(node):
     """The case it exists for: gyro saw 9.5 deg, PnP saw 0.1."""
     assert disagreement(yaw(9.5), yaw(0.1).T) > node.imu_rotation_tol
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The orientation path
+#
+# MEASURED 2026-08-27 against BiguaSim ground truth: the simulator's gyro reads
+# 2.99x the true rate on every axis, while the orientation quaternion on the
+# same message matches ground-truth yaw to 0.00 deg. Integrating a rate
+# multiplies the sender's scale error by the length of the flight; differencing
+# two orientations does not integrate anything.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def quat_about_z(angle):
+    return (0.0, 0.0, np.sin(angle / 2.0), np.cos(angle / 2.0))
+
+
+def feed_orientation(node, angles, t0, t1, rate_xyz=(0.0, 0.0, 0.0), hz=200.0):
+    """Orientations sampled from t0 to t1, `angles` a yaw(t) callable.
+
+    `rate_xyz` is what the gyro claims at the same time — deliberately allowed
+    to disagree, because in the simulator it does.
+    """
+    t = t0
+    dt = 1.0 / hz
+    while t <= t1 + 1e-9:
+        m = Imu()
+        m.header.stamp.sec = int(t)
+        m.header.stamp.nanosec = int(round((t - int(t)) * 1e9))
+        (m.angular_velocity.x, m.angular_velocity.y,
+         m.angular_velocity.z) = rate_xyz
+        (m.orientation.x, m.orientation.y,
+         m.orientation.z, m.orientation.w) = quat_about_z(angles(t - t0))
+        m.orientation_covariance[0] = 0.01
+        node._cb_imu(m)
+        t += dt
+
+
+def test_orientation_is_preferred_over_a_gyro_that_disagrees(node):
+    """The simulator's gyro is 3x fast. The orientation on the same message is
+    exact. Whichever this node believes decides the whole VIO, so pin it."""
+    true_yaw = np.radians(12.0)
+    feed_orientation(node, lambda dt: true_yaw * (dt / 0.4), 300.0, 300.4,
+                     rate_xyz=(0.0, 0.0, np.radians(90.0)))   # 3x too fast
+    R = node._imu_rotation(300.0, 300.4)
+    assert R is not None
+    assert np.degrees(angle_of(R)) == pytest.approx(12.0, abs=0.5), \
+        "the 3x gyro was believed over the exact orientation"
+
+
+def test_orientation_needs_no_dt_so_a_sparse_stream_is_still_exact(node):
+    """Two samples 0.4 s apart carry the same answer as eighty. That is the
+    point of differencing an angle instead of integrating a rate."""
+    true_yaw = np.radians(20.0)
+    feed_orientation(node, lambda dt: true_yaw * (dt / 0.4), 400.0, 400.4, hz=5.0)
+    R = node._imu_rotation(400.0, 400.4)
+    assert np.degrees(angle_of(R)) == pytest.approx(20.0, abs=0.5)
+
+
+def test_orientation_stays_yaw_in_the_optical_frame(node):
+    """Same frame contract as the rate path: body yaw must not come back as
+    optical roll."""
+    feed_orientation(node, lambda dt: np.radians(30.0) * (dt / 0.4),
+                     500.0, 500.4)
+    R_opt = node._imu_rotation(500.0, 500.4)
+    C = R_BASE_FROM_OPTICAL
+    axis = cv2.Rodrigues(C @ R_opt @ C.T)[0].ravel()
+    assert abs(axis[2]) > 0.99 * np.linalg.norm(axis), "yaw did not stay yaw"
+
+
+def test_an_unset_orientation_falls_back_to_the_rate(node):
+    """A sender that fills in no orientation leaves the identity quaternion and
+    an all-zero covariance behind. Believing that pair would report 'nothing
+    turned' forever and the rate path would never run again."""
+    feed_gyro(node, (0.0, 0.0, np.radians(30.0)), 600.0, 600.4)
+    R = node._imu_rotation(600.0, 600.4)
+    assert R is not None
+    assert np.degrees(angle_of(R)) == pytest.approx(12.0, abs=0.5)
+
+
+def test_a_covariance_of_minus_one_falls_back_to_the_rate(node):
+    """REP 145: orientation_covariance[0] == -1 means there is no orientation.
+    A sender that says so must not have its zeros believed."""
+    t = 700.0
+    while t <= 700.4 + 1e-9:
+        m = Imu()
+        m.header.stamp.sec = int(t)
+        m.header.stamp.nanosec = int(round((t - int(t)) * 1e9))
+        m.angular_velocity.z = np.radians(30.0)
+        # a PERFECTLY VALID quaternion, explicitly disclaimed
+        (m.orientation.x, m.orientation.y,
+         m.orientation.z, m.orientation.w) = quat_about_z(np.radians(90.0))
+        m.orientation_covariance[0] = -1.0
+        node._cb_imu(m)
+        t += 1.0 / 200.0
+    R = node._imu_rotation(700.0, 700.4)
+    assert np.degrees(angle_of(R)) == pytest.approx(12.0, abs=0.5), \
+        "a disclaimed orientation was used anyway"
