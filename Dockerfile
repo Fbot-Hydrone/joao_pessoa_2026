@@ -74,6 +74,12 @@ RUN apt-get update && apt-get install -y \
       ros-humble-octomap-rviz-plugins \
     && rm -rf /var/lib/apt/lists/*
 
+# octomap-python: the ONLY way a Python node can ask the octree a question.
+# ROS's own converters (octomap_msgs::binaryMsgToMap) are C++ only, so without
+# this /octomap_binary is a byte blob to everything in this stack — a 3-D map
+# we build and cannot read. hydrone_map/octree.py wraps it.
+RUN pip install --no-cache-dir octomap-python==1.10.0.0
+
 # ─────────────────────────────────────────────────────────────────────────────
 # LAYER ORDER MATTERS BELOW THIS LINE.
 #
