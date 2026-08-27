@@ -70,7 +70,7 @@ def generate_launch_description():
         # Sim-only VO drift logger; see sources_sim.launch.py.
         DeclareLaunchArgument("odom_error", default_value="true"),
         DeclareLaunchArgument("odom_error_print", default_value="false"),
-        DeclareLaunchArgument("odom_error_dir", default_value=""),
+        DeclareLaunchArgument("odom_error_dir", default_value="/ws/logs"),
     ]
 
     sources = IncludeLaunchDescription(

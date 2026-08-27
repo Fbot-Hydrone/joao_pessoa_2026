@@ -49,7 +49,7 @@ def generate_launch_description():
         DeclareLaunchArgument("odom_source",      default_value="vo"),
         DeclareLaunchArgument("odom_error",       default_value="true"),
         DeclareLaunchArgument("odom_error_print", default_value="false"),
-        DeclareLaunchArgument("odom_error_dir",   default_value=""),
+        DeclareLaunchArgument("odom_error_dir",   default_value="/ws/logs"),
     ]
 
     # ── SOURCES layer (exactly one, chosen by use_sim) ──────────────────────

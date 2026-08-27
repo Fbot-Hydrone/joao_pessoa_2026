@@ -45,7 +45,7 @@ def generate_launch_description():
         # forwarded so it is settable from this file's command line too.
         DeclareLaunchArgument("odom_error",       default_value="true"),
         DeclareLaunchArgument("odom_error_print", default_value="false"),
-        DeclareLaunchArgument("odom_error_dir",   default_value=""),
+        DeclareLaunchArgument("odom_error_dir",   default_value="/ws/logs"),
     ]
 
     # Base sim now brings up MAVROS + the vision_odom_bridge itself (the vehicle

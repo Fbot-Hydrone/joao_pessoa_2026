@@ -41,7 +41,7 @@ def generate_launch_description():
             "odom_error_print", default_value="false",
             description="Echo the VO drift to stdout at 1 Hz as well as the CSV."),
         DeclareLaunchArgument(
-            "odom_error_dir", default_value="",
+            "odom_error_dir", default_value="/ws/logs",
             description="Directory for the drift CSV. Empty = repo root."),
     ]
 

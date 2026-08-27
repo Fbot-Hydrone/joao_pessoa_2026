@@ -84,7 +84,7 @@ def generate_launch_description():
         # VO handles worst, and this is what measures how badly.
         DeclareLaunchArgument("odom_error", default_value="true"),
         DeclareLaunchArgument("odom_error_print", default_value="false"),
-        DeclareLaunchArgument("odom_error_dir", default_value=""),
+        DeclareLaunchArgument("odom_error_dir", default_value="/ws/logs"),
     ]
 
     sources = IncludeLaunchDescription(
