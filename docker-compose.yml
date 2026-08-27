@@ -25,6 +25,10 @@ services:
       # Asset backend used by `biguasim.install(...)`; set on the host if used.
       - BS_WORLDS_URL=${BS_WORLDS_URL:-}
     volumes:
+      # Where runs write their logs. odom_error_node's drift CSV lands here,
+      # and it is the ONLY record of how far the VO wanders — without this
+      # mount it is written inside the container and lost on `down`.
+      - ./logs:/ws/logs
       # The DDS profile above, read at startup by every node in the container.
       - ./docker/fastdds_udp_only.xml:/ws/docker/fastdds_udp_only.xml:ro
       # UE5 viewport on the host X server (run `xhost +local:docker` first,

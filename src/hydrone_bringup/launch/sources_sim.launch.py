@@ -478,8 +478,13 @@ def generate_launch_description():
             'odom_error_print', default_value='false',
             description='Echo the VO drift to stdout at 1 Hz as well as the CSV.'),
         DeclareLaunchArgument(
-            'odom_error_dir', default_value='',
-            description='Directory for the drift CSV. Empty = repo root.'),
+            'odom_error_dir', default_value='/ws/logs',
+            description='Directory for the drift CSV. Defaults to /ws/logs, '
+                        'which docker-compose bind-mounts to ./logs on the '
+                        'host — the CSV is the only record of VO drift there '
+                        'is, and anywhere else in the container it dies with '
+                        'the container. Empty = the node picks the repo root, '
+                        'which it does NOT find from an installed path.'),
         ardubridge,
         sitl_dds,
         zed_mimic,

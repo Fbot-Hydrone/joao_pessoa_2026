@@ -121,6 +121,33 @@ class VisualOdometryNode(Node):
         # not motion. Rejected steps hold pose (exactly like a starved frame).
         self.declare_parameter("max_step_m", 0.5)
         self.declare_parameter("max_step_deg", 20.0)
+        # ZERO-VELOCITY UPDATE. The bound above rejects steps too BIG to be
+        # real; these reject steps too SMALL. PnP never returns exactly zero —
+        # feature positions carry sub-pixel noise, so a perfectly still camera
+        # still yields a few millimetres of "motion" every frame, with inliers
+        # to spare. Every gate above passes it, and integrating it forever is
+        # pure invented distance.
+        #
+        # MEASURED from odom_error_20260827_010810.csv, a 51.5 m flight:
+        #   94% of samples the vehicle was LITERALLY still (ground truth moved
+        #   < 0.01 mm) and the VO reported 441.8 m of travel across them —
+        #   1.61 mm per frame, relentlessly. Total: 51.5 m flown, 527.3 m
+        #   reported, a 10.2x inflation. While actually moving the same VO is
+        #   fine: 50.6 m of ground truth against 58.2 m reported, 1.15x.
+        #
+        # So essentially ALL of the drift is invented while standing still, and
+        # that is what these thresholds delete. 5 mm sits 3x above the measured
+        # noise and ~10x below one frame of real flight (0.5 m/s at 10 Hz is
+        # 50 mm/frame), so there is a wide margin on both sides.
+        #
+        # The real ZED does this too — the SDK detects a static state and holds
+        # its pose, which is why the hardware looked better than the sim.
+        self.declare_parameter("min_step_m", 0.005)
+        # Angular counterpart. NOT measured yet — the CSV logs accumulated yaw
+        # error, not per-frame rotation noise, so this is a starting value
+        # chosen to be small against any real turn (ATC_SLEW_YAW-limited turns
+        # are degrees per frame, not hundredths). Worth measuring.
+        self.declare_parameter("min_step_deg", 0.25)
         # Whether this node owns the odom->base_link TF. False when it is
         # demoted to an observer publishing to a side topic while ground
         # truth flies the vehicle — two broadcasters of the same transform
@@ -136,6 +163,10 @@ class VisualOdometryNode(Node):
         self.max_step_m = float(self.get_parameter("max_step_m").value)
         self.max_step_rad = np.radians(
             float(self.get_parameter("max_step_deg").value))
+        self.min_step_m = float(self.get_parameter("min_step_m").value)
+        self.min_step_rad = np.radians(
+            float(self.get_parameter("min_step_deg").value))
+        self.n_static = 0
         self.publish_tf = bool(self.get_parameter("publish_tf").value)
 
         self.bridge = CvBridge()
@@ -254,6 +285,19 @@ class VisualOdometryNode(Node):
             self.get_logger().warn(
                 f"VO: implausible step {step_t:.2f} m / "
                 f"{np.degrees(step_r):.1f} deg in one frame; holding pose")
+            return
+
+        # Zero-velocity update: too small to be motion, so it is noise, and
+        # noise integrated is invented distance. BOTH have to be small — a
+        # vehicle turning on the spot translates by nothing and must still have
+        # its rotation integrated, which is exactly what Phase 1's search does.
+        if step_t < self.min_step_m and step_r < self.min_step_rad:
+            self.n_static += 1
+            self.get_logger().info(
+                f"VO: still ({step_t * 1000:.1f} mm / "
+                f"{np.degrees(step_r):.2f} deg); holding pose "
+                f"[{self.n_static} frames so far]",
+                throttle_duration_sec=30.0)
             return
 
         R, _ = cv2.Rodrigues(rvec)

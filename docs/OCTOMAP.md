@@ -140,12 +140,26 @@ walked. A planner reads that as a corridor where there is masonry, or the
 reverse. It does not show up on a freshly started sim; it shows up on a long
 attempt.
 
-**`odom_error_node` has been writing the drift to CSV all along.** Read it
-before doing anything else here. If ten minutes costs a few centimetres, this
-entire item is moot and the map is ready. If it costs tens, the choice is real:
-map in `map` (does not drift, but jumps when the EKF corrects, which tears the
-map), clear the map periodically, or SLAM. The same measurement decides whether
-SLAM is worth building at all.
+**MEASURED 2026-08-27** (odom_error_20260827_010810.csv, a 51.5 m flight):
+final position error **5.28 m**, peak **11.98 m**, yaw error up to 180°. In an
+8x8 m arena that is not an estimate of anything.
+
+But the cause was not bad odometry. Splitting the samples by whether the
+vehicle was actually moving:
+
+    TOTAL       ground truth 51.5 m, VO reported 527.3 m   -> 10.2x inflation
+    94% still   ground truth  0.0 m, VO reported 441.8 m   -> 1.61 mm/frame
+     1% moving  ground truth 50.6 m, VO reported  58.2 m   -> 1.15x
+
+Essentially all of the drift was noise integrated while parked. Fixed by a
+zero-velocity update in `visual_odometry_node` (`min_step_m`); see
+[`VO-DRIFT.md`](VO-DRIFT.md). **The numbers above are from BEFORE that fix and
+need re-measuring** — the CSV now lands in `./logs/`, which is bind-mounted.
+
+If the re-measured drift is centimetres over ten minutes, this item is closed
+and the map is ready. If it is still metres, the choice is real: map in `map`
+(does not drift, but jumps when the EKF corrects, which tears the map), clear
+the map periodically, or SLAM.
 
 ### 2. `filter_speckles` is off
 
