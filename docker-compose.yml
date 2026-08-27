@@ -16,9 +16,17 @@ services:
       # It was briefly enabled here (the LAN-discovery stall it fixes is real)
       # and that is exactly what broke rviz. Pick one.
       #- ROS_LOCALHOST_ONLY=1
+      # Fast DDS without shared memory. With SHM, any process that joins after
+      # the stack has been up receives NOTHING — rviz2 included, which is what
+      # made the octomap "flicker" and topics look empty. See the XML for the
+      # measurements. Nodes launched together are unaffected either way, which
+      # is why the drone flies while nothing outside can see it.
+      - FASTRTPS_DEFAULT_PROFILES_FILE=/ws/docker/fastdds_udp_only.xml
       # Asset backend used by `biguasim.install(...)`; set on the host if used.
       - BS_WORLDS_URL=${BS_WORLDS_URL:-}
     volumes:
+      # The DDS profile above, read at startup by every node in the container.
+      - ./docker/fastdds_udp_only.xml:/ws/docker/fastdds_udp_only.xml:ro
       # UE5 viewport on the host X server (run `xhost +local:docker` first,
       # or use scripts/docker_up.sh)
       - /tmp/.X11-unix:/tmp/.X11-unix

@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+FastDDS without the shared-memory transport.
+
+WHY THIS EXISTS
+Fast DDS defaults to shared memory between processes on one host, and on this
+stack that transport stops accepting new participants once the sim has been up
+for a while. The symptom is specific and it wasted a lot of time: the nodes
+that were launched together keep talking to each other perfectly — the drone
+flies, MAVROS gets its pose — while ANY process that joins later receives
+nothing at all. `ros2 topic list` still shows all 176 topics, because discovery
+works; only the data never arrives.
+
+rviz2 is exactly such a late joiner. That is why its displays go red and empty,
+why the octomap "flickers", and why topics appear to vanish.
+
+MEASURED 2026-08-26, a fresh subscriber inside the running container, 20 s:
+
+                                  with SHM     UDP only
+    /tf                                  0            1
+    /octomap_binary                      0           33
+    /hydrone/map/cloud_filtered          0           32
+    cloud_registered (the source)        0           36
+
+Clearing the 386 orphaned /dev/shm/fastrtps_* segments left over from previous
+runs (97 MB, none in use) did NOT help, so it is not simply stale files.
+
+THE COST
+UDP loopback copies where shared memory would not, so large messages pay for
+it. The biggest thing on this bus is the ZED cloud at ~230 KB per frame, 10 Hz
+-> ~2.3 MB/s over lo. That is nothing for loopback, and it is worth paying to
+have a bus that works.
+
+ON THE HOST
+rviz2 and any `ros2` command outside the container need this too:
+    export FASTRTPS_DEFAULT_PROFILES_FILE=<repo>/docker/fastdds_udp_only.xml
+scripts/env.sh does it for you.
+-->
+<dds xmlns="http://www.eprosima.com">
+  <profiles>
+    <transport_descriptors>
+      <transport_descriptor>
+        <transport_id>udp_transport</transport_id>
+        <type>UDPv4</type>
+      </transport_descriptor>
+    </transport_descriptors>
+
+    <participant profile_name="udp_only" is_default_profile="true">
+      <rtps>
+        <userTransports>
+          <transport_id>udp_transport</transport_id>
+        </userTransports>
+        <!-- false, or Fast DDS adds the shared-memory transport back -->
+        <useBuiltinTransports>false</useBuiltinTransports>
+      </rtps>
+    </participant>
+  </profiles>
+</dds>

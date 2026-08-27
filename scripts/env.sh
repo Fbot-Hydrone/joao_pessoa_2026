@@ -66,8 +66,15 @@ fi
 
 # Private DDS domain — must match ROS_DOMAIN_ID in docker-compose.yml so host
 # `ros2` commands see the containerized stack and other apps on domain 0 don't
-# poison the micro-ROS agent.
-export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-42}"
+# poison the micro-ROS agent. It drifted to 42 here while the compose file said
+# 63, which on its own is enough to make rviz2 list nothing at all.
+export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-63}"
+
+# Fast DDS without shared memory — the same profile the container uses. Without
+# it rviz2 and `ros2` commands on the host are late joiners on a bus whose SHM
+# transport has stopped accepting them: topics list fine and no data ever
+# arrives. See docker/fastdds_udp_only.xml for the measurements.
+export FASTRTPS_DEFAULT_PROFILES_FILE="$_HYDRONE_WS/docker/fastdds_udp_only.xml"
 
 # ── 3. XRCE-DDS IDL generator (needed whenever ArduPilot rebuilds) ─────────
 export MICROXRCEDDSGEN_DIR="$_HYDRONE_WS/tools/Micro-XRCE-DDS-Gen"
