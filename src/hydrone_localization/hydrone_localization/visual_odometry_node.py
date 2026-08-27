@@ -98,6 +98,30 @@ class VisualOdometryNode(Node):
         # ── Parameters ─────────────────────────────────────────────────────
         self.declare_parameter("in_rgb", "/zed/zed_node/rgb/image_rect_color")
         self.declare_parameter("in_depth", "/zed/zed_node/depth/depth_registered")
+        # STEREO. The ZED 2i is a stereo camera: its tracker follows features
+        # and gets their range by MATCHING the two eyes, not by reading a depth
+        # image someone else computed. Consuming the sim's depth was a shortcut
+        # the real drone does not have, and it hid the errors the real one
+        # makes — a feature the right eye cannot match has NO depth here, where
+        # the sim's depth image would have handed over a perfect number.
+        #
+        # This is for ODOMETRY ONLY. The mapping stack, the pad detectors and
+        # odom_GT keep using the sim's depth exactly as before.
+        #
+        # in_right empty falls back to in_depth, which is the real drone's
+        # configuration too (zed_wrapper publishes its own depth there).
+        self.declare_parameter("in_right", "/zed/zed_node/right/image_rect_color")
+        self.declare_parameter("in_right_info", "/zed/zed_node/right/camera_info")
+        # Row tolerance for a stereo match, in pixels. The pair is rectified,
+        # so a left feature's partner is on the same row; this allows for the
+        # detector's own sub-pixel jitter and any small mounting error.
+        self.declare_parameter("stereo_row_tol", 2.0)
+        # Smallest disparity worth triangulating, in pixels. Range error is
+        # dZ/Z = dd/d, so at 1 px of matching error a disparity of 4 px is
+        # already 25% range error — and at fx=320, B=0.12 that is 9.6 m away.
+        # Below this the feature is effectively at infinity and contributes
+        # nothing but noise to PnP.
+        self.declare_parameter("min_disparity", 4.0)
         self.declare_parameter("in_info", "/zed/zed_node/rgb/camera_info")
         self.declare_parameter("out_odom", "/zed/zed_node/odom")
         # ORB budget. More features = steadier pose, more CPU.
@@ -124,7 +148,21 @@ class VisualOdometryNode(Node):
         self.declare_parameter("match_ratio", 0.75)
         # Depth gating (meters): reject back-projections outside a sane band.
         self.declare_parameter("min_depth", 0.3)
-        self.declare_parameter("max_depth", 20.0)
+        # 6 m, and this is a STEREO limit, not an arena one. Triangulated depth
+        # degrades as Z^2: dZ = Z^2 * dd / (fx * B), and with the sim pair's
+        # fx=320 px and B=0.12 m one pixel of disparity is worth 0.65 m at 5 m
+        # and 2.6 m at 10 m. MEASURED against the sim's own depth image:
+        #
+        #     1-3 m   |error| median 0.305 m
+        #     3-6 m   |error| median 2.535 m
+        #     6-12 m  |error| median 1.864 m
+        #
+        # A feature at 10 m carries metres of range error into PnP, and PnP
+        # weights it like any other. It was 20 m, which let the whole far half
+        # of the arena vote. The real ZED 2i has the same physics with a longer
+        # focal length, so this bound belongs here on the real drone too — it
+        # just sits further out.
+        self.declare_parameter("max_depth", 6.0)
         # Minimum RANSAC inliers to trust a motion estimate.
         self.declare_parameter("min_inliers", 12)
         # Minimum inlier RATIO (inliers / usable matches). 12 inliers out of 13
@@ -202,6 +240,9 @@ class VisualOdometryNode(Node):
         # ── VO state ────────────────────────────────────────────────────────
         self.K = None                 # 3x3 intrinsics, from camera_info
         self.last_depth = None        # latest depth frame (meters), cached
+        self.last_right = None        # latest right-eye frame, for stereo
+        self.baseline = None          # metres, from the right camera_info
+        self.n_stereo_empty = 0       # frames where matching found nothing
         self.prev_depth = None        # depth aligned with prev_kp/prev_des
         self.prev_pts = None          # Nx2 keypoint pixel coords of prev frame
         self.prev_des = None
@@ -216,6 +257,14 @@ class VisualOdometryNode(Node):
         self.create_subscription(Image, p("in_depth"), self._cb_depth, 10)
         self.create_subscription(Image, p("in_rgb"), self._cb_rgb, 10)
 
+        self._in_right = p("in_right")
+        if self._in_right:
+            self.create_subscription(Image, self._in_right, self._cb_right, 10)
+            self.create_subscription(CameraInfo, p("in_right_info"),
+                                     self._cb_right_info, 10)
+        self.stereo_row_tol = float(p("stereo_row_tol"))
+        self.min_disparity = float(p("min_disparity"))
+
         self.get_logger().info("Visual odometry ready — estimating /zed/zed_node/odom")
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -223,20 +272,36 @@ class VisualOdometryNode(Node):
     def _cb_info(self, msg: CameraInfo):
         self.K = np.array(msg.k, dtype=np.float64).reshape(3, 3)
 
+    def _cb_right(self, msg: Image):
+        self.last_right = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
+
+    def _cb_right_info(self, msg: CameraInfo):
+        """Baseline from P[3] = -fx * B, which is where REP 104 puts it."""
+        fx = msg.p[0]
+        if fx:
+            self.baseline = abs(msg.p[3] / fx)
+
     def _cb_depth(self, msg: Image):
         self.last_depth = self.bridge.imgmsg_to_cv2(msg, desired_encoding="32FC1")
 
     def _backproject(self, pts, depth):
-        """Nx2 pixel coords -> Nx3 optical-frame points + valid mask (vectorized)."""
+        """Nx2 pixel coords -> Nx3 optical-frame points + valid mask.
+
+        `depth` is either a per-KEYPOINT array (stereo) or a depth IMAGE (the
+        fallback). Both end up as one range per point; only the lookup differs.
+        """
         fx, fy = self.K[0, 0], self.K[1, 1]
         cx, cy = self.K[0, 2], self.K[1, 2]
-        h, w = depth.shape
         u = np.rint(pts[:, 0]).astype(np.int32)
         v = np.rint(pts[:, 1]).astype(np.int32)
-        in_img = (u >= 0) & (u < w) & (v >= 0) & (v < h)
-        uc = np.clip(u, 0, w - 1)
-        vc = np.clip(v, 0, h - 1)
-        d = depth[vc, uc]
+        if depth.ndim == 1:
+            # Stereo: one range per keypoint, already aligned with pts.
+            in_img = np.ones(len(pts), dtype=bool)
+            d = depth if len(depth) == len(pts) else np.full(len(pts), np.nan)
+        else:
+            h, w = depth.shape
+            in_img = (u >= 0) & (u < w) & (v >= 0) & (v < h)
+            d = depth[np.clip(v, 0, h - 1), np.clip(u, 0, w - 1)]
         valid = in_img & np.isfinite(d) & (d >= self.min_depth) & (d <= self.max_depth)
         d_safe = np.where(valid, d, 1.0)  # avoid nan propagation; masked out anyway
         x = (u - cx) / fx * d_safe
@@ -244,8 +309,73 @@ class VisualOdometryNode(Node):
         pts3d = np.stack([x, y, d_safe], axis=1)
         return pts3d, valid
 
+    def _stereo_match(self, kp_left, des_left, left_gray):
+        """Range for each left keypoint, by matching it in the RIGHT eye.
+
+        Returns an array of depths in metres, NaN where the feature could not
+        be matched, aligned with kp_left.
+
+        SPARSE, not a dense disparity map, and the difference is the whole
+        point. A dense matcher (SGBM) optimises over the image and does badly
+        exactly where a corner detector likes to put keypoints: silhouettes,
+        occlusion boundaries, thin structure. MEASURED on a live frame — of 981
+        ORB keypoints, SGBM had disparity for only 267, so 73% of the features
+        the tracker wanted were thrown away, and the ones left were biased
+        toward flat interiors. That is why dense stereo made odometry WORSE
+        than reading the sim's depth image.
+
+        Matching the features themselves puts the range exactly where the
+        tracker needs it, and it is what the ZED's own tracker does.
+
+        The pair is rectified (identical intrinsics, pure horizontal offset),
+        so a left feature's partner lies on the SAME row, at a smaller x. Both
+        facts are used as filters — they are free and they reject most wrong
+        matches before the descriptor has to.
+        """
+        if (self.last_right is None or self.baseline is None
+                or self.K is None or des_left is None or not kp_left):
+            return None
+
+        right = cv2.cvtColor(self.last_right, cv2.COLOR_BGR2GRAY)
+        if right.shape != left_gray.shape:
+            self.get_logger().error(
+                f"stereo pair mismatched: left {left_gray.shape} vs right "
+                f"{right.shape}; the two eyes must share resolution",
+                throttle_duration_sec=30.0)
+            return None
+        # The SAME equalisation on both eyes: ORB describes intensity
+        # gradients, so equalising one and not the other breaks every match.
+        if self.clahe is not None:
+            right = self.clahe.apply(right)
+
+        kp_r, des_r = self.orb.detectAndCompute(right, None)
+        depths = np.full(len(kp_left), np.nan, dtype=np.float64)
+        if des_r is None or len(kp_r) < 2:
+            return depths
+
+        matches = self.matcher.knnMatch(des_left, des_r, k=2)
+        fx = float(self.K[0, 0])
+        for pair in matches:
+            if len(pair) < 2:
+                continue
+            m, second = pair
+            if m.distance > self.match_ratio * second.distance:
+                continue
+            pl = kp_left[m.queryIdx].pt
+            pr = kp_r[m.trainIdx].pt
+            # Same row, within a tolerance for the detector's own jitter.
+            if abs(pl[1] - pr[1]) > self.stereo_row_tol:
+                continue
+            disparity = pl[0] - pr[0]
+            # Positive, and large enough that Z is not dominated by one pixel
+            # of error: dZ/Z = dd/d, so d < min_disparity is unusable range.
+            if disparity < self.min_disparity:
+                continue
+            depths[m.queryIdx] = fx * self.baseline / disparity
+        return depths
+
     def _cb_rgb(self, msg: Image):
-        if self.K is None or self.last_depth is None:
+        if self.K is None:
             return
 
         gray = cv2.cvtColor(
@@ -253,10 +383,29 @@ class VisualOdometryNode(Node):
             cv2.COLOR_BGR2GRAY)
         if self.clahe is not None:
             gray = self.clahe.apply(gray)
+
         kp, des = self.orb.detectAndCompute(gray, None)
-        depth = self.last_depth
         pts = (np.array([k.pt for k in kp], dtype=np.float64)
                if kp else np.empty((0, 2)))
+
+        # Range for the features about to be tracked, from the RIGHT eye —
+        # one depth per keypoint, NaN where it could not be matched. Falls back
+        # to the depth image for a rig without a second eye, which is also how
+        # the real drone runs (zed_wrapper computes depth on the camera).
+        depth = self._stereo_match(kp, des, gray)
+        if depth is None:
+            if self.last_depth is None:
+                return
+            depth = self.last_depth
+        elif not np.isfinite(depth).any():
+            self.n_stereo_empty += 1
+            self.get_logger().warn(
+                f"VO: no feature matched in the right eye "
+                f"[{self.n_stereo_empty}]; holding pose",
+                throttle_duration_sec=10.0)
+            self.prev_depth, self.prev_pts, self.prev_des = depth, pts, des
+            self._publish(msg.header.stamp)
+            return
 
         if des is not None and self.prev_des is not None and len(kp) >= self.min_inliers:
             # 3D points from PREVIOUS frame's depth; 2D from the current frame.

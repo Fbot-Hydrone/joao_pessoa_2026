@@ -20,8 +20,10 @@ and overrides every input topic (and the camera offset) from it. The defaults
 below only matter when the node is run standalone with `ros2 run`.
 
 Outputs (real ZED wrapper names):
-  /zed/zed_node/rgb/image_rect_color     sensor_msgs/Image
+  /zed/zed_node/rgb/image_rect_color     sensor_msgs/Image          (left eye)
   /zed/zed_node/rgb/camera_info          sensor_msgs/CameraInfo
+  /zed/zed_node/right/image_rect_color   sensor_msgs/Image          (right eye)
+  /zed/zed_node/right/camera_info        sensor_msgs/CameraInfo     (P[3] = -fx*B)
   /zed/zed_node/depth/depth_registered   sensor_msgs/Image (32FC1, meters, NaN=invalid)
   /zed/zed_node/depth/camera_info        sensor_msgs/CameraInfo
   /zed/zed_node/point_cloud/cloud_registered  sensor_msgs/PointCloud2 (organized
@@ -60,6 +62,7 @@ IDENTICAL header.stamp — required by time-synchronized subscribers downstream.
 """
 
 import array
+from copy import deepcopy
 import numpy as np
 import rclpy
 from rclpy.executors import ExternalShutdownException
@@ -135,6 +138,17 @@ class ZedMimicNode(Node):
         # Multiply sim depth values to get meters (set to 0.01 if the sim
         # turns out to report centimeters — verify in RViz once).
         self.declare_parameter("depth_scale", 1.0)
+        # RIGHT eye of the stereo pair. Empty disables it, which is what a
+        # config without a RightCamera gives you — the node then behaves
+        # exactly as before.
+        self.declare_parameter("in_right", "/biguasim/uav0_id0/RightCamera")
+        # Stereo baseline in metres, the distance between the two eyes. The
+        # ZED 2i's is 0.12. It reaches consumers through the right camera's
+        # projection matrix (P[3] = -fx * baseline), which is where every
+        # stereo algorithm in ROS looks for it, and it MUST match the two
+        # `location` entries in biguasim's config.yaml or triangulated depth
+        # is wrong by exactly that ratio.
+        self.declare_parameter("baseline", 0.12)
         # Camera mounting position on the drone body, in meters, in base_link
         # (X forward, Y left, Z up). In sim this is overridden from the camera's
         # `location` in biguasim's config.yaml — BiguaSim's body frame is GLU,
@@ -154,10 +168,13 @@ class ZedMimicNode(Node):
         self.declare_parameter("point_cloud_freq", 10.0)
 
         self.depth_scale = self.get_parameter("depth_scale").value
+        self._in_right = self.get_parameter("in_right").value
+        self.baseline = float(self.get_parameter("baseline").value)
 
         # ── State: latest depth/info cached until the next RGB frame ───────
         self.last_depth: Image | None = None
         self.last_info: CameraInfo | None = None
+        self.last_right: Image | None = None
         # Whether last_depth has already been through _prepare_depth.
         self._depth_converted = False
 
@@ -166,6 +183,12 @@ class ZedMimicNode(Node):
             Image, "/zed/zed_node/rgb/image_rect_color", 10)
         self.pub_rgb_info = self.create_publisher(
             CameraInfo, "/zed/zed_node/rgb/camera_info", 10)
+        # Same names the real wrapper uses for the right eye, so a stereo
+        # consumer cannot tell sim from hardware.
+        self.pub_right = self.create_publisher(
+            Image, "/zed/zed_node/right/image_rect_color", 10)
+        self.pub_right_info = self.create_publisher(
+            CameraInfo, "/zed/zed_node/right/camera_info", 10)
         self.pub_depth = self.create_publisher(
             Image, "/zed/zed_node/depth/depth_registered", 10)
         self.pub_depth_info = self.create_publisher(
@@ -211,6 +234,8 @@ class ZedMimicNode(Node):
         self.create_subscription(Image, p("in_rgb"), self._cb_rgb, 1)
         self.create_subscription(CameraInfo, p("in_rgb_info"), self._cb_info, 10)
         self.create_subscription(Image, p("in_depth"), self._cb_depth, 1)
+        if self._in_right:
+            self.create_subscription(Image, self._in_right, self._cb_right, 1)
         self.create_subscription(Odometry, p("in_odom"), self._cb_odom, 10)
         self.create_subscription(Imu, p("in_imu"), self._cb_imu, 10)
 
@@ -266,6 +291,29 @@ class ZedMimicNode(Node):
 
     def _cb_info(self, msg: CameraInfo):
         self.last_info = msg
+
+    def _cb_right(self, msg: Image):
+        # Cached and republished on the LEFT frame's clock read, so the pair
+        # carries one identical stamp. A stereo matcher that pairs images by
+        # timestamp needs them to actually match; drifting stamps turn a static
+        # scene into apparent motion.
+        self.last_right = msg
+
+    def _right_info(self) -> CameraInfo | None:
+        """The left's intrinsics with the baseline written into P[3].
+
+        A rectified stereo pair shares K; the only thing that distinguishes the
+        right camera is its position, and REP 104 puts that in P[3] as
+        -fx * baseline. Every stereo consumer in ROS reads the baseline from
+        there, so this is the one place it has to be right.
+        """
+        if self.last_info is None:
+            return None
+        info = deepcopy(self.last_info)
+        p = list(info.p)
+        p[3] = -info.k[0] * self.baseline      # -fx * B
+        info.p = p
+        return info
 
     def _cb_depth(self, msg: Image):
         # Cache the frame RAW and do no work here. BiguaSim publishes depth at
@@ -429,12 +477,22 @@ class ZedMimicNode(Node):
             self.last_depth.header.frame_id = FRAME_OPTICAL
             self.pub_depth.publish(self.last_depth)
 
+        if self.last_right is not None:
+            self.last_right.header.stamp = stamp
+            self.last_right.header.frame_id = FRAME_OPTICAL
+            self.pub_right.publish(self.last_right)
+
         if self.last_info is not None:
             self.last_info.header.stamp = stamp
             self.last_info.header.frame_id = FRAME_OPTICAL
             self.pub_rgb_info.publish(self.last_info)
             # Depth is registered onto the RGB image -> same intrinsics.
             self.pub_depth_info.publish(self.last_info)
+            right_info = self._right_info()
+            if right_info is not None:
+                right_info.header.stamp = stamp
+                right_info.header.frame_id = FRAME_OPTICAL
+                self.pub_right_info.publish(right_info)
 
         # The cloud is built from the depth frame that was JUST published and
         # carries the same stamp, so a consumer pairing it with the odometry

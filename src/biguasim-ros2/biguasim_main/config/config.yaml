@@ -77,6 +77,26 @@
               Hz: 10
               location: [0.14, 0, -0.08]
               configuration: {CaptureWidth: 640, CaptureHeight: 480}
+            # RIGHT eye of the stereo pair. The ZED 2i is a STEREO camera and
+            # its tracker triangulates the features it follows from the two
+            # views; feeding a ready-made depth image instead is a shortcut the
+            # real drone does not have, and it hides exactly the errors the
+            # real one makes (a feature the right eye cannot match is a feature
+            # with NO depth, not a feature with perfect depth).
+            #
+            # Baseline 0.12 m, the ZED 2i's. This eye sits to the RIGHT of the
+            # existing camera rather than moving it, so the left eye stays
+            # where every other consumer already expects it: base_link is GLU
+            # (X forward, Y LEFT, Z up), so right is -Y.
+            #
+            # Same resolution and FOV as the left, and it must stay that way —
+            # triangulation assumes a rectified pair with shared intrinsics.
+            - sensor_type: RGBCamera
+              sensor_name: RightCamera
+              ros_publish: true
+              Hz: 10
+              location: [0.14, -0.12, -0.08]
+              configuration: {CaptureWidth: 640, CaptureHeight: 480}
             - sensor_type: DepthCamera
               ros_publish: true
               Hz: 10
