@@ -18,7 +18,7 @@ without importing a mission node.
 |---|---|
 | `hydrone_bringup` | **Where data comes from**, and every launch file. The sim/real pairs live side by side on purpose: `zed_mimic` ↔ `zed_sdk`, `down_cam_mimic` ↔ `down_cam_usb`. Also `rangefinder_bridge` and the sim-only `odom_error`. |
 | `hydrone_localization` | **Where the drone thinks it is.** `visual_odometry` (the real VO), `map_odom` (the `map`→`odom` edge), `vision_odom_bridge` (the pose ArduPilot flies on). SLAM, if it ever earns its place, lands here. |
-| `hydrone_map` | **What the drone remembers about the world.** `pad_map` (the pads, and which were landed on) and `feature_map` (the accumulated point cloud). An occupancy map would sit next to them. |
+| `hydrone_map` | **What the drone remembers about the world.** `pad_map` (the pads, and which were landed on), `feature_map` (the accumulated point cloud), and the 3-D occupancy map — `cloud_filter_node` plus `octomap_server`, see [`OCTOMAP.md`](OCTOMAP.md). |
 | `hydrone_nav` | **How to get there.** `route` is a plain-Python library — no rclpy, no message imports — so any phase can ask it which pad is next. `nav_node` is the previous generation. |
 | `hydrone_vision` | **What the camera sees.** `pad_detector` is a library; `pad_detector_node` is its ROS skin. New detectors (kit markers, gestures, Phase 4 targets) belong beside it, same shape. |
 | `hydrone_mission` | **What to do, in what order.** One state machine per phase. |
