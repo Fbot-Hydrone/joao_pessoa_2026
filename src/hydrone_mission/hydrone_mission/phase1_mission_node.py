@@ -117,7 +117,8 @@ import math
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
+                       ReliabilityPolicy)
 
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import String
@@ -126,7 +127,10 @@ from std_srvs.srv import Trigger
 from mavros_msgs.msg import State, StatusText
 from mavros_msgs.srv import CommandBool, CommandTOL, SetMode
 
-from hydrone_nav import route
+from octomap_msgs.msg import Octomap
+
+from hydrone_map import octree
+from hydrone_nav import planner, route
 from hydrone_msgs.msg import PadDetection, PadMap
 from hydrone_msgs.srv import MarkPadVisited, RegisterTakeoffBase
 
@@ -284,6 +288,20 @@ class Phase1MissionNode(Node):
         self.declare_parameter("takeoff_timeout_s", 45.0)
         self.declare_parameter("service_timeout_s", 30.0)
         self.declare_parameter("setpoint_hz", 10.0)
+        # The box the planner may search in, [min_x, min_y, min_z, max_x,
+        # max_y, max_z] in the pose frame. Worth setting: without bounds a
+        # search that cannot reach its goal expands outwards through open
+        # space until the expansion cap stops it, which costs a second of
+        # nothing at the moment a leg begins. The default is the competition
+        # arena with a metre of slack, floored above the landing pads and
+        # ceilinged at the net.
+        self.declare_parameter("plan_bounds",
+                               [-5.0, -5.0, 0.3, 5.0, 5.0, 2.5])
+        # Whether a plan may cross space no ray has reached. True here because
+        # the fallback — the straight line this mission always flew — crosses
+        # it without asking, so a plan that at least avoids the known
+        # obstacles is strictly safer. Phase 4 should set this False.
+        self.declare_parameter("plan_allow_unknown", True)
         self.declare_parameter("auto_start", True)
 
         # ── DRY RUN: the vehicle never arms, a human is the actuator ────────
@@ -366,6 +384,16 @@ class Phase1MissionNode(Node):
         # the very thing the search is made of.
         self.setpoint: list[float] = [0.0, 0.0, 0.0, 0.0]
         self.stream_setpoint = False
+        # Waypoints still to fly on the current leg, [] for a straight one.
+        # See _goto_via_map: a straight leg is one setpoint and this stays
+        # empty, which is exactly what every leg was before there was a
+        # planner.
+        self._leg: list[tuple[float, float, float, float]] = []
+        self.octree_tree = None         # decoded on demand, see _cb_octomap
+        b = [float(v) for v in self.get_parameter("plan_bounds").value]
+        self.plan_bounds = (tuple(b[:3]), tuple(b[3:]))
+        self.plan_allow_unknown = bool(
+            self.get_parameter("plan_allow_unknown").value)
         self._call: _Call | None = None
         self._pending: str | None = None    # what _call is for
         self._last_cmd_t = 0.0              # when the last command went out
@@ -404,6 +432,15 @@ class Phase1MissionNode(Node):
         self.create_subscription(PoseStamped, "/mavros/local_position/pose",
                                  self._cb_pose, sensor_qos)
         self.create_subscription(PadMap, "/hydrone/pads/map", self._cb_map, 10)
+        # The occupancy map, latched: octomap_server publishes TRANSIENT_LOCAL
+        # so a subscriber that connects late is handed the current tree at
+        # once. With the default volatile QoS this subscription would match
+        # nothing and the mission would silently fly every leg unchecked.
+        self.create_subscription(
+            Octomap, "/octomap/octomap_binary", self._cb_octomap,
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                       reliability=ReliabilityPolicy.RELIABLE,
+                       history=HistoryPolicy.KEEP_LAST))
         # The belly camera's OWN topic, not the shared /hydrone/pads/detections
         # the map is built from. Those detections carry no position — see
         # _cb_detection — so they must not reach pad_map_node, and keeping them
@@ -482,6 +519,21 @@ class Phase1MissionNode(Node):
     def _cb_pose(self, msg: PoseStamped):
         self.pose = msg
 
+    def _cb_octomap(self, msg: Octomap):
+        """Keep the newest tree, decoded.
+
+        Decoding writes a temp file (octomap-python only reads from disk), so
+        it is not free — but the map updates at 2 Hz and a leg is planned far
+        less often than that, so doing it here costs less than the alternative
+        of decoding inside a state handler and stalling the setpoint stream at
+        the moment a leg begins.
+        """
+        try:
+            self.octree_tree = octree.tree_from_msg(msg)
+        except ValueError as exc:
+            self.get_logger().warn(f"octomap: {exc}",
+                                   throttle_duration_sec=20.0)
+
     def _cb_map(self, msg: PadMap):
         self.pad_map = msg
 
@@ -549,6 +601,8 @@ class Phase1MissionNode(Node):
         self.rotations_done = 0
         self.landing_for = self.LAND_PAD
         self._land_after_takeoff = False
+        # An abort mid-leg must not leave waypoints behind for the next one.
+        self._leg = []
 
     # ────────────────────────────────────────────────────────────────────────
     # Setpoint stream
@@ -581,6 +635,89 @@ class Phase1MissionNode(Node):
     def _goto(self, x: float, y: float, z: float, yaw: float):
         self.setpoint = [x, y, z, yaw]
         self.stream_setpoint = True
+
+    def _goto_via_map(self, x: float, y: float, z: float, yaw: float):
+        """Fly to (x, y, z), around whatever the occupancy map says is there.
+
+        Until 2026-08-27 every leg was a single setpoint on a straight line and
+        nothing consulted the map — which is survivable in an 8x8 m open arena
+        and is not survivable in Phase 4's confined space. The map has known
+        what is occupied for weeks; this is what makes the mission read it.
+
+        Three outcomes, and the fall-back is deliberate:
+
+        * the straight line is clear (the usual case) -> one setpoint, exactly
+          the old behaviour, no waypoints and no extra decelerations
+        * it is not, and A* finds a way round -> the simplified waypoints
+        * there is no map yet, or it is too sparse to plan in -> the straight
+          line, with a warning. Refusing to fly because the map is thin would
+          ground the vehicle at takeoff, when the map is always thin. The
+          straight line is what this mission did for its whole life so far, so
+          falling back to it is the status quo, not a new risk.
+        """
+        self._leg = []
+        target = (x, y, z)
+        occ = self._occupancy()
+        if occ is None:
+            self.get_logger().warn(
+                "no occupancy map — flying the leg straight, unchecked",
+                throttle_duration_sec=20.0)
+            self._goto(x, y, z, yaw)
+            return
+
+        here = (self.pose.pose.position.x, self.pose.pose.position.y,
+                self.pose.pose.position.z)
+        # `path_hits_obstacle`, not `path_is_clear_inflated`. The strict
+        # version demands the whole leg be MEASURED empty, and in a
+        # half-explored arena almost no leg is — every one would be reported
+        # blocked, which is a warning that means nothing. What has to trigger a
+        # detour is something actually in the way.
+        if not octree.path_hits_obstacle(self.octree_tree, here, target):
+            self._goto(x, y, z, yaw)
+            return
+
+        self.get_logger().warn(
+            f"the straight leg to ({x:.2f}, {y:.2f}) runs into the map — "
+            f"planning around it")
+        # allow_unknown=True, and this is a deliberate choice for THIS mission,
+        # not a default to carry into Phase 4. The fallback if planning fails
+        # is the straight line, which flies through unknown space without
+        # asking; so a plan that avoids what is known to be occupied and is
+        # otherwise willing to cross unknown is strictly better than what this
+        # mission did before there was a planner. Phase 4's confined space is
+        # where allow_unknown should be False and the map should be dense
+        # enough to afford it.
+        path = planner.plan(occ, here, target,
+                            resolution=self.octree_tree.getResolution(),
+                            bounds=self.plan_bounds,
+                            allow_unknown=self.plan_allow_unknown)
+        if path is None:
+            self.get_logger().error(
+                f"no clear path to ({x:.2f}, {y:.2f}) in the map — flying the "
+                f"straight line and relying on the supervisor")
+            self._goto(x, y, z, yaw)
+            return
+
+        path = planner.simplify(
+            path, lambda a, b: not octree.path_hits_obstacle(
+                self.octree_tree, a, b))
+        self.get_logger().info(
+            f"planned {len(path)} waypoints around the obstruction")
+        # path[0] is where we already are; the rest are the leg.
+        self._leg = [(p[0], p[1], p[2], yaw) for p in path[1:]]
+        wx, wy, wz, wyaw = self._leg.pop(0)
+        self._goto(wx, wy, wz, wyaw)
+
+    def _occupancy(self):
+        """The map as a callable for the planner, already inflated, or None.
+
+        Inflated here rather than in the planner because the planner must not
+        know what an octree is — and because the radius is a property of the
+        airframe, which is this node's business.
+        """
+        if self.octree_tree is None:
+            return None
+        return lambda p: octree.inflated_state(self.octree_tree, p)
 
     def _hold(self, yaw: float | None = None):
         """Hold the current setpoint, optionally re-aiming the yaw."""
@@ -826,7 +963,7 @@ class Phase1MissionNode(Node):
                 f"takeoff base at ({hx:.2f}, {hy:.2f}).")
             self.target_id = None
             self.landing_for = self.LAND_FINAL
-            self._goto(hx, hy, self.takeoff_alt, self.setpoint[3])
+            self._goto_via_map(hx, hy, self.takeoff_alt, self.setpoint[3])
             self._enter(self.TRAVEL)
             return
 
@@ -838,8 +975,8 @@ class Phase1MissionNode(Node):
                 f"pad {pad.id} at ({pad.position.x:.2f}, {pad.position.y:.2f}) "
                 f"is confirmed in the map ({pad.observations} looks, conf "
                 f"{pad.confidence:.2f}) — flying over it.")
-            self._goto(pad.position.x, pad.position.y, self.takeoff_alt,
-                       self.setpoint[3])
+            self._goto_via_map(pad.position.x, pad.position.y,
+                               self.takeoff_alt, self.setpoint[3])
             self._enter(self.TRAVEL)
             return
 
@@ -959,6 +1096,16 @@ class Phase1MissionNode(Node):
         d = math.hypot(self.pose.pose.position.x - self.setpoint[0],
                        self.pose.pose.position.y - self.setpoint[1])
         if d <= self.arrive_tol:
+            # Intermediate waypoints from _goto_via_map come first: arriving at
+            # one is not arriving at the pad, it is the corner of a leg that
+            # had to bend around something.
+            if self._leg:
+                wx, wy, wz, wyaw = self._leg.pop(0)
+                self.get_logger().info(
+                    f"waypoint reached — {len(self._leg)} to go, next "
+                    f"({wx:.2f}, {wy:.2f}, {wz:.2f})")
+                self._goto(wx, wy, wz, wyaw)
+                return
             if self.landing_for == self.LAND_FINAL:
                 self.get_logger().info(
                     "over the takeoff base — landing to finish the run.")

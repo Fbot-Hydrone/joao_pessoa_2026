@@ -175,6 +175,14 @@ def generate_launch_description():
             description="Run the world/coverage mapper over the ZED's point "
                         "cloud. Pure observer — turn it off to save CPU."),
         DeclareLaunchArgument(
+            "landmark_correction", default_value="true",
+            description="Measure the pose error against the landing bases — "
+                        "the takeoff base's registered position first, then "
+                        "re-observed pads. Publishes "
+                        "/hydrone/localization/correction and steers nothing; "
+                        "its own `apply` parameter is what would change that, "
+                        "and it defaults to false."),
+        DeclareLaunchArgument(
             "octomap", default_value="true",
             description="Run the 3-D occupancy map (cloud_filter_node + "
                         "octomap_server). Read it from /octomap_binary — the "
@@ -442,6 +450,13 @@ def generate_launch_description():
             "sensor_model.hit": 0.7,
             "sensor_model.miss": 0.4,
             "filter_ground_plane": False,
+            # An isolated occupied voxel with no occupied neighbour is noise,
+            # and octomap_server leaves it in the tree by default. Harmless to
+            # look at and a phantom obstacle to a planner: it makes the drone
+            # dodge nothing, and in a confined arena dodging nothing is how a
+            # path gets pushed into a wall. On from 2026-08-27, when there
+            # started being a planner that reads this map.
+            "filter_speckles": True,
             # Height band that /projected_map collapses into 2-D. WITHOUT it
             # the arena floor is projected as obstacle and the whole grid comes
             # back occupied — MEASURED on a 6x6 m floor: 1681 occupied cells
@@ -524,10 +539,29 @@ def generate_launch_description():
         }],
     )
 
+    # Measures how far the estimate has walked from the world, using the one
+    # position in the map that did not come out of that estimate: the takeoff
+    # base, registered from where the drone was standing when it armed. An
+    # OBSERVER — it publishes a number and steers nothing. See
+    # hydrone_localization/landmark_correction_node.py for why that matters and
+    # what would have to be measured before it does anything else.
+    landmark_correction = Node(
+        package="hydrone_localization",
+        executable="landmark_correction_node",
+        name="landmark_correction",
+        output="screen",
+        condition=IfCondition(LaunchConfiguration("landmark_correction")),
+        # The default /hydrone/pads/detections, NOT the belly camera's topic:
+        # the belly detector runs with project_position False and contributes
+        # no position at all, and a re-observation with no position measures
+        # nothing.
+    )
+
     return LaunchDescription(args + [
         forward_detector,
         down_detector,
         pad_map,
+        landmark_correction,
         feature_map,
         cloud_filter,
         octomap,
