@@ -22,6 +22,7 @@ setup(
             'visual_odometry_node = hydrone_localization.visual_odometry_node:main',
             'map_odom_node = hydrone_localization.map_odom_node:main',
             'vision_odom_bridge = hydrone_localization.vision_odom_bridge:main',
+            'landmark_correction_node = hydrone_localization.landmark_correction_node:main',
         ],
     },
 )
