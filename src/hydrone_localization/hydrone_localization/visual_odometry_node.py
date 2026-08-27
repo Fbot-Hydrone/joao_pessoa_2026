@@ -398,6 +398,50 @@ class VisualOdometryNode(Node):
             depths[i] = fx * self.baseline / disparity
         return depths
 
+    def _cb_rgb(self, msg: Image):
+        if self.K is None:
+            return
+
+        gray = cv2.cvtColor(
+            self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8"),
+            cv2.COLOR_BGR2GRAY)
+        if self.clahe is not None:
+            gray = self.clahe.apply(gray)
+
+        kp, des = self.orb.detectAndCompute(gray, None)
+        pts = (np.array([k.pt for k in kp], dtype=np.float64)
+               if kp else np.empty((0, 2)))
+
+        # Range for the features about to be tracked, from the RIGHT eye —
+        # one depth per keypoint, NaN where it could not be matched. Falls back
+        # to the depth image for a rig without a second eye, which is also how
+        # the real drone runs (zed_wrapper computes depth on the camera).
+        depth = self._stereo_match(kp, des, gray)
+        if depth is None:
+            if self.last_depth is None:
+                return
+            depth = self.last_depth
+        elif not np.isfinite(depth).any():
+            self.n_stereo_empty += 1
+            self.get_logger().warn(
+                f"VO: no feature matched in the right eye "
+                f"[{self.n_stereo_empty}]; holding pose",
+                throttle_duration_sec=10.0)
+            self.prev_depth, self.prev_pts, self.prev_des = depth, pts, des
+            self._publish(msg.header.stamp)
+            return
+
+        if des is not None and self.prev_des is not None and len(kp) >= self.min_inliers:
+            # 3D points from PREVIOUS frame's depth; 2D from the current frame.
+            prev_pts3d, valid = self._backproject(self.prev_pts, self.prev_depth)
+            self._match_and_update(pts, des, prev_pts3d, valid)
+
+        # Roll the reference frame forward and publish (holds pose if no update).
+        self.prev_depth = depth
+        self.prev_pts = pts
+        self.prev_des = des
+        self._publish(msg.header.stamp)
+
     def _match_and_update(self, cur_pts, des, prev_pts3d, valid):
         pairs = self.matcher.knnMatch(self.prev_des, des, k=2)
         obj, img = [], []
