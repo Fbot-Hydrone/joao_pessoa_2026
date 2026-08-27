@@ -135,6 +135,54 @@ built from the description of the 2026-08-20 measurement rather than from that
 frame, which is no longer on disk. What the flight log should show is the
 `only N usable matches` warnings becoming rare.
 
+## Stereo odometry: built, measured, and NOT an improvement
+
+The ZED 2i triangulates the features it tracks from its two eyes rather than
+reading a depth image, so the sim was given a second RGB camera (0.12 m to the
+right, the ZED's baseline), zed_mimic publishes the pair on the real wrapper's
+topic names with the baseline in `P[3]`, and the VO matches features between
+the eyes along the epipolar line. It is for ODOMETRY ONLY — the mapping stack,
+the pad detectors and odom_GT still read the sim's depth image.
+
+It made odometry WORSE, and the reason is geometry, not code:
+
+```
+                                   final error   VO/GT inflation
+sim depth image (what existed)         1.58 m         1.02x
+stereo, dense SGBM                     3.22 m         0.63x
+stereo, sparse + global match          4.98 m         0.11x
+stereo, sparse + epipolar search       7.68 m         0.11x
+```
+
+Depth resolution of the pair, dZ = Z^2 / (fx * B) per pixel of disparity error,
+with the sim's fx=320 and B=0.12:
+
+```
+   1 m ->  0.03 m        3 m ->  0.23 m        6 m ->  0.94 m
+```
+
+The drone flies an 8 m arena looking at walls 3-6 m away, so one pixel of
+matching error is worth 25-94 cm of range — and the MEASURED median error was
+1.54 m, worse than that floor because some matches are simply wrong. PnP fed
+3-D points that noisy does not converge: 34 `PnP failed` and 44 `inlier ratio`
+warnings in a two-minute flight.
+
+The real ZED 2i has twice this resolution — fx~700 at 720p against the 320 that
+640x480 at 90 deg FOV gives here. **The geometry was reproduced faithfully; the
+angular resolution was not.**
+
+Three ways out, none of them more parameter-guessing:
+
+1. **Raise fx** — 1280x720 doubles it and halves the error. Costs render, and
+   config.yaml already records what the third camera cost in actuation lag.
+2. **Widen the baseline** — 0.25 m doubles precision too, but stops being a ZED.
+3. **Turn it off** — `in_right:=""` falls back to the depth image, no code
+   change, back to 1.58 m.
+
+And the finding worth keeping: even with the real camera, pure stereo VO in
+this arena is poor. That is why the ZED SDK does not do pure VO — it does
+VIO, fusing the IMU. `DynamicsSensor` already publishes IMU on this bus.
+
 ## What this does NOT fix
 
 The 1.15x scale error while moving is untouched, and it is real: over 50 m of
