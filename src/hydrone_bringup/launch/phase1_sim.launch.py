@@ -85,6 +85,8 @@ def generate_launch_description():
         DeclareLaunchArgument("odom_error", default_value="true"),
         DeclareLaunchArgument("odom_error_print", default_value="false"),
         DeclareLaunchArgument("odom_error_dir", default_value="/ws/logs"),
+        # Stereo vs depth image for ODOMETRY. See sources_sim.launch.py.
+        DeclareLaunchArgument("vo_stereo", default_value="true"),
     ]
 
     sources = IncludeLaunchDescription(
@@ -95,6 +97,7 @@ def generate_launch_description():
             "odom_error": LaunchConfiguration("odom_error"),
             "odom_error_print": LaunchConfiguration("odom_error_print"),
             "odom_error_dir": LaunchConfiguration("odom_error_dir"),
+            "vo_stereo": LaunchConfiguration("vo_stereo"),
         }.items(),
     )
 

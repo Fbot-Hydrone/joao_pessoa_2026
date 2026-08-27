@@ -367,6 +367,13 @@ def generate_launch_description():
         parameters=[{
             'out_odom': vo_odom,
             'publish_tf': ParameterValue(vo_tf, value_type=bool),
+            # Empty turns stereo OFF and the node falls back to the depth
+            # IMAGE, which is also how the real drone runs (zed_wrapper
+            # computes depth on the camera). It is the A/B switch between
+            # "triangulate it ourselves" and "read a depth image".
+            'in_right': PythonExpression(
+                ["'/zed/zed_node/right/image_rect_color' if '",
+                 LaunchConfiguration('vo_stereo'), "' == 'true' else ''"]),
         }],
     )
 
@@ -477,6 +484,12 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'odom_error_print', default_value='false',
             description='Echo the VO drift to stdout at 1 Hz as well as the CSV.'),
+        DeclareLaunchArgument(
+            'vo_stereo', default_value='true',
+            description='Triangulate depth from the stereo pair for odometry '
+                        '(what the ZED does). false reads the depth image '
+                        'instead — the A/B switch for which one localises '
+                        'better. Mapping and odom_GT are unaffected either way.'),
         DeclareLaunchArgument(
             'odom_error_dir', default_value='/ws/logs',
             description='Directory for the drift CSV. Defaults to /ws/logs, '
