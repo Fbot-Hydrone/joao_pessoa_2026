@@ -562,18 +562,40 @@ class PadMapNode(Node):
         return best
 
     def _prune(self):
-        """Drop stale one-off candidates. Confirmed and visited pads are kept."""
+        """Drop TRUE one-offs. Confirmed, visited and takeoff-base pads are kept.
+
+        A single sighting is what noise produces. TWO sightings, from different
+        frames, is a thing that was there both times — and dropping it because
+        a third never came is a misreading of the evidence. The third never
+        came because the drone TURNED AWAY, not because the pad stopped being
+        there: not re-seeing something nobody looked at again is an absence of
+        evidence, not evidence of absence. It is the same free/unknown
+        distinction the occupancy map is built around.
+
+        MEASURED 2026-08-27, a --ground-truth run over 6 bases:
+
+            pad 1: dropped — 2 sighting(s) in 120 s
+            pad 2: dropped — 2 sighting(s) in 120 s
+
+        Both were real bases, seen at 6.9 m and 5.7 m. Losing them here is
+        losing them for the whole attempt, because nothing downstream can
+        target a pad that is no longer in the map. The mission has a far better
+        judge than this timer anyway — a confirmation hover puts the belly
+        camera a metre above the thing, and a candidate that fails it is
+        blacklisted. Spending one hover on a doubtful lead costs ~25 s;
+        dropping a real base costs the base.
+        """
         now = self.get_clock().now().nanoseconds * 1e-9
         doomed = [pid for pid, e in self.pads.items()
                   if not e.visited
                   and not e.is_takeoff_base
-                  and e.observations < self.min_obs
+                  and e.observations < 2
                   and now - e.last_seen > self.ttl]
         for pid in doomed:
             entry = self.pads.pop(pid)
             self.get_logger().info(
-                f"pad {pid}: dropped — {entry.observations} sighting(s) in "
-                f"{self.ttl:.0f} s, treating it as a false positive")
+                f"pad {pid}: dropped — seen ONCE in {self.ttl:.0f} s, "
+                f"treating it as a false positive")
 
     # ────────────────────────────────────────────────────────────────────────
     # Output

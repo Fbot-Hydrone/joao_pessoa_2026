@@ -34,9 +34,9 @@ def test_a_blacklisted_pad_is_never_a_candidate():
     assert not route.is_candidate(pad(7, 2.0, 0.0), blacklist={7})
 
 
-def test_a_pad_needs_three_sightings():
-    assert not route.is_candidate(pad(1, 2.0, 0.0, observations=2))
-    assert route.is_candidate(pad(1, 2.0, 0.0, observations=3))
+def test_a_pad_needs_more_than_one_sighting():
+    assert not route.is_candidate(pad(1, 2.0, 0.0, observations=1))
+    assert route.is_candidate(pad(1, 2.0, 0.0, observations=2))
 
 
 def test_a_pad_on_top_of_home_is_never_a_candidate():
@@ -71,3 +71,16 @@ def test_takeoff_base_is_read_from_the_map_when_registered():
 
 def test_takeoff_base_falls_back_when_the_map_has_none():
     assert route.takeoff_base_xy([pad(1, 2.0, 0.0)], fallback=(9.0, 9.0)) == (9.0, 9.0)
+
+
+def test_two_sightings_are_enough_to_be_worth_a_leg():
+    """This needed three until 2026-08-27, and three cost real bases: two pads
+    seen twice at 6.9 m and 5.7 m never got a third look because the search
+    turned away, so they were never flown to. The confirmation hover is the
+    real filter — a metre up, where the pad is hundreds of pixels across."""
+    assert route.is_candidate(pad(1, 2.0, 0.0, observations=2))
+
+
+def test_a_single_sighting_is_still_not_enough():
+    """One frame of blue noise reaches the map."""
+    assert not route.is_candidate(pad(1, 2.0, 0.0, observations=1))

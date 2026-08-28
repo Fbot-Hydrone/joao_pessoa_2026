@@ -150,11 +150,15 @@ def test_a_blacklisted_pad_is_never_a_candidate(node):
     assert not node._is_candidate(pad(7, 2.0, 0.0))
 
 
-def test_an_unconfirmed_pad_is_never_a_candidate(node):
-    """Two sightings is not a base. The map confirms at three."""
+def test_a_pad_seen_only_once_is_never_a_candidate(node):
+    """One frame of blue noise reaches the map. Two frames is a thing that was
+    there both times, and the confirmation hover is what settles it — a metre
+    up, where the pad is hundreds of pixels across instead of a handful.
+    Requiring three across the arena only meant the better judge never voted,
+    and it cost real bases (see route.MIN_OBSERVATIONS)."""
     node.home = (9.0, 9.0)
-    assert not node._is_candidate(pad(1, 2.0, 0.0, observations=2))
-    assert node._is_candidate(pad(1, 2.0, 0.0, observations=3))
+    assert not node._is_candidate(pad(1, 2.0, 0.0, observations=1))
+    assert node._is_candidate(pad(1, 2.0, 0.0, observations=2))
 
 
 def test_anything_sitting_where_we_armed_is_never_a_candidate(node):
@@ -250,19 +254,24 @@ def test_a_turn_that_never_arrives_still_counts(node):
 
 
 def test_the_search_terminates(node):
-    """Eight turns is a full circle. Past that there is nothing new to see."""
+    """Eight turns is a full circle, and with nothing left to look at the run
+    has to end. It ends by flying HOME, never by landing here: an off-base
+    landing is eliminatory, and "where the vehicle happens to be when the
+    search gives up" is the arena floor."""
     set_map(node)
     node.rotations_done = node.max_rotations
+    node.coverage_search = False         # nothing left to look at
     enter(node, node.SETTLE, age_s=5.0)
     node._do_settle()
-    assert node.state == node.LAND
-    assert node.landing_for == node.LAND_FALLBACK
-    assert not node.stream_setpoint      # the FCU owns the descent now
+    assert node.state == node.TRAVEL
+    assert node.landing_for == node.LAND_FINAL
+    assert node.target_id is None
 
 
 def test_a_full_search_makes_exactly_max_rotations_turns(node):
     """Walk the real loop rather than trusting the counter arithmetic."""
     set_map(node)
+    node.coverage_search = False          # no map here; pin the turn count
     enter(node, node.SETTLE, age_s=5.0)
     for _ in range(200):
         if node.state == node.SETTLE:
@@ -274,7 +283,9 @@ def test_a_full_search_makes_exactly_max_rotations_turns(node):
         else:
             break
     assert node.rotations_done == node.max_rotations
-    assert node.state == node.LAND
+    # It ends by flying home, never by landing where the search ran out.
+    assert node.state == node.TRAVEL
+    assert node.landing_for == node.LAND_FINAL
 
 
 # ── Choosing what to do with the air ─────────────────────────────────────────
@@ -505,29 +516,22 @@ def test_a_rejection_restarts_the_search_from_scratch(node):
     assert node.setpoint[:3] == pytest.approx([2.0, 1.0, 1.0])
 
 
-# ── The fallback ─────────────────────────────────────────────────────────────
+# ── Never land off a base ────────────────────────────────────────────────────
 
-def test_the_fallback_hops_once_and_stops(node):
-    """Land, take off, land again, done — and no leg home: the whole reason we
-    are in the fallback is that the search stopped producing anything."""
-    node.landing_for = node.LAND_FALLBACK
-    enter(node, node.DWELL, age_s=999.0)
-    node._do_dwell()
-    assert node.state == node.ARMING
-    assert node._land_after_takeoff
-    assert node.landing_for == node.LAND_FINAL
-
-    # ... the hop: takeoff completes and goes straight back down, in place.
-    set_pose(node, 1.7, -0.4, z=0.0)
-    enter(node, node.TAKEOFF)
-    set_pose(node, 1.7, -0.4, z=1.0)      # climbed takeoff_alt
-    node._do_takeoff()
-    assert node.state == node.LAND
-    assert not node._land_after_takeoff
-
-    enter(node, node.DWELL, age_s=999.0)
-    node._do_dwell()
-    assert node.state == node.DONE
+def test_an_exhausted_search_flies_home_instead_of_landing_in_place(node):
+    """There is no "land where you are" ending any more. It existed, reasoned
+    that a drifted estimate made a cross-arena leg risky — but that trade is
+    backwards against an eliminatory rule: a risky leg to a real base beats a
+    CERTAIN touchdown on the floor."""
+    set_map(node, pad(0, 1.0, -0.5, takeoff_base=True))
+    node.rotations_done = node.max_rotations
+    node.coverage_search = False
+    enter(node, node.SETTLE, age_s=5.0)
+    node._do_settle()
+    assert node.state == node.TRAVEL
+    assert node.setpoint[0] == pytest.approx(1.0)
+    assert node.setpoint[1] == pytest.approx(-0.5)
+    assert node.landing_for == node.LAND_FINAL, "must land ON the base, at home"
 
 
 def test_an_ordinary_takeoff_searches_instead_of_landing(node):
@@ -685,13 +689,15 @@ def test_repositioning_targets_no_pad(node, monkeypatch):
     assert node.target_id is None
 
 
-def test_nothing_left_to_see_still_falls_back(node, monkeypatch):
+def test_nothing_left_to_see_ends_the_run_at_the_takeoff_base(node,
+                                                              monkeypatch):
     """None means the search is FINISHED, not merely out of turns — and that
     is the case that justifies going home."""
     monkeypatch.setattr(node, "_next_viewpoint", lambda: None)
     exhaust_the_turns(node)
     node._do_settle()
-    assert node.landing_for == node.LAND_FALLBACK
+    assert node.state == node.TRAVEL
+    assert node.landing_for == node.LAND_FINAL
 
 
 def test_a_coverage_search_that_throws_does_not_take_the_mission_with_it(node):
@@ -740,3 +746,38 @@ def test_a_pad_leg_is_not_treated_as_a_viewpoint_leg(node):
     node._do_select()
     assert node.state == node.TRAVEL
     assert not node._viewpoint_leg
+
+
+def test_arriving_at_a_viewpoint_never_confirms_or_lands(node, monkeypatch):
+    """The worst failure this mission has had. MEASURED 2026-08-27: a run that
+    reported "6 of 6 bases" had landed on ONE. The other five were a coverage
+    leg arriving and being treated as an arrival over a pad — "over pad None —
+    confirming on the belly camera" — putting the vehicle down mid-arena on
+    whatever looked blue from 1 m. Off-base landings are eliminatory."""
+    monkeypatch.setattr(node, "_next_viewpoint", lambda: ((3.0, 2.0), 12))
+    exhaust_the_turns(node)
+    node._do_settle()
+    assert node.state == node.TRAVEL and node._viewpoint_leg
+
+    node.setpoint = [3.0, 2.0, 1.0, 0.0]
+    set_pose(node, 3.0, 2.0)             # arrive
+    node._do_travel()
+
+    assert node.state == node.SETTLE, "a viewpoint arrival reached CONFIRM"
+    assert not node._viewpoint_leg
+    assert node.rotations_done == 0, "the new vantage point gets a full sweep"
+
+
+def test_arriving_with_no_target_pad_refuses_to_land(node):
+    """Belt and braces behind the viewpoint check: nothing may descend without
+    a pad it is descending ONTO. "over pad None" is how the vehicle ends up on
+    the floor, and that ends the run."""
+    node.target_id = None
+    node.landing_for = node.LAND_PAD
+    node._viewpoint_leg = False
+    node.setpoint = [2.0, 1.0, 1.0, 0.0]
+    set_pose(node, 2.0, 1.0)
+    enter(node, node.TRAVEL)
+    node._do_travel()
+    assert node.state == node.SETTLE
+    assert node.state != node.CONFIRM

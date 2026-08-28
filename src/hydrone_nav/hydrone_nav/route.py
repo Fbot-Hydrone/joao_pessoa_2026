@@ -18,9 +18,23 @@ needs one — that is the point of it being a library.
 
 import math
 
-# Three fused sightings before a pad is worth a leg. One frame of blue noise
-# reaches the map; three from different angles do not.
-MIN_OBSERVATIONS = 3
+# Two fused sightings before a pad is worth a leg. One frame of blue noise
+# reaches the map; two from different frames is a thing that was there both
+# times.
+#
+# This was three, and three was costing real bases. MEASURED 2026-08-27 on a
+# --ground-truth run over six of them: two pads were sighted twice, at 6.9 m
+# and 5.7 m, and never got a third look because the search turned away — so
+# they were never eligible, never flown to, and eventually dropped.
+#
+# Three was the wrong place to spend the caution. The forward camera judges a
+# pad across the arena, where the ring and the cross are a handful of pixels;
+# the CONFIRMATION HOVER judges it from a metre up, where the same structure is
+# hundreds of pixels across, and a candidate that fails it is blacklisted. That
+# is the real filter. Making the weaker judge stricter only means the stronger
+# one never gets to vote — and the asymmetry is brutal: a doubtful lead costs
+# one hover, ~25 s, while a missed base costs the base.
+MIN_OBSERVATIONS = 2
 
 # A pad this close to where we armed is the takeoff base under another id.
 HOME_RADIUS_M = 1.0

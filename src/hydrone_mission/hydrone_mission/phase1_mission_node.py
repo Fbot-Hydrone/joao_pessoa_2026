@@ -200,10 +200,12 @@ class Phase1MissionNode(Node):
 
     # ── Why we are landing. Decides what happens after the dwell. ───────────
     #   PAD      a confirmed landing site: count it, then go find the next one
-    #   FALLBACK the search came up empty: touch down, take off, land, stop
     #   FINAL    the last landing of the run: stay down
+    #
+    # There used to be a FALLBACK: when the search came up empty the vehicle
+    # touched down WHERE IT WAS. That is an off-base landing, which is
+    # eliminatory, so an exhausted search now flies home like any other ending.
     LAND_PAD = "pad"
-    LAND_FALLBACK = "fallback"
     LAND_FINAL = "final"
 
     def __init__(self, **kwargs):
@@ -1122,12 +1124,28 @@ class Phase1MissionNode(Node):
                 self._enter(self.TRAVEL)
                 return
 
+            # Go HOME, do not land here. Landing off a base is ELIMINATORY,
+            # and "land in place" is a guaranteed one — where the vehicle
+            # happens to be when the search gives up is the arena floor.
+            #
+            # The old reasoning for landing in place was that the position
+            # estimate had stopped being worth flying on, so a cross-arena leg
+            # was the last thing to attempt. That trade is the wrong way round
+            # against an eliminatory rule: a risky leg to a real base beats a
+            # certain touchdown on the floor. And the leg is not blind — the
+            # takeoff base is the one position in the map that did not come
+            # from the drifting estimate.
+            hx, hy = self._takeoff_base_xy()
             self.get_logger().warn(
                 f"{self.rotations_done} turns and no new base in sight, and "
-                "nothing unseen left worth flying to — falling back: landing, "
-                "taking off once, landing again.")
-            self.landing_for = self.LAND_FALLBACK
-            self._begin_landing()
+                f"nothing unseen left worth flying to — returning to the "
+                f"takeoff base at ({hx:.2f}, {hy:.2f}) to end the run. NOT "
+                f"landing here: off-base landings are eliminatory.")
+            self.target_id = None
+            self.landing_for = self.LAND_FINAL
+            self._viewpoint_leg = False
+            self._goto_via_map(hx, hy, self.takeoff_alt, self.setpoint[3])
+            self._enter(self.TRAVEL)
             return
 
         # Aim the next turn here rather than inside ROTATE, so ROTATE is a pure
@@ -1263,10 +1281,39 @@ class Phase1MissionNode(Node):
                     f"({wx:.2f}, {wy:.2f}, {wz:.2f})")
                 self._goto(wx, wy, wz, wyaw)
                 return
+            # A COVERAGE leg went somewhere to LOOK. Arriving is the end of
+            # the trip, not the start of a landing — there is no target pad
+            # under it and nothing has said there is a base here at all.
+            #
+            # This was missing when coverage first flew, and the result is the
+            # worst failure this mission has: MEASURED 2026-08-27, a run that
+            # reported "6 of 6 bases" had landed on ONE. The other five were
+            # this branch — "over pad None — confirming on the belly camera" —
+            # putting the vehicle down mid-arena on whatever happened to look
+            # blue from 1 m. Landing off a base is ELIMINATORY, so a viewpoint
+            # arrival must never reach CONFIRM.
+            if self._viewpoint_leg:
+                self._viewpoint_leg = False
+                self.get_logger().info(
+                    f"arrived at the viewpoint ({self.setpoint[0]:.2f}, "
+                    f"{self.setpoint[1]:.2f}) — looking around from here.")
+                self.rotations_done = 0
+                self._enter(self.SETTLE)
+                return
             if self.landing_for == self.LAND_FINAL:
                 self.get_logger().info(
                     "over the takeoff base — landing to finish the run.")
                 self._begin_landing()
+            elif self.target_id is None:
+                # Belt and braces behind the check above. Nothing may descend
+                # without a pad it is descending ONTO: "over pad None" is how
+                # the vehicle ends up on the floor, and that ends the run.
+                self.get_logger().error(
+                    "arrived with no target pad — refusing to confirm or land. "
+                    "Resuming the search.")
+                self._leg = []
+                self.rotations_done = 0
+                self._enter(self.SETTLE)
             else:
                 self.get_logger().info(
                     f"over pad {self.target_id} — confirming on the belly "
@@ -1571,20 +1618,6 @@ class Phase1MissionNode(Node):
                 f"mission complete — {self.landed_count} base(s) landed on, "
                 "home on the takeoff base.")
             self._enter(self.DONE)
-            return
-
-        if self.landing_for == self.LAND_FALLBACK:
-            # The agreed fallback: touch down, take off once, land again where
-            # we are, stop. No leg home — the whole reason we are here is that
-            # the position estimate has stopped being worth flying on, and a
-            # cross-arena leg is the last thing to attempt on it.
-            self.get_logger().info(
-                "fallback: taking off once more, then landing in place to end "
-                "the run.")
-            self.landing_for = self.LAND_FINAL
-            self._land_after_takeoff = True
-            self._takeoff_tries = 0
-            self._enter(self.ARMING)
             return
 
         self._takeoff_tries = 0
