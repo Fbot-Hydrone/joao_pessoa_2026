@@ -250,12 +250,24 @@ def u_sweep(bounds, *, inset_m=1.2, z=2.0, step_m=1.5, start_corner=2):
     out = []
     for a, b in zip(order, order[1:]):          # three legs, not four
         yaw = _inward_yaw(a, b, centre)
+        # TRANSLATE, THEN TURN — never both at once. A setpoint that changes
+        # position and heading together asks the vehicle to yaw while it is
+        # still moving, and yawing under translation is where this arena's
+        # odometry loses the most: the camera sweeps, matching fails, and the
+        # rotation that really happened is never recorded.
+        #
+        # So each corner emits the SAME POSITION twice: once holding the
+        # heading that was flown in on, once with the new one. The first is
+        # "arrive and stop", the second is "now turn, standing still".
+        if out:
+            out.append((a[0], a[1], z, out[-1][3]))    # arrive on the old yaw
+            out.append((a[0], a[1], z, yaw))           # turn on the spot
         dist = math.hypot(b[0] - a[0], b[1] - a[1])
         n = max(1, int(math.ceil(dist / step_m)))
         for i in range(n + 1):
             t = i / n
             pt = (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, z, yaw)
-            if not out or out[-1][:2] != pt[:2]:
+            if not out or out[-1] != pt:
                 out.append(pt)
     return out
 

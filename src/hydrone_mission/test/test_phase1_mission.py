@@ -40,6 +40,7 @@ import rclpy
 from geometry_msgs.msg import PoseStamped
 
 from hydrone_msgs.msg import Pad, PadDetection, PadMap
+from hydrone_nav import servo as servo_module
 from hydrone_mission.phase1_mission_node import (
     Phase1MissionNode, wrap_pi, yaw_of)
 
@@ -1131,3 +1132,142 @@ def test_level_3_actually_runs_instead_of_being_judged_flown_at_once(node):
     node._do_settle()
     assert node._level == 3, "escalated past level 3 without running it"
     assert node.survey_done
+
+
+# ── Investigate before climbing ──────────────────────────────────────────────
+
+def test_unconfirmed_leads_are_investigated_before_the_next_level(node):
+    """MEASURED 2026-08-28: a run ended a level with 4 confirmed and 2
+    unconfirmed candidates and escalated anyway. Investigating those two would
+    have completed the quota there and then; instead two more levels were
+    flown and still came back 5 of 6."""
+    node.survey_done = False
+    node.survey_circuit = True
+    node.target_bases = 6
+    node.landed_count = 0
+    node.home = (9.0, 9.0)
+    node._survey_path = []                       # the level is flown
+    node._harvest_relief = lambda: None
+    set_map(node,
+            pad(1, 2.0, 0.0, observations=5),    # confirmed
+            pad(2, -2.0, 1.0, observations=1))   # a lead nobody looked at
+    enter(node, node.SETTLE, age_s=5.0)
+    node._do_settle()
+    assert node._level == 1, "climbed a level with a lead still unlooked at"
+    assert node.investigating
+    assert node.state == node.SELECT
+
+
+def test_investigating_drops_the_bar_to_a_single_sighting(node):
+    """Not the bar being wrong the rest of the time — the cost of being wrong
+    has changed. A doubtful lead now competes only with flying the whole U
+    again half a metre up."""
+    node.home = (9.0, 9.0)
+    node.investigating = False
+    assert not node._is_candidate(pad(1, 2.0, 0.0, observations=1))
+    node.investigating = True
+    assert node._is_candidate(pad(1, 2.0, 0.0, observations=1))
+
+
+def test_a_lead_that_fails_its_hover_stops_being_one(node):
+    """The blacklist is what keeps the investigation from looping."""
+    node.home = (9.0, 9.0)
+    node.investigating = True
+    node.blacklist.add(2)
+    set_map(node, pad(2, -2.0, 1.0, observations=1))
+    assert node._uninvestigated() == []
+
+
+def test_the_takeoff_base_is_never_a_lead_to_investigate(node):
+    node.home = (9.0, 9.0)
+    set_map(node, pad(0, 1.0, 1.0, observations=1, takeoff_base=True))
+    assert node._uninvestigated() == []
+
+
+def test_escalating_leaves_investigation_mode(node):
+    """Otherwise the next level would target one-sighting noise as it flies."""
+    node.survey_done = True
+    node.survey_circuit = False
+    node.investigating = True
+    node.landed_count = 0
+    node.target_bases = 6
+    node.home = (9.0, 9.0)
+    node.coverage_search = False
+    node.relief_leads = False
+    node.pub_relief = None
+    node.rotations_done = node.max_rotations
+    set_map(node)
+    enter(node, node.SETTLE, age_s=5.0)
+    node._do_settle()
+    assert not node.investigating
+    assert node._level == 2
+
+
+# ── Centring on the pad ──────────────────────────────────────────────────────
+
+def see_pad_at(node, u, v, confidence=0.9):
+    det = PadDetection()
+    det.camera = "down"
+    det.confidence = float(confidence)
+    det.position_valid = True
+    det.u, det.v = float(u), float(v)
+    node._last_down = det
+    node._last_down_t = node._now()
+
+
+def test_the_hover_nudges_towards_the_pad_it_sees(node):
+    """The position came from a projection made across the arena; the belly
+    camera at 1 m is the only sensor that can say where the pad actually is
+    relative to the vehicle."""
+    node.target_id = 4
+    node.setpoint = [2.0, 1.0, 1.0, 0.0]
+    set_pose(node, 2.0, 1.0)
+    enter(node, node.CONFIRM)
+    see_pad_at(node, 500.0, 240.0)          # well off centre
+    node._do_confirm()
+    assert node.setpoint[:2] != [2.0, 1.0], "hovered without centring"
+
+
+def test_a_centred_pad_is_left_alone(node):
+    """Moving again would only add drift."""
+    node.target_id = 4
+    node.setpoint = [2.0, 1.0, 1.0, 0.0]
+    set_pose(node, 2.0, 1.0)
+    enter(node, node.CONFIRM)
+    see_pad_at(node, 320.0, 240.0)
+    node._do_confirm()
+    assert node.setpoint[:2] == pytest.approx([2.0, 1.0])
+
+
+def test_centring_can_be_turned_off(node):
+    node.centre_on_pad = False
+    node.target_id = 4
+    node.setpoint = [2.0, 1.0, 1.0, 0.0]
+    set_pose(node, 2.0, 1.0)
+    enter(node, node.CONFIRM)
+    see_pad_at(node, 500.0, 240.0)
+    node._do_confirm()
+    assert node.setpoint[:2] == pytest.approx([2.0, 1.0])
+
+
+def test_the_nudge_is_rotated_by_the_vehicle_s_heading(node):
+    """The servo knows about pixels and the airframe, not about where north
+    is. The same pixel error at two headings must move the setpoint two
+    different ways."""
+    steps = []
+    for yaw in (0.0, math.pi / 2.0):
+        node._servo = servo_module.VisualServo(target_uv=(320.0, 240.0))
+        node.setpoint = [0.0, 0.0, 1.0, yaw]
+        set_pose(node, 0.0, 0.0, yaw=yaw)
+        enter(node, node.CONFIRM)
+        see_pad_at(node, 500.0, 240.0)
+        node._do_confirm()
+        steps.append(tuple(node.setpoint[:2]))
+    assert steps[0] != pytest.approx(steps[1])
+
+
+def test_the_target_pixel_is_a_parameter_for_an_off_centre_lens(node):
+    """What the servo cannot learn is where the camera points when the vehicle
+    is level — that is what "centred" means. On a misaligned airframe it is
+    measured once by hovering over a known pad."""
+    assert node.get_parameter("pad_target_uv").value == [320.0, 240.0]

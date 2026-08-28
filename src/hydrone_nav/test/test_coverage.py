@@ -364,3 +364,26 @@ def test_neither_shape_survives_an_arena_smaller_than_the_inset():
     tiny = ((-1.0, -1.0, 0.0), (1.0, 1.0, 2.0))
     assert u_sweep(tiny, inset_m=2.0) == []
     assert lawnmower(tiny, inset_m=2.0) == []
+
+
+def test_the_u_never_translates_and_turns_at_the_same_time():
+    """Yawing under translation is where this arena's odometry loses the most:
+    the camera sweeps, matching fails, and the rotation that really happened is
+    never recorded. Every heading change must happen at a standstill."""
+    from hydrone_nav.coverage import u_sweep
+    pts = u_sweep(B8, inset_m=1.0, step_m=1.5)
+    for a, b in zip(pts, pts[1:]):
+        moved = (a[0], a[1]) != (b[0], b[1])
+        turned = abs((b[3] - a[3] + math.pi) % (2 * math.pi) - math.pi) > 1e-9
+        assert not (moved and turned), \
+            f"moved and turned together at {a[:2]} -> {b[:2]}"
+
+
+def test_each_corner_is_visited_twice_to_stop_before_turning():
+    from hydrone_nav.coverage import u_sweep
+    pts = u_sweep(B8, inset_m=1.0, step_m=10.0)     # corners only
+    seen = {}
+    for x, y, _, _ in pts:
+        seen[(round(x, 6), round(y, 6))] = seen.get((round(x, 6), round(y, 6)), 0) + 1
+    assert sum(1 for n in seen.values() if n > 1) == 2, \
+        "the two corners must each be held twice: arrive, then turn"

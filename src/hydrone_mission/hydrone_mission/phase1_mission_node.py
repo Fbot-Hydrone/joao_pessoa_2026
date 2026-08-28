@@ -131,7 +131,7 @@ from mavros_msgs.srv import CommandBool, CommandTOL, SetMode
 from octomap_msgs.msg import Octomap
 
 from hydrone_map import octree, relief
-from hydrone_nav import coverage, planner, route
+from hydrone_nav import coverage, planner, route, servo
 from hydrone_msgs.msg import PadDetection, PadMap
 from hydrone_msgs.srv import MarkPadVisited, RegisterTakeoffBase
 
@@ -324,6 +324,15 @@ class Phase1MissionNode(Node):
         # How far the ladder is allowed to climb. 4 spends everything; lower it
         # to cap what an attempt may cost.
         self.declare_parameter("max_search_level", 4)
+        # Centre the vehicle over the pad during the confirmation hover, using
+        # the belly camera. The pixel-to-metre mapping is learned in flight;
+        # see hydrone_nav.servo for why it cannot be a constant.
+        self.declare_parameter("centre_on_pad", True)
+        # Where the pad should sit in the belly image. The image centre unless
+        # the lens is off-centre on the airframe — which the servo CANNOT
+        # learn, because it is what "centred" means. Measure it once by
+        # hovering over a known pad and reading where it lands in frame.
+        self.declare_parameter("pad_target_uv", [320.0, 240.0])
         self.declare_parameter("survey_max_viewpoints", 8)
         self.declare_parameter("survey_max_stalls", 2)
         # How much the predicted gain must fall for a trip to count as
@@ -450,6 +459,9 @@ class Phase1MissionNode(Node):
         self.level2_climb_m = float(p("level2_climb_m"))
         self.lawnmower_lane_m = float(p("lawnmower_lane_m"))
         self.max_search_level = int(p("max_search_level"))
+        self.centre_on_pad = bool(p("centre_on_pad"))
+        t = [float(v) for v in p("pad_target_uv")]
+        self._servo = servo.VisualServo(target_uv=(t[0], t[1]))
         self._level = 1
         self._survey_path = None
         self.survey_max_viewpoints = int(p("survey_max_viewpoints"))
@@ -468,6 +480,8 @@ class Phase1MissionNode(Node):
         # False until the arena has been swept. See _do_settle: a candidate
         # found during the sweep is remembered, not flown to.
         self.survey_done = False
+        # True while working through leads the search could not confirm.
+        self.investigating = False
         self.fresh_s = float(p("fresh_detection_s"))
         self.dwell_s = float(p("dwell_s"))
         self.land_timeout = float(p("land_timeout_s"))
@@ -764,6 +778,7 @@ class Phase1MissionNode(Node):
         self._viewpoint_leg = False
         self._failed_viewpoints.clear()
         self.survey_done = False
+        self.investigating = False
         self._relief_seen.clear()
         self._survey_visits = 0
         self._survey_stalls = 0
@@ -1197,7 +1212,19 @@ class Phase1MissionNode(Node):
         )
 
     def _is_candidate(self, pad) -> bool:
-        return route.is_candidate(pad, blacklist=self.blacklist, home=self.home)
+        """Is this pad worth flying to?
+
+        While INVESTIGATING the bar drops to a single sighting. That is not the
+        bar being wrong the rest of the time — it is that the cost of being
+        wrong has changed. During the search a doubtful lead competes with
+        finding real bases; once the search has stalled short of the quota, the
+        only thing a doubtful lead competes with is climbing half a metre and
+        flying the whole U again. A hover settles it either way, and a failed
+        one blacklists the pad.
+        """
+        n = 1 if self.investigating else route.MIN_OBSERVATIONS
+        return route.is_candidate(pad, blacklist=self.blacklist,
+                                  home=self.home, min_observations=n)
 
     def _takeoff_base_xy(self) -> tuple[float, float]:
         """Where home is. The map's registered entry if there is one, else the
@@ -1287,11 +1314,32 @@ class Phase1MissionNode(Node):
                 self._enter(self.SELECT)
                 return
 
+            # INVESTIGATE BEFORE CLIMBING. A pad the map holds but has not
+            # confirmed is a lead the belly camera can settle in one hover;
+            # climbing half a metre and flying the whole U again is minutes.
+            #
+            # MEASURED 2026-08-28: a run ended a level with 4 confirmed and 2
+            # unconfirmed candidates and escalated anyway — investigating those
+            # two would have completed the quota there and then, and instead
+            # two more levels were flown and still came back 5 of 6.
+            weak = self._uninvestigated()
+            if weak and found + self.landed_count < self.target_bases:
+                self.investigating = True
+                self.survey_done = True
+                self.get_logger().info(
+                    f"SEARCH LEVEL {self._level} flown: {found} confirmed and "
+                    f"{len(weak)} unconfirmed candidate(s). Investigating "
+                    f"those before climbing — a hover settles one, a whole "
+                    f"level costs minutes.")
+                self._enter(self.SELECT)
+                return
+
             self.get_logger().warn(
                 f"SEARCH LEVEL {self._level} flown and only {found} of "
                 f"{self.target_bases} base(s) are in the map — escalating.")
             self._level += 1
             self._survey_path = None
+            self.investigating = False
             return
 
         # ── 2. land on what was found ───────────────────────────────────────
@@ -1368,6 +1416,7 @@ class Phase1MissionNode(Node):
             self._level += 1
             self._survey_path = None
             self.survey_done = False
+            self.investigating = False
             self.rotations_done = 0
             self.get_logger().warn(
                 f"still {self.landed_count}/{self.target_bases} base(s) and "
@@ -1385,6 +1434,21 @@ class Phase1MissionNode(Node):
         self._viewpoint_leg = False
         self._goto_via_map(hx, hy, self.takeoff_alt, self.setpoint[3])
         self._enter(self.TRAVEL)
+
+    def _uninvestigated(self):
+        """Pads the map holds but has not confirmed, and nobody has looked at.
+
+        Below the targeting bar — one sighting, or a relief lead the occupancy
+        map raised — so `_is_candidate` refuses them and they would otherwise
+        sit in the map untouched for the whole attempt. They are exactly the
+        leads a confirmation hover exists to settle.
+        """
+        pads = self.pad_map.pads if self.pad_map else []
+        return [p for p in pads
+                if not p.is_takeoff_base
+                and not p.visited
+                and int(p.id) not in self.blacklist
+                and not self._is_candidate(p)]
 
     def _candidate_count(self) -> int:
         """Bases in the map that are still worth flying to."""
@@ -1769,6 +1833,7 @@ class Phase1MissionNode(Node):
                     f"over pad {self.target_id} — confirming on the belly "
                     "camera.")
                 self._confirm_hits = 0
+                self._servo.reset()
                 self._enter(self.CONFIRM)
             return
 
@@ -1840,6 +1905,18 @@ class Phase1MissionNode(Node):
         fresh = (self._last_down is not None
                  and self._now() - self._last_down_t <= self.fresh_s)
         if fresh and self._last_down.confidence >= self.confirm_conf:
+            # CENTRE THE PAD FIRST. The hover is directly over the thing it is
+            # about to land on, and "directly" is the word doing the work: the
+            # position came from a projection made across the arena, and the
+            # belly camera at 1 m is the only sensor that can say where the pad
+            # actually is relative to the vehicle.
+            #
+            # The pixel-to-metre mapping is LEARNED, not assumed — see
+            # hydrone_nav.servo. It is a rotation, a sign and a scale, none of
+            # which can be written down for an airframe whose camera may be
+            # bolted on differently from the simulator's, and getting the sign
+            # wrong does not centre slowly, it flies away.
+            self._centre_on_pad(self._last_down)
             self._confirm_hits += 1
             # One detection must not be counted twice: the belly camera runs at
             # 10 Hz and this tick at 10 Hz, so without clearing it a single
@@ -1859,6 +1936,28 @@ class Phase1MissionNode(Node):
                 f"{self.confirm_detections} looks) — not a landing site. "
                 "Blacklisting it and searching from here.")
             self._reject_target()
+
+    def _centre_on_pad(self, det):
+        """Nudge the setpoint so the belly camera's pad moves to `target_uv`.
+
+        The step comes back in the BODY frame and is rotated into the world by
+        the vehicle's own yaw before it becomes a setpoint — the servo knows
+        about pixels and the airframe, not about where north is.
+        """
+        if not self.centre_on_pad or self.pose is None:
+            return
+        step = self._servo.update((det.u, det.v), self.pose.pose.position.z)
+        if step is None:
+            return
+        yaw = yaw_of(self.pose)
+        dx = step[0] * math.cos(yaw) - step[1] * math.sin(yaw)
+        dy = step[0] * math.sin(yaw) + step[1] * math.cos(yaw)
+        self.setpoint[0] += dx
+        self.setpoint[1] += dy
+        self.get_logger().info(
+            f"centring on pad {self.target_id}: ({det.u:.0f}, {det.v:.0f}) px "
+            f"-> nudging ({dx:+.2f}, {dy:+.2f}) m",
+            throttle_duration_sec=2.0)
 
     def _reject_target(self):
         """Give up on the current candidate and go back to turning."""
