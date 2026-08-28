@@ -261,6 +261,17 @@ class Phase1MissionNode(Node):
         self.declare_parameter("confirm_detections", 3)
         self.declare_parameter("confirm_confidence", 0.60)
         self.declare_parameter("confirm_timeout_s", 25.0)
+        # How long a leg may go without getting closer before its target is
+        # written off. Generous on purpose: this must never fire on a leg that
+        # is merely slow, only on one that has stopped closing, and the removed
+        # 60 s budget is the cautionary tale (see _do_travel). At the mission's
+        # cruise a real approach improves by centimetres every tick, so 20 s of
+        # NO improvement at all is already far outside normal.
+        self.declare_parameter("travel_stall_s", 20.0)
+        # How much closer counts as progress. Above the position estimate's
+        # own jitter, so hovering noise cannot masquerade as an approach and
+        # keep a dead leg alive forever.
+        self.declare_parameter("travel_progress_m", 0.05)
         self.declare_parameter("fresh_detection_s", 1.0)
 
         # ── Landing, and the plumbing ───────────────────────────────────────
@@ -342,6 +353,8 @@ class Phase1MissionNode(Node):
         self.confirm_detections = int(p("confirm_detections"))
         self.confirm_conf = float(p("confirm_confidence"))
         self.confirm_timeout = float(p("confirm_timeout_s"))
+        self.travel_stall_s = float(p("travel_stall_s"))
+        self.travel_progress_m = float(p("travel_progress_m"))
         self.fresh_s = float(p("fresh_detection_s"))
         self.dwell_s = float(p("dwell_s"))
         self.land_timeout = float(p("land_timeout_s"))
@@ -389,6 +402,9 @@ class Phase1MissionNode(Node):
         # empty, which is exactly what every leg was before there was a
         # planner.
         self._leg: list[tuple[float, float, float, float]] = []
+        # Closest this leg has come, and when it last improved. See _do_travel.
+        self._travel_best: float | None = None
+        self._travel_progress_t = 0.0
         self._octomap_msg = None        # raw and latched; see _cb_octomap
         self.octree_tree = None         # decoded per leg, in _goto_via_map
         b = [float(v) for v in self.get_parameter("plan_bounds").value]
@@ -621,6 +637,7 @@ class Phase1MissionNode(Node):
         self._land_after_takeoff = False
         # An abort mid-leg must not leave waypoints behind for the next one.
         self._leg = []
+        self._travel_best = None
 
     # ────────────────────────────────────────────────────────────────────────
     # Setpoint stream
@@ -1104,10 +1121,31 @@ class Phase1MissionNode(Node):
         the same time, and there is nothing to gain — the belly camera looks
         straight down and does not care which way the nose points.
 
-        There is no time budget. The leg ends when the vehicle arrives. A 60 s
-        one used to blacklist candidates that were still closing — pad 4 on
-        2026-08-23 was 0.70 m away when it fired — and every run is supervised,
-        so a slow leg is a human's call to abort, not this node's.
+        The leg ends when the vehicle arrives, or when it stops getting closer.
+
+        There used to be a flat 60 s budget and it was removed for a good
+        reason: it blacklisted candidates that were still closing — pad 4 on
+        2026-08-23 was 0.70 m away when it fired. What replaces it is not that
+        budget back. It is a STALL test, and the difference is the whole point:
+        a pad still being approached is making progress and never trips it, no
+        matter how slow the leg is.
+
+        Why anything is needed at all. MEASURED 2026-08-27, a plain --phase1
+        run flying on the VO:
+
+            [ARMING -> REGISTER -> TAKEOFF -> SELECT -> TRAVEL]   and then
+            nothing, for four and a half minutes, with the vehicle parked.
+
+        The pose had drifted 4-5 m in an 8 m arena, so the target sat 4 m from
+        where the vehicle believed it was — permanently. `d` never fell below
+        arrive_tol because it COULD not. One leg, one mission, no landings.
+        "Every run is supervised, so a slow leg is a human's call" holds for a
+        leg that is slow; it does not hold for one that will never finish, and
+        this cannot tell a human anything if it never says a word.
+
+        Blacklisting is the right response and not a guess: the pad is
+        unreachable FROM THIS ESTIMATE, and the search resuming is what gives
+        the estimate a chance to change before anything else is attempted.
         """
         if self.pose is None:
             return
@@ -1115,6 +1153,17 @@ class Phase1MissionNode(Node):
 
         d = math.hypot(self.pose.pose.position.x - self.setpoint[0],
                        self.pose.pose.position.y - self.setpoint[1])
+
+        # Progress, not elapsed time. `_travel_best` is the closest this leg has
+        # ever been; improving it resets the clock.
+        now = self._now()
+        if self._travel_best is None or d < self._travel_best - self.travel_progress_m:
+            self._travel_best = d
+            self._travel_progress_t = now
+        elif now - self._travel_progress_t > self.travel_stall_s:
+            self._on_travel_stalled(d)
+            return
+
         if d <= self.arrive_tol:
             # Intermediate waypoints from _goto_via_map come first: arriving at
             # one is not arriving at the pad, it is the corner of a leg that
@@ -1137,6 +1186,33 @@ class Phase1MissionNode(Node):
                 self._confirm_hits = 0
                 self._enter(self.CONFIRM)
             return
+
+    def _on_travel_stalled(self, d: float):
+        """The leg stopped closing. Give up on this target and search again.
+
+        The final return leg is NOT blacklisted and not abandoned: there is no
+        other candidate to fall back to and the takeoff base is where the run
+        has to end. Stalling there is reported and the leg is left running, so
+        the supervisor sees it and the vehicle keeps trying — which is the old
+        behaviour, kept exactly where it was the right one.
+        """
+        if self.landing_for == self.LAND_FINAL:
+            self.get_logger().error(
+                f"the return leg has not closed in {self.travel_stall_s:.0f} s "
+                f"and is stuck {d:.2f} m out — the estimate has drifted. "
+                f"Holding the leg; a human decides this one.",
+                throttle_duration_sec=30.0)
+            return
+
+        self.get_logger().error(
+            f"pad {self.target_id} stopped getting closer {d:.2f} m out and "
+            f"has not improved in {self.travel_stall_s:.0f} s — unreachable "
+            f"from this estimate. Blacklisting it and resuming the search.")
+        if self.target_id is not None:
+            self.blacklist.add(int(self.target_id))
+        self.target_id = None
+        self._leg = []
+        self._enter(self.SELECT)
 
     # ── CONFIRM ──────────────────────────────────────────────────────────────
 
@@ -1266,6 +1342,7 @@ class Phase1MissionNode(Node):
             else:
                 self.get_logger().info(
                     f"LANDED ({self.landing_for}) at z={z:.2f} m ({why}).")
+                self._report_landing_anchor()
             self._enter(self.DWELL)
             return
 
@@ -1274,6 +1351,46 @@ class Phase1MissionNode(Node):
                 f"no touchdown within {self.land_timeout:.0f} s — carrying on "
                 "anyway so the mission does not stall here.")
             self._enter(self.DWELL)
+
+    def _report_landing_anchor(self):
+        """The one measurement of drift against the WORLD this stack can make.
+
+        Everything else compares two quantities that live in the same drifting
+        frame. hydrone_localization.landmark was built to correct the pose from
+        re-observed pads and MEASURED, on 2026-08-27, that it cannot: the map
+        entry and the fresh detection are both projected through the same pose,
+        so when that pose walks 7 m they walk together and their difference is
+        noise. The anchor there is worse — `map` is the EKF's own frame and the
+        takeoff base was registered at the vehicle's position in it, so the
+        difference is zero by construction. A frame's drift is not observable
+        from inside it.
+
+        This is observable, because the evidence is not a projection. The
+        vehicle is PHYSICALLY resting on the base it armed from. Its pose
+        should therefore read `home`. Whatever it reads instead is the
+        accumulated error, measured by contact — no camera, no depth, no
+        association, no ambiguity.
+
+        Reported, not applied, and for the same reason the landmark node is an
+        observer: /zed/zed_node/odom is what the EKF flies on with GPS off, and
+        a correction injected there on the strength of an unmeasured idea is an
+        aircraft flying to the wrong place. What this produces is the number
+        that has to be checked against the odom_error CSV's `err_norm` first —
+        they are the same quantity, so the comparison is arithmetic rather than
+        opinion. It also arrives once per attempt, at the end, which is the
+        right cadence to trust before it is the right cadence to steer on.
+        """
+        if self.home is None or self.pose is None:
+            return
+        dx = self.pose.pose.position.x - self.home[0]
+        dy = self.pose.pose.position.y - self.home[1]
+        self.get_logger().info(
+            f"LANDING ANCHOR: resting on the takeoff base, which is at "
+            f"({self.home[0]:.2f}, {self.home[1]:.2f}); the estimate says "
+            f"({self.pose.pose.position.x:.2f}, {self.pose.pose.position.y:.2f}). "
+            f"Accumulated drift {math.hypot(dx, dy):.2f} m "
+            f"(x {dx:+.2f}, y {dy:+.2f}). Compare against err_norm at the end "
+            f"of the odom_error CSV — they are the same quantity.")
 
     def _z_is_still(self) -> bool:
         """Has the reported altitude stopped moving?
@@ -1421,6 +1538,13 @@ class Phase1MissionNode(Node):
             # only comparable on the first climb of a run. See _do_takeoff.
             self._takeoff_start_z = (self.pose.pose.position.z
                                      if self.pose is not None else 0.0)
+        if state == self.TRAVEL:
+            # Each leg gets its own progress record. Carrying the previous
+            # leg's best distance over would make a new leg look stalled from
+            # its first tick, because it starts FARTHER from its target than
+            # the last one ended from its own.
+            self._travel_best = None
+            self._travel_progress_t = self._now()
         self.state = state
         self._state_since = self._now()
         self._call = None

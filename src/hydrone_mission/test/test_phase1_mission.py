@@ -348,18 +348,93 @@ def test_arriving_home_lands_without_confirming(node):
     assert node.state == node.LAND
 
 
-def test_a_long_leg_is_not_given_up_on(node):
-    """No travel timeout: a base the ZED found is flown to until it arrives.
+def stall(node, seconds=None):
+    """Pretend the leg last got closer `seconds` ago."""
+    node._travel_progress_t = node._now() - (
+        seconds if seconds is not None else node.travel_stall_s + 1.0)
 
-    A 60 s budget used to blacklist pad 4 while the vehicle was 0.70 m away and
-    still closing, so CONFIRM was never entered and the belly camera never got
-    to vote on a base that was right there.
+
+def test_a_long_leg_is_not_given_up_on(node):
+    """Elapsed time alone never abandons a leg. A 60 s budget used to blacklist
+    pad 4 while the vehicle was 0.70 m away and still closing, so CONFIRM was
+    never entered and the belly camera never voted on a base that was there.
+
+    What replaces it tests PROGRESS, so this case is still safe: the leg below
+    has been running forever and is still closing on every tick.
     """
     node.target_id = 4
     node.landing_for = node.LAND_PAD
     node.setpoint = [20.0, 0.0, 1.0, 0.0]
-    set_pose(node, 0.0, 0.0)
     enter(node, node.TRAVEL, age_s=99999.0)
+    for x in (0.0, 2.0, 4.0, 6.0, 8.0):        # closing, slowly, for ever
+        set_pose(node, x, 0.0)
+        node._do_travel()
+    assert node.blacklist == set()
+    assert node.state == node.TRAVEL
+
+
+def test_a_leg_that_stops_closing_is_given_up_on(node):
+    """MEASURED 2026-08-27 on a plain --phase1 run: the pose drifted 4-5 m in
+    an 8 m arena, so the target sat permanently 4 m from where the vehicle
+    believed it was, `d` could never reach arrive_tol, and the mission sat in
+    TRAVEL for four and a half minutes — one leg, no landings, no message."""
+    node.target_id = 4
+    node.landing_for = node.LAND_PAD
+    node.setpoint = [20.0, 0.0, 1.0, 0.0]
+    set_pose(node, 0.0, 0.0)
+    enter(node, node.TRAVEL)
+    node._do_travel()                          # records the first distance
+    stall(node)
+    node._do_travel()
+    assert 4 in node.blacklist
+    assert node.state == node.SELECT
+    assert node.target_id is None
+
+
+def test_hovering_noise_does_not_count_as_progress(node):
+    """Otherwise a dead leg stays alive forever on estimate jitter alone."""
+    node.target_id = 4
+    node.landing_for = node.LAND_PAD
+    node.setpoint = [20.0, 0.0, 1.0, 0.0]
+    enter(node, node.TRAVEL)
+    set_pose(node, 0.0, 0.0)
+    node._do_travel()
+    stall(node)
+    set_pose(node, 0.001, 0.0)                 # a millimetre is not an approach
+    node._do_travel()
+    assert 4 in node.blacklist
+
+
+def test_the_return_leg_is_never_blacklisted(node):
+    """There is no other candidate to fall back to and the run has to end on
+    the takeoff base. Stalling there is reported and the leg is left running,
+    which is the old behaviour kept where it was the right one."""
+    node.landing_for = node.LAND_FINAL
+    node.target_id = None
+    node.setpoint = [20.0, 0.0, 1.0, 0.0]
+    set_pose(node, 0.0, 0.0)
+    enter(node, node.TRAVEL)
+    node._do_travel()
+    stall(node)
+    node._do_travel()
+    assert node.state == node.TRAVEL
+    assert node.blacklist == set()
+
+
+def test_each_leg_gets_a_fresh_progress_record(node):
+    """A new leg starts FARTHER from its target than the last one ended from
+    its own, so carrying the previous best over would make it look stalled on
+    its first tick."""
+    node.target_id = 4
+    node.landing_for = node.LAND_PAD
+    node.setpoint = [1.0, 0.0, 1.0, 0.0]
+    set_pose(node, 0.5, 0.0)
+    enter(node, node.TRAVEL)
+    node._do_travel()                          # best distance is now 0.5 m
+    node.target_id = 5
+    node.setpoint = [20.0, 0.0, 1.0, 0.0]
+    enter(node, node.TRAVEL)                   # a new, much longer leg
+    set_pose(node, 0.0, 0.0)
     node._do_travel()
     assert node.blacklist == set()
     assert node.state == node.TRAVEL
@@ -545,3 +620,34 @@ def test_nothing_is_published_once_the_fcu_owns_the_descent(node):
     node.pub_sp.publish = published.append
     node._stream()
     assert published == []
+
+
+# ── The landing anchor ───────────────────────────────────────────────────────
+#
+# The only measurement of drift against the WORLD this stack can make.
+# landmark.py's re-observation compares two things projected through the same
+# drifting pose; this compares the pose against a base the vehicle is
+# physically resting on.
+
+def test_the_landing_anchor_measures_the_pose_against_where_we_armed(node,
+                                                                    capfd):
+    """capfd, not caplog: rclpy's logger writes to the process's stderr, which
+    pytest's logging capture never sees."""
+    node.home = (1.0, -0.5)
+    set_pose(node, 1.4, -0.2)
+    capfd.readouterr()
+    node._report_landing_anchor()
+    text = "".join(capfd.readouterr())
+    assert "LANDING ANCHOR" in text
+    assert "0.50 m" in text                 # hypot(0.4, 0.3)
+
+
+def test_the_anchor_says_nothing_without_a_home(node, capfd):
+    """Registration can fail. Reporting a drift against a home that was never
+    captured would invent a number, and inventing one here is worse than
+    having none: this is the measurement everything else is checked against."""
+    node.home = None
+    set_pose(node, 5.0, 5.0)
+    capfd.readouterr()
+    node._report_landing_anchor()
+    assert "LANDING ANCHOR" not in "".join(capfd.readouterr())
