@@ -198,51 +198,49 @@ def next_viewpoint(occupancy, *, frm, yaw, bounds, z,
     return (best[1], best[2])
 
 
-def rectangle_survey(bounds, *, inset_m=1.2, z=1.0, step_m=2.0,
-                     centre=None):
-    """A rectangular circuit that sweeps the arena, as (x, y, z, yaw) points.
+def lateral_sweep(bounds, *, inset_m=1.2, z=2.0, step_m=1.5):
+    """Two straight passes across the arena, as (x, y, z, yaw) points.
 
-    Standing still and turning is the wrong shape for this problem, and
-    MEASURED 2026-08-28 it degenerates completely: asked which directions had
-    unobserved arena behind them, an open arena answers "all of them" — the
-    directed sweep came back 22, -22, 68, -68, 112, -112, 158, -158, which is
-    a full circle with the turns merely reordered. Spinning cannot do better,
-    because what limits the map is not where the camera POINTS but where it
-    has PARALLAX. A camera that never translates never sees behind anything.
+    This replaces a rectangular circuit, and the reason is the same one that
+    killed the spin before it: ROTATION. The circuit re-aimed the camera at the
+    arena centre at every step, so it turned continuously along every edge —
+    which is what "he is still spinning" kept meaning. A pass with a FIXED
+    heading does not.
 
-    So: fly. A circuit inset from the walls, with the camera aimed INWARD at
-    the arena, sweeps the whole floor in one pass and sees every base from a
-    changing angle — which is also what the depth camera needs to fill the
-    occupancy map. Inward matters: aimed outward this would spend the entire
-    flight photographing the four walls, which is the complaint that started
-    it.
+    The shape:
 
-    `step_m` puts intermediate points along each edge so the yaw is re-aimed
-    as the vehicle travels, rather than only at the corners.
+        pass A   along the top, looking across at the arena      (yaw = -90 deg)
+        one 180 deg turn, at the end, once
+        pass B   along the bottom, looking back the other way    (yaw = +90 deg)
 
-    Deterministic and cheap on purpose. The competition gives three attempts
-    in thirty minutes, so a sweep whose length can be read off the arena
-    beforehand is worth more than a clever one that might converge.
+    Two passes and one turn covers the floor from two opposite directions,
+    which is what a base needs to be seen from — a pad that is edge-on or
+    back-lit on one pass is face-on on the other. And a fixed heading during
+    the translation is worth more than the angles it gives up: the detector
+    gets a stable scene to work on, the depth camera sweeps a clean band into
+    the occupancy map, and the odometry is never asked to do the one thing
+    this arena breaks it on.
+
+    `z` is NOT the mission's cruise altitude by default and must not be
+    silently taken from it: the top pass runs over the house, whose roof is at
+    1.5 m in the competition arena, so a sweep at the usual 1 m would fly into
+    it. The caller passes an altitude that clears the house and stays under the
+    net.
     """
     (min_x, min_y, _), (max_x, max_y, _) = bounds
     x0, x1 = min_x + inset_m, max_x - inset_m
-    y0, y1 = min_y + inset_m, max_y - inset_m
-    if x1 <= x0 or y1 <= y0:
+    y_hi, y_lo = max_y - inset_m, min_y + inset_m
+    if x1 <= x0 or y_hi <= y_lo:
         return []
-    cx, cy = centre if centre is not None else ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
-
-    corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
-    pts = []
-    for a, b in zip(corners, corners[1:] + corners[:1]):
-        dist = math.hypot(b[0] - a[0], b[1] - a[1])
-        n = max(1, int(math.ceil(dist / step_m)))
-        for k in range(n):
-            t = k / n
-            pts.append((a[0] + (b[0] - a[0]) * t,
-                        a[1] + (b[1] - a[1]) * t))
 
     out = []
-    for (x, y) in pts:
-        yaw = math.atan2(cy - y, cx - x)      # look at the arena, not the wall
-        out.append((x, y, z, yaw))
+    span = x1 - x0
+    n = max(1, int(math.ceil(span / step_m)))
+    # Pass A: left to right along the top, looking south across the arena.
+    for k in range(n + 1):
+        out.append((x0 + span * (k / n), y_hi, z, -math.pi / 2.0))
+    # Pass B: back along the bottom, looking north. The single 180 deg turn
+    # happens on the way between them.
+    for k in range(n + 1):
+        out.append((x1 - span * (k / n), y_lo, z, math.pi / 2.0))
     return out

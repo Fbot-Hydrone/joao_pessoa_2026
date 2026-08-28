@@ -821,7 +821,7 @@ def test_real_progress_resets_the_patience(node):
     assert not node._survey_gain_is_real(19)
 
 
-def test_the_survey_flies_a_circuit_instead_of_spinning(node):
+def test_the_survey_flies_instead_of_spinning(node):
     """Turning on the spot cannot map an arena: what limits the map is not
     where the camera POINTS but where it has PARALLAX, and a camera that never
     translates never sees behind anything."""
@@ -835,7 +835,7 @@ def test_the_survey_flies_a_circuit_instead_of_spinning(node):
     assert node._survey_path is not None
 
 
-def test_the_circuit_ends_the_survey_when_it_runs_out(node):
+def test_the_sweep_ends_the_survey_when_it_runs_out(node):
     node.survey_done = False
     node.survey_circuit = True
     node._survey_path = []                 # already flown
@@ -846,7 +846,7 @@ def test_the_circuit_ends_the_survey_when_it_runs_out(node):
     assert node.state == node.SELECT
 
 
-def test_an_abort_forgets_the_circuit(node):
+def test_an_abort_forgets_the_sweep(node):
     node._survey_path = [(1.0, 1.0, 1.0, 0.0)]
     node._reset()
     assert node._survey_path is None
@@ -896,7 +896,7 @@ def test_the_relief_is_not_consulted_while_blue_candidates_remain(node,
     assert node.state == node.SELECT
     assert "yes" not in called
 
-def test_arriving_on_a_circuit_leg_never_confirms_or_lands(node):
+def test_arriving_on_a_sweep_leg_never_confirms_or_lands(node):
     """The worst failure this mission has had. MEASURED 2026-08-27: a run that
     reported "6 of 6 bases" had landed on ONE. The other five were a look-leg
     arriving and being treated as an arrival over a pad — "over pad None —
@@ -930,7 +930,7 @@ def test_an_unreachable_look_leg_is_not_blacklisted_as_a_pad(node):
     assert (3.0, 2.0) in node._failed_viewpoints
 
 
-def test_a_candidate_is_not_chased_before_the_circuit_is_flown(node):
+def test_a_candidate_is_not_chased_before_the_sweep_is_flown(node):
     """Running at the first sighting is explore-nothing/exploit-everything in
     the worst order: the battery goes on whichever base happened to be in
     front of the camera at takeoff."""
@@ -942,3 +942,57 @@ def test_a_candidate_is_not_chased_before_the_circuit_is_flown(node):
     node._do_settle()
     assert node.state == node.TRAVEL and node._viewpoint_leg, \
         "chased a pad before sweeping the arena"
+
+
+def test_the_sweep_climbs_above_the_house(node):
+    """The passes cross the house, whose roof is 1.5 m in the competition
+    arena, and the cruise height is 1 m. Taking the sweep altitude from
+    takeoff_alt would fly the drone into it."""
+    node.survey_done = False
+    node.survey_circuit = True
+    set_map(node)
+    enter(node, node.SETTLE, age_s=5.0)
+    node._do_settle()
+    assert node.survey_alt > 1.5
+    assert node.setpoint[2] == pytest.approx(node.survey_alt)
+
+
+def test_the_sweep_holds_one_heading_per_pass(node):
+    """The rectangle it replaced re-aimed the camera at every step, so it
+    turned continuously along every edge."""
+    node.survey_done = False
+    node.survey_circuit = True
+    set_map(node)
+    enter(node, node.SETTLE, age_s=5.0)
+    node._do_settle()
+    yaws = [p[3] for p in ([(0, 0, 0, node.setpoint[3])] + node._survey_path)]
+    changes = sum(1 for a, b in zip(yaws, yaws[1:]) if abs(a - b) > 1e-9)
+    assert changes == 1, f"turned {changes} times across the whole sweep"
+
+
+def test_a_refused_takeoff_gives_up_instead_of_looping_for_ever(node):
+    """TAKEOFF bounces back to ARMING on every refusal. Clearing the counter on
+    the way through means the three-strike abort never accumulates — MEASURED
+    2026-08-28: after landing on an elevated base at z=0.89 m the FCU refused
+    takeoff and the mission sat in ARMING <-> TAKEOFF for the rest of the
+    flight, retrying every two seconds."""
+    node.dry_run = False
+    node.base_registered = True
+    node.mav_state.mode = "GUIDED"
+    node.mav_state.armed = True
+    node._takeoff_tries = 3
+    enter(node, node.ARMING)
+    node._do_arming()
+    assert node.state == node.TAKEOFF
+    assert node._takeoff_tries == 3, "the retry counter was cleared on the way"
+
+
+def test_a_new_landing_cycle_gets_its_takeoff_tries_back(node):
+    """DWELL is the place that means 'this is a fresh attempt'."""
+    node._takeoff_tries = 3
+    node.landed_count = 1
+    node.target_bases = 6
+    node.landing_for = node.LAND_PAD
+    enter(node, node.DWELL, age_s=999.0)
+    node._do_dwell()
+    assert node._takeoff_tries == 0

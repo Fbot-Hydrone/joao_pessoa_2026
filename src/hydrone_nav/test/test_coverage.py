@@ -199,61 +199,56 @@ def test_avoiding_everything_reachable_ends_the_search():
                           sensor_range=1.5, avoid=avoid) is None
 
 
-# ── the rectangular sweep ────────────────────────────────────────────────────
+# ── the lateral sweep ────────────────────────────────────────────────────────
 #
-# Standing still and turning is the wrong shape. MEASURED 2026-08-28: asked
-# which directions had unobserved arena behind them, an open arena answers
-# "all of them" — the directed sweep came back 22, -22, 68, -68, 112, -112,
-# 158, -158, a full circle with the turns merely reordered.
+# Two straight passes, fixed heading in each. The rectangle it replaced
+# re-aimed the camera at the arena centre at every step, so it turned
+# CONTINUOUSLY along every edge — which is what "he is still spinning" meant.
 
-def test_the_circuit_stays_inside_the_arena():
-    from hydrone_nav.coverage import rectangle_survey
-    pts = rectangle_survey(((-4.0, -4.0, 0.0), (4.0, 4.0, 2.0)), inset_m=1.0)
-    assert pts
-    for x, y, _, _ in pts:
-        assert -3.0 - 1e-9 <= x <= 3.0 + 1e-9
-        assert -3.0 - 1e-9 <= y <= 3.0 + 1e-9
-
-
-def test_the_camera_looks_at_the_arena_not_at_the_wall():
-    """Aimed outward this would spend the whole flight photographing the four
-    walls, which is the complaint that started it."""
-    from hydrone_nav.coverage import rectangle_survey
-    pts = rectangle_survey(((-4.0, -4.0, 0.0), (4.0, 4.0, 2.0)), inset_m=1.0)
-    for x, y, _, yaw in pts:
-        to_centre = math.atan2(-y, -x)
-        err = abs((yaw - to_centre + math.pi) % (2 * math.pi) - math.pi)
-        assert err < 1e-6, f"({x}, {y}) looks away from the arena"
+def test_the_heading_never_changes_during_a_pass():
+    """The whole point. A fixed heading gives the detector a stable scene, the
+    depth camera a clean band, and never asks the odometry to do the one thing
+    this arena breaks it on."""
+    from hydrone_nav.coverage import lateral_sweep
+    pts = lateral_sweep(((-4.0, -4.0, 0.0), (4.0, 4.0, 2.5)), inset_m=1.0)
+    yaws = [p[3] for p in pts]
+    changes = sum(1 for a, b in zip(yaws, yaws[1:]) if abs(a - b) > 1e-9)
+    assert changes == 1, f"turned {changes} times; a two-pass sweep turns once"
 
 
-def test_it_visits_all_four_sides():
-    from hydrone_nav.coverage import rectangle_survey
-    pts = rectangle_survey(((-4.0, -4.0, 0.0), (4.0, 4.0, 2.0)), inset_m=1.0,
-                           step_m=2.0)
-    xs = [p[0] for p in pts]
-    ys = [p[1] for p in pts]
-    assert min(xs) == pytest.approx(-3.0)
-    assert max(xs) == pytest.approx(3.0)
-    assert min(ys) == pytest.approx(-3.0)
-    assert max(ys) == pytest.approx(3.0)
+def test_the_two_passes_look_in_opposite_directions():
+    """A pad that is edge-on or back-lit on one pass is face-on on the other."""
+    from hydrone_nav.coverage import lateral_sweep
+    pts = lateral_sweep(((-4.0, -4.0, 0.0), (4.0, 4.0, 2.5)), inset_m=1.0)
+    yaws = sorted({round(p[3], 6) for p in pts})
+    assert len(yaws) == 2
+    assert abs(abs(yaws[1] - yaws[0]) - math.pi) < 1e-6
 
 
-def test_a_finer_step_puts_more_points_on_each_edge():
-    """The yaw is re-aimed as the vehicle travels, not only at the corners."""
-    from hydrone_nav.coverage import rectangle_survey
-    b = ((-4.0, -4.0, 0.0), (4.0, 4.0, 2.0))
-    assert len(rectangle_survey(b, step_m=1.0)) > len(
-        rectangle_survey(b, step_m=3.0))
+def test_each_pass_looks_ACROSS_the_arena_not_along_it():
+    from hydrone_nav.coverage import lateral_sweep
+    b = ((-4.0, -4.0, 0.0), (4.0, 4.0, 2.5))
+    for x, y, _, yaw in lateral_sweep(b, inset_m=1.0):
+        # the ray from (x, y) along yaw must head towards y = 0
+        assert (y > 0 and math.sin(yaw) < 0) or (y < 0 and math.sin(yaw) > 0)
 
 
-def test_an_arena_smaller_than_the_inset_yields_no_circuit():
-    """Better an empty plan than a rectangle turned inside out."""
-    from hydrone_nav.coverage import rectangle_survey
-    assert rectangle_survey(((-1.0, -1.0, 0.0), (1.0, 1.0, 2.0)),
-                            inset_m=2.0) == []
+def test_the_passes_run_along_opposite_sides():
+    from hydrone_nav.coverage import lateral_sweep
+    pts = lateral_sweep(((-4.0, -4.0, 0.0), (4.0, 4.0, 2.5)), inset_m=1.0)
+    ys = sorted({round(p[1], 6) for p in pts})
+    assert ys == [-3.0, 3.0]
 
 
-def test_the_altitude_is_carried_through():
-    from hydrone_nav.coverage import rectangle_survey
-    pts = rectangle_survey(((-4.0, -4.0, 0.0), (4.0, 4.0, 2.0)), z=1.4)
-    assert all(p[2] == pytest.approx(1.4) for p in pts)
+def test_the_sweep_altitude_is_explicit_and_not_the_cruise_height():
+    """The top pass runs over the house, whose roof is at 1.5 m. A sweep at the
+    usual 1 m cruise would fly into it."""
+    from hydrone_nav.coverage import lateral_sweep
+    pts = lateral_sweep(((-4.0, -4.0, 0.0), (4.0, 4.0, 2.5)), z=2.0)
+    assert all(p[2] == pytest.approx(2.0) for p in pts)
+
+
+def test_an_arena_smaller_than_the_inset_yields_no_sweep():
+    from hydrone_nav.coverage import lateral_sweep
+    assert lateral_sweep(((-1.0, -1.0, 0.0), (1.0, 1.0, 2.0)),
+                         inset_m=2.0) == []

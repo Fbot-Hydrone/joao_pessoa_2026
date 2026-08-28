@@ -309,7 +309,12 @@ class Phase1MissionNode(Node):
         self.declare_parameter("survey_inset_m", 1.2)
         # Spacing of the points along each edge — how often the yaw is
         # re-aimed at the arena while travelling.
-        self.declare_parameter("survey_step_m", 2.0)
+        self.declare_parameter("survey_step_m", 1.5)
+        # Height of the sweep. ABOVE THE HOUSE (1.5 m roof in the competition
+        # arena) and below the net at 2.5 m — the passes fly over it, and at
+        # the 1 m cruise height they would fly INTO it. Higher also widens what
+        # each pass sees.
+        self.declare_parameter("survey_alt_m", 2.0)
         self.declare_parameter("survey_max_viewpoints", 8)
         self.declare_parameter("survey_max_stalls", 2)
         # How much the predicted gain must fall for a trip to count as
@@ -432,6 +437,7 @@ class Phase1MissionNode(Node):
         self.survey_circuit = bool(p("survey_circuit"))
         self.survey_inset_m = float(p("survey_inset_m"))
         self.survey_step_m = float(p("survey_step_m"))
+        self.survey_alt = float(p("survey_alt_m"))
         self._survey_path = None
         self.survey_max_viewpoints = int(p("survey_max_viewpoints"))
         self.survey_max_stalls = int(p("survey_max_stalls"))
@@ -960,13 +966,22 @@ class Phase1MissionNode(Node):
                 "[dry] WOULD ARM (GUIDED, then arm) — nothing sent. Treating "
                 "the vehicle as armed from here; the takeoff base is about to "
                 "be registered and the map starts accepting detections.")
-            self._takeoff_tries = 0
             self._enter(self.REGISTER if not self.base_registered
                         else self.TAKEOFF)
             return
 
         if self.mav_state.mode == "GUIDED" and self.mav_state.armed:
-            self._takeoff_tries = 0
+            # `_takeoff_tries` is NOT reset here. TAKEOFF bounces back to this
+            # state on every refusal, and clearing the counter on the way
+            # through means the three-strike abort can never accumulate —
+            # MEASURED 2026-08-28: after landing on an elevated base at
+            # z=0.89 m the FCU refused takeoff, and the mission sat in
+            # ARMING <-> TAKEOFF for the rest of the flight, retrying every
+            # two seconds and never saying anything but "failed: no reason
+            # given by the FCU".
+            #
+            # DWELL zeroes it when a genuinely new landing cycle starts, which
+            # is the place that means "this is a fresh attempt".
             self._enter(self.REGISTER if not self.base_registered
                         else self.TAKEOFF)
             return
@@ -1093,9 +1108,12 @@ class Phase1MissionNode(Node):
             self._takeoff_tries += 1
             if self._takeoff_tries > 3:
                 self.get_logger().error(
-                    "takeoff refused three times — check EKF origin/home "
-                    "(see docs/DEVELOP-PIPELINES.md: no origin -> no home -> "
-                    "NAV_TAKEOFF fails). Aborting.")
+                    f"takeoff refused three times from z="
+                    f"{self.pose.pose.position.z if self.pose else 0.0:.2f} m "
+                    f"after {self.landed_count} landing(s) — check EKF "
+                    f"origin/home (docs/DEVELOP-PIPELINES.md: no origin -> no "
+                    f"home -> NAV_TAKEOFF fails). Aborting rather than "
+                    f"retrying for the rest of the attempt.")
                 self._enter(self.ABORTED)
                 return
             self.get_logger().warn("takeoff did not lift us; retrying.")
@@ -1203,28 +1221,35 @@ class Phase1MissionNode(Node):
 
         # ── 1. the circuit ──────────────────────────────────────────────────
         #
-        # Turning on the spot cannot map an arena, and the directed version of
-        # it degenerated completely: MEASURED 2026-08-28, asked which
-        # directions had unobserved arena behind them an open arena answers
-        # "all of them", and the sweep came back 22, -22, 68, -68, 112, -112,
-        # 158, -158 — a full circle with the turns merely reordered. What
-        # limits the map is not where the camera POINTS but where it has
-        # PARALLAX; a camera that never translates never sees behind anything.
+        # Turning on the spot cannot map an arena — what limits the map is not
+        # where the camera POINTS but where it has PARALLAX, and a camera that
+        # never translates never sees behind anything. MEASURED 2026-08-28, the
+        # "directed" version of spinning came back 22, -22, 68, -68, 112, -112,
+        # 158, -158: a full circle with the turns merely reordered.
         #
-        # So fly a rectangle inset from the walls with the camera aimed INWARD.
-        # One pass sweeps the whole floor, every base is seen from a changing
-        # angle, and the length can be read off the arena beforehand — worth
-        # more than a clever sweep that might converge, when the rules give
-        # three attempts in thirty minutes.
+        # The rectangle that replaced it was better and still wrong in the same
+        # direction: it re-aimed the camera at the arena centre at every step,
+        # so it turned CONTINUOUSLY along every edge.
+        #
+        # This turns ONCE. Two straight passes across the arena, heading fixed
+        # in each, looking back the other way on the return — so a pad that is
+        # edge-on or back-lit going out is face-on coming back. A fixed heading
+        # during the translation is worth more than the angles it gives up: the
+        # detector gets a stable scene, the depth camera sweeps a clean band
+        # into the occupancy map, and the odometry is never asked to do the one
+        # thing this arena breaks it on.
+        #
+        # It runs at `survey_alt`, NOT at takeoff_alt: the passes cross the
+        # house, whose roof is at 1.5 m, and the cruise height is 1 m.
         if not self.survey_done and self.survey_circuit:
             if self._survey_path is None:
-                self._survey_path = coverage.rectangle_survey(
+                self._survey_path = coverage.lateral_sweep(
                     self.plan_bounds, inset_m=self.survey_inset_m,
-                    z=self.takeoff_alt, step_m=self.survey_step_m)
+                    z=self.survey_alt, step_m=self.survey_step_m)
                 self.get_logger().info(
-                    f"SURVEY: flying a {len(self._survey_path)}-point circuit "
-                    f"inset {self.survey_inset_m:.1f} m from the walls, camera "
-                    f"aimed at the arena.")
+                    f"SURVEY: two passes at {self.survey_alt:.1f} m, "
+                    f"{len(self._survey_path)} points, heading FIXED in each — "
+                    f"across the arena one way, then back looking the other.")
             if self._survey_path:
                 x, y, z, yaw = self._survey_path.pop(0)
                 self._viewpoint_leg = True      # to LOOK: never confirms, never lands
