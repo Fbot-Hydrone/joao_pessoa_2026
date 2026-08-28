@@ -328,11 +328,21 @@ class Phase1MissionNode(Node):
         # ceilinged at the net.
         self.declare_parameter("plan_bounds",
                                [-5.0, -5.0, 0.3, 5.0, 5.0, 2.5])
-        # Whether a plan may cross space no ray has reached. True here because
-        # the fallback — the straight line this mission always flew — crosses
-        # it without asking, so a plan that at least avoids the known
-        # obstacles is strictly safer. Phase 4 should set this False.
-        self.declare_parameter("plan_allow_unknown", True)
+        # Whether a plan may cross space no ray has reached. FALSE.
+        #
+        # This was true, on the argument that the fallback — the straight line
+        # this mission always flew — crosses unknown space without asking, so a
+        # plan that at least avoids the KNOWN obstacles was strictly safer.
+        # That argument was wrong in practice and the drone hit a wall.
+        #
+        # What it missed: a straight line to a pad is short and aimed at
+        # somewhere the camera has been looking. A PLANNED path is free to
+        # detour anywhere the search can reach, and with unknown space
+        # traversable the cheapest detour is very often straight through the
+        # part of the arena nothing has mapped — which is where the walls the
+        # drone has not seen yet are. Permission to plan through the unmapped
+        # is not the same risk as flying a short straight line through it.
+        self.declare_parameter("plan_allow_unknown", False)
         self.declare_parameter("auto_start", True)
 
         # ── DRY RUN: the vehicle never arms, a human is the actuator ────────
@@ -432,6 +442,8 @@ class Phase1MissionNode(Node):
         self._travel_progress_t = 0.0
         # Is the current leg going somewhere to LOOK rather than to land?
         self._viewpoint_leg = False
+        # Did the last _goto_via_map refuse to fly? See _do_travel.
+        self._blocked_target = False
         # Viewpoints the vehicle could not reach. Not retried: the search would
         # otherwise loop between turning eight times and failing the same trip.
         self._failed_viewpoints: list[tuple[float, float]] = []
@@ -723,6 +735,7 @@ class Phase1MissionNode(Node):
           falling back to it is the status quo, not a new risk.
         """
         self._leg = []
+        self._blocked_target = False
         target = (x, y, z)
         # Decoded once, here, and used for every question this leg asks.
         self.octree_tree = self._tree()
@@ -761,10 +774,19 @@ class Phase1MissionNode(Node):
                             bounds=self.plan_bounds,
                             allow_unknown=self.plan_allow_unknown)
         if path is None:
+            # The straight line is KNOWN to run into something and no way round
+            # it exists in the map. Flying it anyway was what this did, "relying
+            # on the supervisor" — and what that produced was the drone hitting
+            # a wall. There is no supervisor input in a 2 m leg at cruise.
+            #
+            # Refusing costs one target. Flying it costs the aircraft, and in
+            # the competition it costs the attempt.
             self.get_logger().error(
-                f"no clear path to ({x:.2f}, {y:.2f}) in the map — flying the "
-                f"straight line and relying on the supervisor")
-            self._goto(x, y, z, yaw)
+                f"({x:.2f}, {y:.2f}) is blocked and no way round it exists in "
+                f"the map — REFUSING the leg. Holding position.")
+            self._leg = []
+            self._hold()
+            self._blocked_target = True
             return
 
         path = planner.simplify(
@@ -1256,6 +1278,24 @@ class Phase1MissionNode(Node):
         if self.pose is None:
             return
         self._hold()
+
+        if self._blocked_target:
+            # _goto_via_map refused to fly this leg. Do not sit here waiting
+            # for an arrival that was never commanded.
+            self._blocked_target = False
+            if self._viewpoint_leg:
+                self._viewpoint_leg = False
+                self._failed_viewpoints.append(
+                    (self.setpoint[0], self.setpoint[1]))
+            elif self.target_id is not None:
+                self.get_logger().warn(
+                    f"pad {self.target_id} is unreachable in the map — "
+                    f"blacklisting it and searching on.")
+                self.blacklist.add(int(self.target_id))
+                self.target_id = None
+            self.rotations_done = 0
+            self._enter(self.SETTLE)
+            return
 
         d = math.hypot(self.pose.pose.position.x - self.setpoint[0],
                        self.pose.pose.position.y - self.setpoint[1])

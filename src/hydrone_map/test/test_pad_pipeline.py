@@ -338,3 +338,47 @@ def test_empty_floor_produces_an_empty_map():
     finally:
         for node in nodes:
             node.destroy_node()
+
+
+def test_a_detection_outside_the_arena_is_refused():
+    """A ray aimed at the top of a wall crosses the ground plane on the FAR
+    SIDE of it, so the projection lands inside the masonry. MEASURED
+    2026-08-28 on an 8x8 m arena (regions run -4..+4): candidates accepted at
+    (4.99, 3.57) and (4.97, 0.05), and on earlier runs (10.23, -2.25) — two
+    and a half metres past the wall, with the mission then flying at it.
+
+    Nothing downstream can recover: pad_map does not know where the walls are,
+    route flies to the nearest candidate, and the confirmation hover happens
+    after the trip.
+    """
+    from hydrone_map.pad_map_node import PadMapNode
+    from hydrone_msgs.msg import PadDetection
+
+    # Another test in this module may already own the context.
+    started = not rclpy.ok()
+    if started:
+        rclpy.init()
+    try:
+        node = PadMapNode(parameter_overrides=[
+            rclpy.parameter.Parameter("arena_bounds",
+                                      value=[-4.5, -4.5, 4.5, 4.5]),
+            rclpy.parameter.Parameter("require_armed", value=False),
+        ])
+        node.armed_once = True
+        for x, y, inside in [(0.0, 0.0, True), (4.0, 3.0, True),
+                             (10.2, -2.2, False), (4.99, 3.57, False),
+                             (0.0, -6.0, False)]:
+            before = len(node.pads)
+            det = PadDetection()
+            det.camera = "forward"
+            det.confidence = 0.9
+            det.position_valid = True
+            det.range_m = 3.0
+            det.position.x, det.position.y = float(x), float(y)
+            node._cb_detection(det)
+            grew = len(node.pads) > before
+            assert grew is inside, f"({x}, {y}) should be {'in' if inside else 'out'}"
+        node.destroy_node()
+    finally:
+        if started:
+            rclpy.shutdown()

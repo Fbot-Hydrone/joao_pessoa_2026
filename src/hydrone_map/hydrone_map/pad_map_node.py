@@ -164,6 +164,23 @@ class PadMapNode(Node):
         self.declare_parameter("min_confidence", 0.50)
         # Beyond this range a projection is too uncertain to seed the map with.
         self.declare_parameter("max_range_m", 30.0)
+        # The arena, as [min_x, min_y, max_x, max_y] in the world frame. A
+        # detection projected OUTSIDE it is refused.
+        #
+        # This is not a tidy-up, it is a wall. The ground-plane projection
+        # intersects a camera ray with the floor, and a ray aimed at the top of
+        # a wall crosses that plane on the FAR SIDE of it — so a base gets
+        # mapped inside the masonry, the mission flies at it, and in a confined
+        # arena that is a collision. MEASURED 2026-08-28 on an 8x8 m arena
+        # (regions run -4..+4): candidates at (4.99, 3.57) and (4.97, 0.05),
+        # and on earlier runs (10.23, -2.25) and (10.36, -2.26) — two and a
+        # half metres past the wall.
+        #
+        # Nothing downstream can recover from this: pad_map has no idea where
+        # the walls are, route just flies to the nearest candidate, and the
+        # confirmation hover happens after the trip. The cheapest place to
+        # refuse it is here, the moment the position is computed.
+        self.declare_parameter("arena_bounds", [-4.5, -4.5, 4.5, 4.5])
         self.declare_parameter("min_observations", 3)
         self.declare_parameter("provisional_ttl_s", 20.0)
         # How close overhead the drone must be for the rangefinder to be
@@ -208,6 +225,8 @@ class PadMapNode(Node):
         self.min_conf = float(p("min_confidence"))
         self.max_range = float(p("max_range_m"))
         self.min_obs = int(p("min_observations"))
+        b = [float(v) for v in p("arena_bounds")]
+        self.arena_bounds = (b[0], b[1], b[2], b[3])
         self.ttl = float(p("provisional_ttl_s"))
         self.overhead_radius = float(p("overhead_radius"))
         self.world_frame = p("world_frame")
@@ -358,6 +377,19 @@ class PadMapNode(Node):
             self._reject(msg, "range",
                          f"range {msg.range_m:.1f} m > max_range_m "
                          f"{self.max_range:.1f} m")
+            return
+        min_x, min_y, max_x, max_y = self.arena_bounds
+        if not (min_x <= msg.position.x <= max_x
+                and min_y <= msg.position.y <= max_y):
+            # Outside the arena means BEHIND A WALL, and a base cannot be
+            # there. See arena_bounds: a ray aimed at the top of a wall crosses
+            # the ground plane on the far side of it, so the projection lands
+            # in the masonry — and the mission then flies at it.
+            self._reject(msg, "outside the arena",
+                         f"({msg.position.x:.2f}, {msg.position.y:.2f}) is "
+                         f"outside [{min_x:.1f}, {min_y:.1f}] .. "
+                         f"[{max_x:.1f}, {max_y:.1f}] — the ray crossed the "
+                         f"ground plane past a wall")
             return
         # Weight close, confident looks far above distant ones — projection
         # error grows with range on both projection routes.

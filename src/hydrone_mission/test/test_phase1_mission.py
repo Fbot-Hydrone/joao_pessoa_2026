@@ -781,3 +781,43 @@ def test_arriving_with_no_target_pad_refuses_to_land(node):
     node._do_travel()
     assert node.state == node.SETTLE
     assert node.state != node.CONFIRM
+
+
+# ── Never fly into a wall ────────────────────────────────────────────────────
+
+def test_a_blocked_leg_with_no_way_round_is_refused_not_flown(node):
+    """This used to fly the straight line anyway and "rely on the supervisor".
+    What that produced was the drone hitting a wall — there is no supervisor
+    input inside a 2 m leg at cruise. Refusing costs one target; flying it
+    costs the aircraft, and in the competition the attempt."""
+    node.target_id = 4
+    node.landing_for = node.LAND_PAD
+    node._blocked_target = True
+    node.setpoint = [3.0, 0.0, 1.0, 0.0]
+    set_pose(node, 0.0, 0.0)
+    enter(node, node.TRAVEL)
+    node._do_travel()
+    assert node.state == node.SETTLE
+    assert 4 in node.blacklist
+    assert node.target_id is None
+
+
+def test_a_blocked_viewpoint_is_remembered_not_blacklisted_as_a_pad(node):
+    node._viewpoint_leg = True
+    node._blocked_target = True
+    node.setpoint = [3.0, 2.0, 1.0, 0.0]
+    set_pose(node, 0.0, 0.0)
+    enter(node, node.TRAVEL)
+    node._do_travel()
+    assert node.state == node.SETTLE
+    assert node.blacklist == set()
+    assert (3.0, 2.0) in node._failed_viewpoints
+
+
+def test_planning_never_crosses_unmapped_space_by_default(node):
+    """It did, on the argument that the straight-line fallback crosses unknown
+    space anyway. But a straight line to a pad is short and aimed where the
+    camera has been looking; a PLANNED path may detour anywhere, and with
+    unknown traversable the cheapest detour runs through the part of the arena
+    nothing has mapped — which is where the unseen walls are."""
+    assert node.plan_allow_unknown is False
