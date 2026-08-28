@@ -200,14 +200,31 @@ class PadMapNode(Node):
         # as the pose it is composed with, and while translating or slewing that
         # pose is stale by however long the estimator lags: the pad lands in the
         # map metres from where it is, and those phantoms are what the search
-        # then flies out to rule out. Holding still costs nothing here — the
-        # search is already rotate, settle, look.
+        # then flies out to rule out. The two limits are sized differently on
+        # purpose: see max_map_speed below for why translation is cheap and
+        # yaw is not.
         #
         # The EKF's own velocity, not a pose difference: at 30 Hz a centimetre
         # of pose noise differentiates to 0.3 m/s and would gate out everything.
         self.declare_parameter("velocity_topic",
                                "/mavros/local_position/velocity_local")
-        self.declare_parameter("max_map_speed", 0.15)
+        # 0.15 m/s until 2026-08-28, and the comment above explains the value:
+        # "holding still costs nothing here — the search is already rotate,
+        # settle, look". That premise died when the search became FLY and look.
+        #
+        # MEASURED on seed 7 with the U sweep: 39 detections refused for
+        # travelling against 4 accepted. The sweep translates continuously by
+        # design, so the gate was throwing away nine tenths of everything the
+        # camera found, and the mission came back 4 of 6 bases.
+        #
+        # The gate's real quantity is not speed, it is speed x the sync error
+        # between the image stamp and the pose stamp — the distance the vehicle
+        # moved between the picture and the position it is projected through.
+        # At 1 m/s and the ~0.1 s the streams are apart that is 0.1 m, against
+        # a pad a metre across. Yaw is the one that stays strict: 10 deg/s over
+        # the same 0.1 s is 1.7 deg, which at 6 m of range is already 0.18 m,
+        # and it grows with distance while the translation error does not.
+        self.declare_parameter("max_map_speed", 1.0)
         self.declare_parameter("max_map_yaw_rate_deg", 10.0)
         # How far from the registered takeoff base a detection is still THAT
         # base. Wider than merge_radius on purpose: the start base is seen from

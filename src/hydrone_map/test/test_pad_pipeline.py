@@ -24,6 +24,7 @@ Run inside the stack container, with the workspace built:
        src/hydrone_map/test/test_pad_pipeline.py -q'
 """
 
+import math
 import os
 import sys
 import time
@@ -378,6 +379,43 @@ def test_a_detection_outside_the_arena_is_refused():
             node._cb_detection(det)
             grew = len(node.pads) > before
             assert grew is inside, f"({x}, {y}) should be {'in' if inside else 'out'}"
+        node.destroy_node()
+    finally:
+        if started:
+            rclpy.shutdown()
+
+
+def test_the_motion_gate_allows_a_sweep_but_still_refuses_a_slew():
+    """The gate was sized for a search that stood still — "holding still costs
+    nothing here, the search is already rotate, settle, look". That premise
+    died when the search became FLY and look. MEASURED 2026-08-28 on seed 7:
+    39 detections refused for travelling against 4 accepted, and the mission
+    came back 4 of 6 bases.
+
+    Translation and yaw are not the same risk. The error is the motion during
+    the image-to-pose sync gap: 1 m/s over ~0.1 s is 0.1 m against a pad a
+    metre across, while 10 deg/s over the same gap is 1.7 deg, which at 6 m of
+    range is 0.18 m ALREADY and grows with distance.
+    """
+    from hydrone_map.pad_map_node import PadMapNode
+    from geometry_msgs.msg import TwistStamped
+
+    started = not rclpy.ok()
+    if started:
+        rclpy.init()
+    try:
+        node = PadMapNode()
+
+        def twist(speed, yaw_rate):
+            t = TwistStamped()
+            t.twist.linear.x = float(speed)
+            t.twist.angular.z = float(yaw_rate)
+            node.twist = t
+            return node._moving()[0]
+
+        assert not twist(0.8, 0.0), "refused a sweep at cruise speed"
+        assert twist(5.0, 0.0), "accepted a speed nothing could be projected at"
+        assert twist(0.0, math.radians(30.0)), "accepted a slew"
         node.destroy_node()
     finally:
         if started:
