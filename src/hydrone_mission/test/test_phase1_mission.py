@@ -651,3 +651,92 @@ def test_the_anchor_says_nothing_without_a_home(node, capfd):
     capfd.readouterr()
     node._report_landing_anchor()
     assert "LANDING ANCHOR" not in "".join(capfd.readouterr())
+
+
+# ── Coverage search ──────────────────────────────────────────────────────────
+#
+# MEASURED 2026-08-27: without this the vehicle spends the whole mission
+# turning at the point it took off from — ONE travel leg in 5.5 minutes — so a
+# base outside that cone never existed to it.
+
+def exhaust_the_turns(node):
+    node.rotations_done = node.max_rotations
+    enter(node, node.SETTLE, age_s=node.settle_s + 1.0)
+    set_map(node)                       # no candidate to distract SELECT
+
+
+def test_a_finished_sweep_repositions_instead_of_giving_up(node, monkeypatch):
+    monkeypatch.setattr(node, "_next_viewpoint", lambda: ((3.0, 2.0), 12))
+    exhaust_the_turns(node)
+    node._do_settle()
+    assert node.state == node.TRAVEL
+    assert node.setpoint[0] == pytest.approx(3.0)
+    assert node.setpoint[1] == pytest.approx(2.0)
+    assert node.rotations_done == 0, "the new spot gets a full sweep of its own"
+
+
+def test_repositioning_targets_no_pad(node, monkeypatch):
+    """The trip is to LOOK, not to land. Leaving target_id set would make the
+    arrival confirm and land on whatever happened to be there."""
+    node.target_id = 7
+    monkeypatch.setattr(node, "_next_viewpoint", lambda: ((3.0, 2.0), 12))
+    exhaust_the_turns(node)
+    node._do_settle()
+    assert node.target_id is None
+
+
+def test_nothing_left_to_see_still_falls_back(node, monkeypatch):
+    """None means the search is FINISHED, not merely out of turns — and that
+    is the case that justifies going home."""
+    monkeypatch.setattr(node, "_next_viewpoint", lambda: None)
+    exhaust_the_turns(node)
+    node._do_settle()
+    assert node.landing_for == node.LAND_FALLBACK
+
+
+def test_a_coverage_search_that_throws_does_not_take_the_mission_with_it(node):
+    """The fallback is what the mission did before coverage existed."""
+    def boom():
+        raise RuntimeError("octree exploded")
+    node.octree_tree = None
+    node._octomap_msg = None
+    assert node._next_viewpoint() is None      # no map: quietly nothing
+
+
+def test_coverage_can_be_turned_off(node):
+    """coverage_search:=false restores the pure turn-in-place search."""
+    node.coverage_search = False
+    assert node._next_viewpoint() is None
+
+
+def test_an_unreachable_viewpoint_is_not_blacklisted_as_a_pad(node,
+                                                              monkeypatch):
+    """A coverage leg is going somewhere to LOOK. There is no pad to blame,
+    and "pad None stopped getting closer" is what this printed on the first
+    flight that exercised it."""
+    monkeypatch.setattr(node, "_next_viewpoint", lambda: ((3.0, 2.0), 12))
+    exhaust_the_turns(node)
+    node._do_settle()
+    assert node.state == node.TRAVEL and node._viewpoint_leg
+
+    set_pose(node, 0.0, 0.0)
+    node._do_travel()
+    node._travel_progress_t = node._now() - node.travel_stall_s - 1.0
+    node._do_travel()
+
+    assert node.blacklist == set(), "blacklisted a pad for a viewpoint's sake"
+    assert node.state == node.SETTLE
+    assert (3.0, 2.0) in node._failed_viewpoints
+
+
+def test_a_pad_leg_is_not_treated_as_a_viewpoint_leg(node):
+    """The flag has to be cleared by whoever starts a normal leg, or the pad
+    that follows a coverage trip would never be blacklisted."""
+    node._viewpoint_leg = True
+    node.landed_count = 0
+    set_map(node, pad(4, 3.0, 0.0))
+    set_pose(node, 0.0, 0.0)
+    enter(node, node.SELECT)
+    node._do_select()
+    assert node.state == node.TRAVEL
+    assert not node._viewpoint_leg

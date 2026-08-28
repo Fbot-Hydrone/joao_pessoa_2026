@@ -130,7 +130,7 @@ from mavros_msgs.srv import CommandBool, CommandTOL, SetMode
 from octomap_msgs.msg import Octomap
 
 from hydrone_map import octree
-from hydrone_nav import planner, route
+from hydrone_nav import coverage, planner, route
 from hydrone_msgs.msg import PadDetection, PadMap
 from hydrone_msgs.srv import MarkPadVisited, RegisterTakeoffBase
 
@@ -272,6 +272,24 @@ class Phase1MissionNode(Node):
         # own jitter, so hovering noise cannot masquerade as an approach and
         # keep a dead leg alive forever.
         self.declare_parameter("travel_progress_m", 0.05)
+        # Coverage search: when a full sweep from one spot finds nothing, fly
+        # to where the occupancy map still has unobserved space instead of
+        # giving up. Off restores the pure turn-in-place search.
+        self.declare_parameter("coverage_search", True)
+        # How finely coverage is COUNTED, and how finely candidate positions
+        # are TRIED. Two grids on purpose: making the second as fine as the
+        # first squares the work for viewpoints that differ by less than the
+        # vehicle's own position error.
+        self.declare_parameter("coverage_cell_m", 0.5)
+        self.declare_parameter("coverage_viewpoint_m", 1.0)
+        # How far a viewpoint is credited with seeing. SHORTER than the
+        # detector's true reach on purpose: a base at the far edge of the frame
+        # is a handful of pixels, and counting it would let the search tick off
+        # arena it only technically looked at.
+        self.declare_parameter("coverage_range_m", 5.0)
+        # Fewer newly visible cells than this does not pay for the drift the
+        # trip costs.
+        self.declare_parameter("coverage_min_gain", 4)
         self.declare_parameter("fresh_detection_s", 1.0)
 
         # ── Landing, and the plumbing ───────────────────────────────────────
@@ -355,6 +373,11 @@ class Phase1MissionNode(Node):
         self.confirm_timeout = float(p("confirm_timeout_s"))
         self.travel_stall_s = float(p("travel_stall_s"))
         self.travel_progress_m = float(p("travel_progress_m"))
+        self.coverage_search = bool(p("coverage_search"))
+        self.coverage_cell_m = float(p("coverage_cell_m"))
+        self.coverage_viewpoint_m = float(p("coverage_viewpoint_m"))
+        self.coverage_range_m = float(p("coverage_range_m"))
+        self.coverage_min_gain = int(p("coverage_min_gain"))
         self.fresh_s = float(p("fresh_detection_s"))
         self.dwell_s = float(p("dwell_s"))
         self.land_timeout = float(p("land_timeout_s"))
@@ -405,6 +428,11 @@ class Phase1MissionNode(Node):
         # Closest this leg has come, and when it last improved. See _do_travel.
         self._travel_best: float | None = None
         self._travel_progress_t = 0.0
+        # Is the current leg going somewhere to LOOK rather than to land?
+        self._viewpoint_leg = False
+        # Viewpoints the vehicle could not reach. Not retried: the search would
+        # otherwise loop between turning eight times and failing the same trip.
+        self._failed_viewpoints: list[tuple[float, float]] = []
         self._octomap_msg = None        # raw and latched; see _cb_octomap
         self.octree_tree = None         # decoded per leg, in _goto_via_map
         b = [float(v) for v in self.get_parameter("plan_bounds").value]
@@ -638,6 +666,8 @@ class Phase1MissionNode(Node):
         # An abort mid-leg must not leave waypoints behind for the next one.
         self._leg = []
         self._travel_best = None
+        self._viewpoint_leg = False
+        self._failed_viewpoints.clear()
 
     # ────────────────────────────────────────────────────────────────────────
     # Setpoint stream
@@ -1000,6 +1030,7 @@ class Phase1MissionNode(Node):
                 f"takeoff base at ({hx:.2f}, {hy:.2f}).")
             self.target_id = None
             self.landing_for = self.LAND_FINAL
+            self._viewpoint_leg = False
             self._goto_via_map(hx, hy, self.takeoff_alt, self.setpoint[3])
             self._enter(self.TRAVEL)
             return
@@ -1012,6 +1043,7 @@ class Phase1MissionNode(Node):
                 f"pad {pad.id} at ({pad.position.x:.2f}, {pad.position.y:.2f}) "
                 f"is confirmed in the map ({pad.observations} looks, conf "
                 f"{pad.confidence:.2f}) — flying over it.")
+            self._viewpoint_leg = False
             self._goto_via_map(pad.position.x, pad.position.y,
                                self.takeoff_alt, self.setpoint[3])
             self._enter(self.TRAVEL)
@@ -1068,9 +1100,32 @@ class Phase1MissionNode(Node):
             return
 
         if self.rotations_done >= self.max_rotations:
+            # A full sweep from HERE found nothing. Before giving up, ask the
+            # occupancy map whether there is anywhere left that this spot
+            # cannot see. MEASURED 2026-08-27: without this the vehicle spends
+            # the entire mission turning at the point it took off from — one
+            # travel leg in 5.5 minutes — so a base behind the house, or
+            # outside that cone, never existed to it. The detector was never
+            # the limit; nobody looked there.
+            spot = self._next_viewpoint()
+            if spot is not None:
+                (vx, vy), gain = spot
+                self.get_logger().info(
+                    f"{self.rotations_done} turns and nothing new here, but "
+                    f"{gain} unseen cells open up from ({vx:.2f}, {vy:.2f}) — "
+                    f"repositioning to look from there.")
+                self.rotations_done = 0
+                self.target_id = None
+                self.landing_for = self.LAND_PAD
+                self._viewpoint_leg = True
+                self._goto_via_map(vx, vy, self.takeoff_alt, self.setpoint[3])
+                self._enter(self.TRAVEL)
+                return
+
             self.get_logger().warn(
-                f"{self.rotations_done} turns and no new base in sight — "
-                "falling back: landing, taking off once, landing again.")
+                f"{self.rotations_done} turns and no new base in sight, and "
+                "nothing unseen left worth flying to — falling back: landing, "
+                "taking off once, landing again.")
             self.landing_for = self.LAND_FALLBACK
             self._begin_landing()
             return
@@ -1082,6 +1137,39 @@ class Phase1MissionNode(Node):
             f"turn {self.rotations_done + 1}/{self.max_rotations}: "
             f"heading for {math.degrees(self.setpoint[3]):.0f} deg.")
         self._enter(self.ROTATE)
+
+    def _next_viewpoint(self):
+        """Where to fly to see arena this spot cannot, or None.
+
+        None means the search is FINISHED rather than merely out of turns —
+        either the map has no unobserved space left worth the trip, or there is
+        no map to ask. The distinction matters: "I have looked everywhere" and
+        "I ran out of turns" deserve different endings, and only the first one
+        justifies going home.
+        """
+        if not self.coverage_search or self.pose is None:
+            return None
+        self.octree_tree = self._tree()
+        occ = self._occupancy()
+        if occ is None:
+            return None
+        try:
+            return coverage.next_viewpoint(
+                occ,
+                frm=(self.pose.pose.position.x, self.pose.pose.position.y),
+                yaw=yaw_of(self.pose),
+                bounds=self.plan_bounds,
+                z=self.takeoff_alt,
+                cell_m=self.coverage_cell_m,
+                viewpoint_m=self.coverage_viewpoint_m,
+                sensor_range=self.coverage_range_m,
+                min_gain=self.coverage_min_gain,
+                avoid=self._failed_viewpoints)
+        except Exception as exc:
+            # A search that throws must not take the mission with it: the
+            # fallback below is the behaviour this had before coverage existed.
+            self.get_logger().error(f"coverage search failed: {exc}")
+            return None
 
     # ── ROTATE ───────────────────────────────────────────────────────────────
 
@@ -1190,12 +1278,32 @@ class Phase1MissionNode(Node):
     def _on_travel_stalled(self, d: float):
         """The leg stopped closing. Give up on this target and search again.
 
-        The final return leg is NOT blacklisted and not abandoned: there is no
-        other candidate to fall back to and the takeoff base is where the run
-        has to end. Stalling there is reported and the leg is left running, so
-        the supervisor sees it and the vehicle keeps trying — which is the old
-        behaviour, kept exactly where it was the right one.
+        Three kinds of leg end up here and they deserve different endings:
+
+        * a **coverage** leg is going somewhere to LOOK, so there is no pad to
+          blacklist. What has to be remembered is the VIEWPOINT, or the next
+          sweep picks the same unreachable spot and the search loops between
+          turning eight times and failing to fly to the same place.
+        * a **pad** leg blacklists its target: it is unreachable from this
+          estimate, and resuming the search is what gives the estimate a chance
+          to change before anything else is tried.
+        * the **final return** leg is neither. There is no other candidate to
+          fall back to and the run has to end on the takeoff base, so stalling
+          there is reported and the leg is left running.
         """
+        if self._viewpoint_leg:
+            self.get_logger().warn(
+                f"could not reach the viewpoint at "
+                f"({self.setpoint[0]:.2f}, {self.setpoint[1]:.2f}) — stopped "
+                f"{d:.2f} m out. Not going back to it; resuming the search "
+                f"from here.")
+            self._failed_viewpoints.append(
+                (self.setpoint[0], self.setpoint[1]))
+            self._viewpoint_leg = False
+            self._leg = []
+            self._enter(self.SETTLE)
+            return
+
         if self.landing_for == self.LAND_FINAL:
             self.get_logger().error(
                 f"the return leg has not closed in {self.travel_stall_s:.0f} s "
