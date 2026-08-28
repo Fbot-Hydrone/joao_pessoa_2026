@@ -198,6 +198,103 @@ def next_viewpoint(occupancy, *, frm, yaw, bounds, z,
     return (best[1], best[2])
 
 
+def _inward_yaw(edge_a, edge_b, centre):
+    """Heading perpendicular to the edge a->b, pointing at the arena.
+
+    Fixed for the whole edge: the camera holds one attitude while the vehicle
+    translates, which is the entire reason this shape beats a circuit that
+    re-aims at every step.
+    """
+    ex, ey = edge_b[0] - edge_a[0], edge_b[1] - edge_a[1]
+    mx, my = (edge_a[0] + edge_b[0]) / 2.0, (edge_a[1] + edge_b[1]) / 2.0
+    # Both perpendiculars; keep the one that points towards the centre.
+    for nx, ny in ((-ey, ex), (ey, -ex)):
+        if (centre[0] - mx) * nx + (centre[1] - my) * ny > 0:
+            return math.atan2(ny, nx)
+    return math.atan2(centre[1] - my, centre[0] - mx)
+
+
+def u_sweep(bounds, *, inset_m=1.2, z=2.0, step_m=1.5, start_corner=2):
+    """Three sides of the arena, heading FIXED on each, as (x, y, z, yaw).
+
+    LEVEL 1 of the search. The vehicle takes off, translates along one edge
+    without rotating at all, turns 90 degrees at the corner, runs the next
+    edge, turns 90 degrees again, runs the third. Two turns in the whole
+    sweep, both at corners, and the camera faces INTO the arena throughout.
+
+    Why three sides and not four: from the third edge the camera already looks
+    back across everything the fourth would cover, so the fourth is a minute of
+    battery spent re-photographing what is already in the map.
+
+    Why fixed headings: every earlier shape failed on rotation. Spinning in
+    place cannot map an arena at all (no parallax). A rectangle that re-aims at
+    the centre each step turns CONTINUOUSLY along every edge. Turning only at
+    corners is what lets the detector work a stable scene and keeps the
+    odometry out of the manoeuvre this arena breaks it on.
+
+    `start_corner` indexes the inset rectangle's corners counter-clockwise from
+    (min_x, min_y). It should be the one nearest where the drone took off, so
+    the sweep starts without a transit leg.
+    """
+    (min_x, min_y, _), (max_x, max_y, _) = bounds
+    x0, x1 = min_x + inset_m, max_x - inset_m
+    y0, y1 = min_y + inset_m, max_y - inset_m
+    if x1 <= x0 or y1 <= y0:
+        return []
+    centre = ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
+
+    corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    k = start_corner % 4
+    order = [corners[(k + i) % 4] for i in range(4)]
+
+    out = []
+    for a, b in zip(order, order[1:]):          # three legs, not four
+        yaw = _inward_yaw(a, b, centre)
+        dist = math.hypot(b[0] - a[0], b[1] - a[1])
+        n = max(1, int(math.ceil(dist / step_m)))
+        for i in range(n + 1):
+            t = i / n
+            pt = (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, z, yaw)
+            if not out or out[-1][:2] != pt[:2]:
+                out.append(pt)
+    return out
+
+
+def lawnmower(bounds, *, inset_m=1.2, z=2.0, step_m=1.5, lane_m=1.5):
+    """Parallel lanes across the arena, alternating direction.
+
+    THE LAST RESORT. It is the most thorough shape there is and the most
+    expensive: it covers the floor at `lane_m` spacing instead of relying on
+    the camera reaching across the arena, so it finds a base that every other
+    level looked past — and it costs several times the flight time.
+
+    Heading follows the lane, flipping 180 degrees at each end, because at this
+    point the point is coverage of the ground beneath rather than a long view
+    across. That means many more turns than the U, which is exactly why it is
+    last and not first.
+    """
+    (min_x, min_y, _), (max_x, max_y, _) = bounds
+    x0, x1 = min_x + inset_m, max_x - inset_m
+    y0, y1 = min_y + inset_m, max_y - inset_m
+    if x1 <= x0 or y1 <= y0 or lane_m <= 0:
+        return []
+
+    out = []
+    y = y0
+    forward = True
+    while y <= y1 + 1e-9:
+        a, b = ((x0, y), (x1, y)) if forward else ((x1, y), (x0, y))
+        yaw = math.atan2(b[1] - a[1], b[0] - a[0])
+        dist = abs(b[0] - a[0])
+        n = max(1, int(math.ceil(dist / step_m)))
+        for i in range(n + 1):
+            t = i / n
+            out.append((a[0] + (b[0] - a[0]) * t, y, z, yaw))
+        forward = not forward
+        y += lane_m
+    return out
+
+
 def lateral_sweep(bounds, *, inset_m=1.2, z=2.0, step_m=1.5):
     """Two straight passes across the arena, as (x, y, z, yaw) points.
 

@@ -206,6 +206,7 @@ def test_a_candidate_found_after_settling_is_taken(node):
 def test_settling_with_nothing_in_the_map_starts_a_turn(node):
     node.survey_circuit = False     # this pins the local turn
     node.survey_done = True
+    node.max_search_level = 1       # and the ladder must not climb
     set_map(node)
     enter(node, node.SETTLE, age_s=5.0)
     node._do_settle()
@@ -216,6 +217,7 @@ def test_the_turn_is_clockwise(node):
     """ENU yaw runs counter-clockwise from east, so clockwise SUBTRACTS."""
     node.survey_circuit = False     # this pins the local turn
     node.survey_done = True
+    node.max_search_level = 1       # and the ladder must not climb
     set_map(node)
     node.setpoint = [0.0, 0.0, 1.0, 0.0]
     enter(node, node.SETTLE, age_s=5.0)
@@ -226,6 +228,7 @@ def test_the_turn_is_clockwise(node):
 def test_the_turn_wraps_rather_than_winding_up(node):
     node.survey_circuit = False     # this pins the local turn
     node.survey_done = True
+    node.max_search_level = 1       # and the ladder must not climb
     set_map(node)
     node.setpoint = [0.0, 0.0, 1.0, math.radians(-170.0)]
     enter(node, node.SETTLE, age_s=5.0)
@@ -269,6 +272,7 @@ def test_the_search_terminates(node):
     search gives up" is the arena floor."""
     set_map(node)
     node.survey_done = True              # the sweep is already over
+    node.max_search_level = 1            # and the ladder must not climb
     node.rotations_done = node.max_rotations
     node.coverage_search = False         # nothing left to look at
     enter(node, node.SETTLE, age_s=5.0)
@@ -282,6 +286,7 @@ def test_a_full_search_makes_exactly_max_rotations_turns(node):
     """Walk the real loop rather than trusting the counter arithmetic."""
     set_map(node)
     node.survey_done = True               # pin the ending, not the sweep
+    node.max_search_level = 1             # the ladder would reset the counter
     node.coverage_search = False          # no map here; pin the turn count
     enter(node, node.SETTLE, age_s=5.0)
     for _ in range(200):
@@ -536,6 +541,7 @@ def test_an_exhausted_search_flies_home_instead_of_landing_in_place(node):
     CERTAIN touchdown on the floor."""
     set_map(node, pad(0, 1.0, -0.5, takeoff_base=True))
     node.survey_done = True
+    node.max_search_level = 1
     node.rotations_done = node.max_rotations
     node.coverage_search = False
     enter(node, node.SETTLE, age_s=5.0)
@@ -835,11 +841,13 @@ def test_the_survey_flies_instead_of_spinning(node):
     assert node._survey_path is not None
 
 
-def test_the_sweep_ends_the_survey_when_it_runs_out(node):
+def test_the_sweep_ends_the_survey_when_it_has_found_the_quota(node):
     node.survey_done = False
     node.survey_circuit = True
+    node.target_bases = 1
+    node.home = (9.0, 9.0)
     node._survey_path = []                 # already flown
-    set_map(node)
+    set_map(node, pad(1, 2.0, 0.0))
     enter(node, node.SETTLE, age_s=5.0)
     node._do_settle()
     assert node.survey_done
@@ -944,7 +952,7 @@ def test_a_candidate_is_not_chased_before_the_sweep_is_flown(node):
         "chased a pad before sweeping the arena"
 
 
-def test_the_sweep_climbs_above_the_house(node):
+def test_level_1_climbs_above_the_house(node):
     """The passes cross the house, whose roof is 1.5 m in the competition
     arena, and the cruise height is 1 m. Taking the sweep altitude from
     takeoff_alt would fly the drone into it."""
@@ -957,18 +965,17 @@ def test_the_sweep_climbs_above_the_house(node):
     assert node.setpoint[2] == pytest.approx(node.survey_alt)
 
 
-def test_the_sweep_holds_one_heading_per_pass(node):
-    """The rectangle it replaced re-aimed the camera at every step, so it
-    turned continuously along every edge."""
+def test_level_1_holds_one_heading_per_leg(node):
+    """The U turns twice, at its corners. The rectangle it replaced re-aimed
+    the camera at every step, so it turned continuously along every edge."""
     node.survey_done = False
     node.survey_circuit = True
     set_map(node)
     enter(node, node.SETTLE, age_s=5.0)
     node._do_settle()
     yaws = [p[3] for p in ([(0, 0, 0, node.setpoint[3])] + node._survey_path)]
-    changes = sum(1 for a, b in zip(yaws, yaws[1:]) if abs(a - b) > 1e-9)
-    assert changes == 1, f"turned {changes} times across the whole sweep"
-
+    turns = sum(1 for a, b in zip(yaws, yaws[1:]) if abs(a - b) > 1e-9)
+    assert turns == 2, f"turned {turns} times; the U turns twice"
 
 def test_a_refused_takeoff_gives_up_instead_of_looping_for_ever(node):
     """TAKEOFF bounces back to ARMING on every refusal. Clearing the counter on
@@ -996,3 +1003,131 @@ def test_a_new_landing_cycle_gets_its_takeoff_tries_back(node):
     enter(node, node.DWELL, age_s=999.0)
     node._do_dwell()
     assert node._takeoff_tries == 0
+
+
+# ── The search ladder ────────────────────────────────────────────────────────
+#
+# Each level exists because the one before it can miss a base, and each costs
+# more — which is the whole reason for a ladder rather than starting with the
+# thorough one.
+
+def fly_the_whole_level(node):
+    """Consume the current level's path without moving the vehicle."""
+    node._survey_path = []
+
+
+def test_a_level_that_finds_everything_stops_the_search(node):
+    node.survey_done = False
+    node.target_bases = 2
+    node.home = (9.0, 9.0)
+    set_map(node, pad(1, 2.0, 0.0), pad(2, -2.0, 1.0))
+    node._begin_level()
+    fly_the_whole_level(node)
+    enter(node, node.SETTLE, age_s=5.0)
+    node._do_settle()
+    assert node.survey_done
+    assert node.state == node.SELECT
+    assert node._level == 1, "escalated despite having found everything"
+
+
+def test_a_level_that_falls_short_escalates(node):
+    node.survey_done = False
+    node.target_bases = 6
+    node.home = (9.0, 9.0)
+    set_map(node, pad(1, 2.0, 0.0))
+    node._begin_level()
+    fly_the_whole_level(node)
+    enter(node, node.SETTLE, age_s=5.0)
+    node._do_settle()
+    assert node._level == 2
+    assert not node.survey_done
+    assert node._survey_path is None, "must rebuild the path for the new level"
+
+
+def test_level_2_is_the_same_shape_half_a_metre_higher(node):
+    """A base seen edge-on from below, or hidden by the house, opens up from
+    higher — raising the camera changes the geometry without changing the
+    flight."""
+    node._level = 1
+    node._begin_level()
+    low = [p[2] for p in node._survey_path]
+    node._level = 2
+    node._begin_level()
+    high = [p[2] for p in node._survey_path]
+    assert high[0] == pytest.approx(low[0] + node.level2_climb_m)
+    assert len(high) == len(low), "level 2 is the same shape, not a new one"
+
+
+def test_level_3_has_no_path_and_hands_over_to_rotate_and_relief(node):
+    """That is where an ELEVATED base is caught: the ground-plane projection
+    cannot place one, so the blue detector's answer for it is in the wrong
+    place however well it was seen."""
+    node._level = 3
+    assert node._begin_level()
+    assert node._survey_path == []
+    assert node.survey_done
+
+
+def test_level_4_is_the_lawnmower_and_costs_much_more(node):
+    node._level = 1
+    node._begin_level()
+    u = len(node._survey_path)
+    node._level = 4
+    node._begin_level()
+    assert len(node._survey_path) > u
+
+
+def test_the_ladder_stops_at_the_top(node):
+    node._level = 99
+    assert not node._begin_level()
+
+
+def test_the_ladder_can_be_capped(node):
+    """Lower max_search_level to cap what an attempt may cost."""
+    node.max_search_level = 1
+    node.survey_done = True
+    node.survey_circuit = False
+    node.landed_count = 0
+    node.target_bases = 6
+    node.home = (9.0, 9.0)
+    node.coverage_search = False
+    node.relief_leads = False
+    node.pub_relief = None
+    node.rotations_done = node.max_rotations
+    set_map(node, pad(0, 1.0, -0.5, takeoff_base=True))
+    enter(node, node.SETTLE, age_s=5.0)
+    node._do_settle()
+    assert node.state == node.TRAVEL
+    assert node.landing_for == node.LAND_FINAL, "kept climbing past the cap"
+
+
+def test_the_sweep_starts_at_the_corner_the_drone_is_nearest(node):
+    """So it starts where it already is instead of transiting first."""
+    set_pose(node, 3.5, 3.5)
+    node._level = 1
+    node._begin_level()
+    assert node._survey_path[0][0] > 0
+    assert node._survey_path[0][1] > 0
+
+
+def test_an_abort_returns_to_level_one(node):
+    node._level = 4
+    node._reset()
+    assert node._level == 1
+
+
+def test_level_3_actually_runs_instead_of_being_judged_flown_at_once(node):
+    """It has no path of its own — it is the rotate-and-investigate behaviour
+    further down _do_settle. MEASURED 2026-08-28: without the hand-over,
+    level 3 escalated 0.08 s after starting and never ran."""
+    node._level = 3
+    node.survey_done = False
+    node.survey_circuit = True
+    node._survey_path = None
+    node.target_bases = 6
+    node.home = (9.0, 9.0)
+    set_map(node)
+    enter(node, node.SETTLE, age_s=5.0)
+    node._do_settle()
+    assert node._level == 3, "escalated past level 3 without running it"
+    assert node.survey_done

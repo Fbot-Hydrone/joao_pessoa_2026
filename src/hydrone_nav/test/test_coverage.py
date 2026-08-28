@@ -252,3 +252,115 @@ def test_an_arena_smaller_than_the_inset_yields_no_sweep():
     from hydrone_nav.coverage import lateral_sweep
     assert lateral_sweep(((-1.0, -1.0, 0.0), (1.0, 1.0, 2.0)),
                          inset_m=2.0) == []
+
+
+# ── LEVEL 1: the U ───────────────────────────────────────────────────────────
+#
+# Take off, run one edge without rotating at all, 90 degrees at the corner, run
+# the next, 90 degrees again, run the third. Two turns in the whole sweep, both
+# at corners, camera facing into the arena throughout.
+
+B8 = ((-4.0, -4.0, 0.0), (4.0, 4.0, 2.5))
+
+
+def test_the_u_turns_only_at_its_two_corners():
+    """Every earlier shape failed on rotation: spinning has no parallax, and a
+    circuit that re-aims at the centre turns continuously along every edge."""
+    from hydrone_nav.coverage import u_sweep
+    pts = u_sweep(B8, inset_m=1.0, step_m=1.5)
+    yaws = [p[3] for p in pts]
+    turns = sum(1 for a, b in zip(yaws, yaws[1:]) if abs(a - b) > 1e-9)
+    assert turns == 2, f"turned {turns} times; the U turns twice"
+
+
+def test_each_leg_of_the_u_turns_ninety_degrees():
+    from hydrone_nav.coverage import u_sweep
+    pts = u_sweep(B8, inset_m=1.0, step_m=1.5)
+    yaws = [p[3] for p in pts]
+    for a, b in zip(yaws, yaws[1:]):
+        d = abs((b - a + math.pi) % (2 * math.pi) - math.pi)
+        assert d < 1e-9 or abs(d - math.pi / 2) < 1e-6
+
+
+def test_the_camera_faces_into_the_arena_on_every_leg():
+    """Aimed outward the sweep photographs the four walls."""
+    from hydrone_nav.coverage import u_sweep
+    for x, y, _, yaw in u_sweep(B8, inset_m=1.0):
+        to_centre = math.atan2(-y, -x)
+        err = abs((yaw - to_centre + math.pi) % (2 * math.pi) - math.pi)
+        assert err < math.pi / 2, f"({x:.1f}, {y:.1f}) looks out of the arena"
+
+
+def test_the_u_covers_three_sides_not_four():
+    """From the third edge the camera already looks back across what a fourth
+    would cover, so the fourth is battery spent re-photographing the map."""
+    from hydrone_nav.coverage import u_sweep
+    pts = u_sweep(B8, inset_m=1.0, step_m=10.0)     # corners only
+    sides = {round(p[3], 6) for p in pts}
+    assert len(sides) == 3
+
+
+def test_the_u_starts_at_the_corner_it_is_told_to():
+    """It should be the one nearest where the drone took off, so the sweep
+    starts without a transit leg."""
+    from hydrone_nav.coverage import u_sweep
+    for k in range(4):
+        pts = u_sweep(B8, inset_m=1.0, step_m=10.0, start_corner=k)
+        corners = [(-3.0, -3.0), (3.0, -3.0), (3.0, 3.0), (-3.0, 3.0)]
+        assert pts[0][:2] == pytest.approx(corners[k])
+
+
+def test_the_u_stays_inside_the_arena():
+    from hydrone_nav.coverage import u_sweep
+    for x, y, _, _ in u_sweep(B8, inset_m=1.0):
+        assert -3.0 - 1e-9 <= x <= 3.0 + 1e-9
+        assert -3.0 - 1e-9 <= y <= 3.0 + 1e-9
+
+
+def test_the_u_carries_its_altitude():
+    """LEVEL 2 is the same shape half a metre higher, so this has to be a
+    parameter and not a constant."""
+    from hydrone_nav.coverage import u_sweep
+    assert all(p[2] == pytest.approx(2.5) for p in u_sweep(B8, z=2.5))
+
+
+# ── LAST RESORT: the lawnmower ───────────────────────────────────────────────
+
+def test_the_lawnmower_lays_parallel_lanes():
+    from hydrone_nav.coverage import lawnmower
+    pts = lawnmower(B8, inset_m=1.0, lane_m=1.5)
+    lanes = sorted({round(p[1], 6) for p in pts})
+    assert len(lanes) >= 4
+    gaps = [b - a for a, b in zip(lanes, lanes[1:])]
+    assert all(g == pytest.approx(1.5) for g in gaps)
+
+
+def test_the_lawnmower_alternates_direction():
+    """Boustrophedon: it does not fly back to the start of every lane."""
+    from hydrone_nav.coverage import lawnmower
+    pts = lawnmower(B8, inset_m=1.0, lane_m=1.5)
+    yaws = sorted({round(p[3], 6) for p in pts})
+    assert len(yaws) == 2
+    assert abs(abs(yaws[1] - yaws[0]) - math.pi) < 1e-6
+
+
+def test_the_lawnmower_costs_more_than_the_u_and_more_as_it_tightens():
+    """Which is exactly why it is the last level and not the first. At the
+    lane spacing that actually guarantees coverage it is several times the
+    flight."""
+    from hydrone_nav.coverage import lawnmower, u_sweep
+    u = len(u_sweep(B8, inset_m=1.0))
+    assert len(lawnmower(B8, inset_m=1.0, lane_m=1.5)) > u
+    assert len(lawnmower(B8, inset_m=1.0, lane_m=0.8)) > 2 * u
+
+
+def test_a_finer_lane_spacing_covers_more_thoroughly():
+    from hydrone_nav.coverage import lawnmower
+    assert len(lawnmower(B8, lane_m=1.0)) > len(lawnmower(B8, lane_m=2.0))
+
+
+def test_neither_shape_survives_an_arena_smaller_than_the_inset():
+    from hydrone_nav.coverage import lawnmower, u_sweep
+    tiny = ((-1.0, -1.0, 0.0), (1.0, 1.0, 2.0))
+    assert u_sweep(tiny, inset_m=2.0) == []
+    assert lawnmower(tiny, inset_m=2.0) == []

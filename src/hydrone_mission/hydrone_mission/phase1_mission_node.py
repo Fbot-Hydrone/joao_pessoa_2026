@@ -315,6 +315,15 @@ class Phase1MissionNode(Node):
         # the 1 m cruise height they would fly INTO it. Higher also widens what
         # each pass sees.
         self.declare_parameter("survey_alt_m", 2.0)
+        # LEVEL 2 is the same U this much higher. Half a metre changes what the
+        # camera can see over and past without changing the flight.
+        self.declare_parameter("level2_climb_m", 0.5)
+        # LEVEL 4's lane spacing. Tighter is more thorough and costs
+        # proportionally more flight.
+        self.declare_parameter("lawnmower_lane_m", 1.5)
+        # How far the ladder is allowed to climb. 4 spends everything; lower it
+        # to cap what an attempt may cost.
+        self.declare_parameter("max_search_level", 4)
         self.declare_parameter("survey_max_viewpoints", 8)
         self.declare_parameter("survey_max_stalls", 2)
         # How much the predicted gain must fall for a trip to count as
@@ -438,6 +447,10 @@ class Phase1MissionNode(Node):
         self.survey_inset_m = float(p("survey_inset_m"))
         self.survey_step_m = float(p("survey_step_m"))
         self.survey_alt = float(p("survey_alt_m"))
+        self.level2_climb_m = float(p("level2_climb_m"))
+        self.lawnmower_lane_m = float(p("lawnmower_lane_m"))
+        self.max_search_level = int(p("max_search_level"))
+        self._level = 1
         self._survey_path = None
         self.survey_max_viewpoints = int(p("survey_max_viewpoints"))
         self.survey_max_stalls = int(p("survey_max_stalls"))
@@ -757,6 +770,7 @@ class Phase1MissionNode(Node):
         self._survey_last_gain = None
         # A new attempt sweeps again, whatever the last one flew.
         self._survey_path = None
+        self._level = 1
 
     # ────────────────────────────────────────────────────────────────────────
     # Setpoint stream
@@ -1243,27 +1257,41 @@ class Phase1MissionNode(Node):
         # house, whose roof is at 1.5 m, and the cruise height is 1 m.
         if not self.survey_done and self.survey_circuit:
             if self._survey_path is None:
-                self._survey_path = coverage.lateral_sweep(
-                    self.plan_bounds, inset_m=self.survey_inset_m,
-                    z=self.survey_alt, step_m=self.survey_step_m)
-                self.get_logger().info(
-                    f"SURVEY: two passes at {self.survey_alt:.1f} m, "
-                    f"{len(self._survey_path)} points, heading FIXED in each — "
-                    f"across the arena one way, then back looking the other.")
+                if not self._begin_level():
+                    # No level left. Land on whatever was found.
+                    self.survey_done = True
+                    self._enter(self.SELECT)
+                    return
+                if self.survey_done:
+                    # A level with no path of its own (level 3 is the
+                    # rotate-and-investigate behaviour further down). Hand over
+                    # rather than judging it flown on the spot — MEASURED
+                    # 2026-08-28, without this level 3 escalated 0.08 s after
+                    # starting and never ran at all.
+                    return
             if self._survey_path:
                 x, y, z, yaw = self._survey_path.pop(0)
-                self._viewpoint_leg = True      # to LOOK: never confirms, never lands
+                self._viewpoint_leg = True   # to LOOK: never confirms, never lands
                 self._goto_via_map(x, y, z, yaw)
                 self._enter(self.TRAVEL)
                 return
-            self.survey_done = True
+
+            # This level is flown. Did it find enough?
             self._harvest_relief()
-            n = sum(1 for p in (self.pad_map.pads if self.pad_map else [])
-                    if self._is_candidate(p))
-            self.get_logger().info(
-                f"SURVEY COMPLETE — circuit flown, {n} candidate base(s) in "
-                f"the map. Landing phase begins.")
-            self._enter(self.SELECT)
+            found = self._candidate_count()
+            if found + self.landed_count >= self.target_bases:
+                self.survey_done = True
+                self.get_logger().info(
+                    f"SEARCH LEVEL {self._level} found all "
+                    f"{self.target_bases} base(s) — landing phase begins.")
+                self._enter(self.SELECT)
+                return
+
+            self.get_logger().warn(
+                f"SEARCH LEVEL {self._level} flown and only {found} of "
+                f"{self.target_bases} base(s) are in the map — escalating.")
+            self._level += 1
+            self._survey_path = None
             return
 
         # ── 2. land on what was found ───────────────────────────────────────
@@ -1330,7 +1358,23 @@ class Phase1MissionNode(Node):
             self._enter(self.TRAVEL)
             return
 
-        # ── 5. home ─────────────────────────────────────────────────────────
+        # ── 5. escalate, or go home ─────────────────────────────────────────
+        #
+        # Level 3 (rotate + relief) has no path of its own, so it ends here:
+        # out of candidates, out of viewpoints, quota unmet. That is the moment
+        # to spend the expensive level rather than to give up.
+        if (self.landed_count < self.target_bases
+                and self._level < self.max_search_level):
+            self._level += 1
+            self._survey_path = None
+            self.survey_done = False
+            self.rotations_done = 0
+            self.get_logger().warn(
+                f"still {self.landed_count}/{self.target_bases} base(s) and "
+                f"level {self._level - 1} is spent — escalating to search "
+                f"level {self._level}.")
+            return
+
         hx, hy = self._takeoff_base_xy()
         self.get_logger().warn(
             f"nothing left to find — returning to the takeoff base at "
@@ -1341,6 +1385,95 @@ class Phase1MissionNode(Node):
         self._viewpoint_leg = False
         self._goto_via_map(hx, hy, self.takeoff_alt, self.setpoint[3])
         self._enter(self.TRAVEL)
+
+    def _candidate_count(self) -> int:
+        """Bases in the map that are still worth flying to."""
+        pads = self.pad_map.pads if self.pad_map else []
+        return sum(1 for p in pads if self._is_candidate(p))
+
+    def _begin_level(self) -> bool:
+        """Build the path for the current search level. False when none is left.
+
+        LEVELS, in the order they are spent. Each exists because the one before
+        it can miss a base, and each costs more than the one before — which is
+        the whole reason for the ladder rather than starting with the thorough
+        one.
+
+          1  the U at cruise height. Three sides, two corner turns, camera
+             facing in. Cheapest shape that sees the whole floor.
+          2  the same U half a metre higher. A base the first pass saw
+             edge-on, or that the house occluded, opens up from higher —
+             raising the camera changes the geometry without changing the
+             flight.
+          3  turn on the spot and investigate the RELIEF the occupancy map
+             found. This is where an ELEVATED base is caught: the ground-plane
+             projection cannot place one, so the blue detector's answer for it
+             is in the wrong place however well it was seen.
+          4  the lawnmower. Lanes across the whole arena, several times the
+             flight time, and it finds what every other level looked past.
+
+        Level 3 has no path — it is the rotate-and-investigate behaviour that
+        the rest of _do_settle already implements, so this returns an empty
+        list for it and lets the sweep fall through.
+        """
+        if self._level == 1:
+            self._survey_path = coverage.u_sweep(
+                self.plan_bounds, inset_m=self.survey_inset_m,
+                z=self.survey_alt, step_m=self.survey_step_m,
+                start_corner=self._nearest_corner())
+            self.get_logger().info(
+                f"SEARCH LEVEL 1: the U at {self.survey_alt:.1f} m — "
+                f"{len(self._survey_path)} points, two corner turns, camera "
+                f"facing into the arena.")
+            return True
+
+        if self._level == 2:
+            z = self.survey_alt + self.level2_climb_m
+            self._survey_path = coverage.u_sweep(
+                self.plan_bounds, inset_m=self.survey_inset_m, z=z,
+                step_m=self.survey_step_m,
+                start_corner=self._nearest_corner())
+            self.get_logger().info(
+                f"SEARCH LEVEL 2: the same U at {z:.1f} m — a base seen "
+                f"edge-on from below, or hidden by the house, opens up from "
+                f"higher.")
+            return True
+
+        if self._level == 3:
+            # No path: the rotate-and-investigate behaviour below is level 3.
+            self._survey_path = []
+            self.get_logger().info(
+                "SEARCH LEVEL 3: turning on the spot and investigating the "
+                "relief the occupancy map found — where an ELEVATED base "
+                "hides, because the ground-plane projection cannot place one.")
+            self.survey_done = True
+            return True
+
+        if self._level == 4:
+            self._survey_path = coverage.lawnmower(
+                self.plan_bounds, inset_m=self.survey_inset_m,
+                z=self.survey_alt, step_m=self.survey_step_m,
+                lane_m=self.lawnmower_lane_m)
+            self.get_logger().warn(
+                f"SEARCH LEVEL 4 (last resort): lawnmower, "
+                f"{len(self._survey_path)} points at {self.lawnmower_lane_m:.1f} m "
+                f"lanes. Several times the flight of the U, and it finds what "
+                f"every other level looked past.")
+            return True
+
+        return False
+
+    def _nearest_corner(self) -> int:
+        """Which inset corner the vehicle is closest to, so the sweep starts
+        where it already is instead of transiting first."""
+        (min_x, min_y, _), (max_x, max_y, _) = self.plan_bounds
+        i = self.survey_inset_m
+        corners = [(min_x + i, min_y + i), (max_x - i, min_y + i),
+                   (max_x - i, max_y - i), (min_x + i, max_y - i)]
+        if self.pose is None:
+            return 0
+        here = (self.pose.pose.position.x, self.pose.pose.position.y)
+        return min(range(4), key=lambda k: math.dist(corners[k], here))
 
     def _relief_leads_left(self) -> bool:
         """Is there relief that has not already been turned into a lead?"""
