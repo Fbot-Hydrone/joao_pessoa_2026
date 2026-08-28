@@ -195,6 +195,7 @@ def test_the_map_is_not_read_before_the_settle_window_closes(node):
 
 
 def test_a_candidate_found_after_settling_is_taken(node):
+    node.survey_done = True               # the landing phase
     node.home = (9.0, 9.0)
     set_map(node, pad(1, 2.0, 0.0))
     enter(node, node.SETTLE, age_s=5.0)
@@ -259,6 +260,7 @@ def test_the_search_terminates(node):
     landing is eliminatory, and "where the vehicle happens to be when the
     search gives up" is the arena floor."""
     set_map(node)
+    node.survey_done = True              # the sweep is already over
     node.rotations_done = node.max_rotations
     node.coverage_search = False         # nothing left to look at
     enter(node, node.SETTLE, age_s=5.0)
@@ -271,6 +273,7 @@ def test_the_search_terminates(node):
 def test_a_full_search_makes_exactly_max_rotations_turns(node):
     """Walk the real loop rather than trusting the counter arithmetic."""
     set_map(node)
+    node.survey_done = True               # pin the ending, not the sweep
     node.coverage_search = False          # no map here; pin the turn count
     enter(node, node.SETTLE, age_s=5.0)
     for _ in range(200):
@@ -524,6 +527,7 @@ def test_an_exhausted_search_flies_home_instead_of_landing_in_place(node):
     backwards against an eliminatory rule: a risky leg to a real base beats a
     CERTAIN touchdown on the floor."""
     set_map(node, pad(0, 1.0, -0.5, takeoff_base=True))
+    node.survey_done = True
     node.rotations_done = node.max_rotations
     node.coverage_search = False
     enter(node, node.SETTLE, age_s=5.0)
@@ -664,6 +668,7 @@ def test_the_anchor_says_nothing_without_a_home(node, capfd):
 # base outside that cone never existed to it.
 
 def exhaust_the_turns(node):
+    node._harvest_relief = lambda: None
     node.rotations_done = node.max_rotations
     enter(node, node.SETTLE, age_s=node.settle_s + 1.0)
     set_map(node)                       # no candidate to distract SELECT
@@ -694,6 +699,7 @@ def test_nothing_left_to_see_ends_the_run_at_the_takeoff_base(node,
     """None means the search is FINISHED, not merely out of turns — and that
     is the case that justifies going home."""
     monkeypatch.setattr(node, "_next_viewpoint", lambda: None)
+    node.survey_done = True
     exhaust_the_turns(node)
     node._do_settle()
     assert node.state == node.TRAVEL
@@ -821,3 +827,111 @@ def test_planning_never_crosses_unmapped_space_by_default(node):
     unknown traversable the cheapest detour runs through the part of the arena
     nothing has mapped — which is where the unseen walls are."""
     assert node.plan_allow_unknown is False
+
+
+# ── Survey first, land second ────────────────────────────────────────────────
+
+def test_a_candidate_found_during_the_survey_is_remembered_not_chased(node):
+    """Running at the first sighting is explore-nothing/exploit-everything in
+    the worst order: the battery goes on whichever base happened to be in
+    front of the camera at takeoff, and the ones never turned towards are
+    never found at all."""
+    node.survey_done = False
+    node.home = (9.0, 9.0)
+    set_map(node, pad(1, 2.0, 0.0))
+    enter(node, node.SETTLE, age_s=5.0)
+    node._do_settle()
+    assert node.state != node.SELECT, "chased a pad during the survey"
+    assert node.state == node.ROTATE
+
+
+def test_the_same_candidate_is_taken_once_the_survey_is_done(node):
+    node.survey_done = True
+    node.home = (9.0, 9.0)
+    set_map(node, pad(1, 2.0, 0.0))
+    enter(node, node.SETTLE, age_s=5.0)
+    node._do_settle()
+    assert node.state == node.SELECT
+
+
+def test_the_survey_ends_when_nothing_unseen_is_left(node, monkeypatch):
+    """None from the coverage search means FINISHED, not out of turns — and
+    that is what starts the landing phase rather than ending the run."""
+    monkeypatch.setattr(node, "_next_viewpoint", lambda: None)
+    monkeypatch.setattr(node, "_harvest_relief", lambda: None)
+    node.survey_done = False
+    exhaust_the_turns(node)
+    node._do_settle()
+    assert node.survey_done
+    assert node.state == node.SELECT
+
+
+def test_an_abort_restarts_the_survey(node):
+    """A new attempt has not swept anything, whatever the last one learned."""
+    node.survey_done = True
+    node._relief_seen.append((1.0, 1.0))
+    node._reset()
+    assert not node.survey_done
+    assert node._relief_seen == []
+
+
+# ── Relief leads ─────────────────────────────────────────────────────────────
+
+def test_relief_is_published_below_the_detector_s_own_floor(node):
+    """Relief is a reason to go LOOK, not a sighting of a pad — nothing has
+    said this is blue. It must not outvote the camera in the map's fusion."""
+    assert node.relief_confidence < 0.5
+
+
+def test_relief_can_be_turned_off(node):
+    node.relief_leads = False
+    node.pub_relief = None
+    node._harvest_relief()          # must not raise
+
+
+def test_the_survey_stops_when_it_stops_learning(node):
+    """The predicted gain is optimistic — it credits everything in range with
+    line of sight, while the octomap only integrates what the depth camera
+    actually swept. MEASURED 2026-08-28: 28, 27, 27 across three trips and
+    never near zero, so a survey that waits for it to run out never ends."""
+    node.survey_max_stalls = 2
+    node.survey_progress_cells = 5
+    assert node._survey_gain_is_real(28)      # first, nothing to compare
+    assert node._survey_gain_is_real(27)      # no real progress: strike 1
+    assert not node._survey_gain_is_real(27)  # strike 2 -> the sweep is over
+
+
+def test_real_progress_resets_the_patience(node):
+    node.survey_max_stalls = 2
+    node.survey_progress_cells = 5
+    assert node._survey_gain_is_real(40)
+    assert node._survey_gain_is_real(39)      # strike 1
+    assert node._survey_gain_is_real(20)      # learned something: reset
+    assert node._survey_gain_is_real(19)      # strike 1 again
+    assert not node._survey_gain_is_real(19)
+
+
+def test_the_survey_is_capped_by_viewpoints_flown(node, monkeypatch):
+    """Phase 1 allows 3 attempts in 30 minutes. A sweep that eats the attempt
+    has cost the run whatever it learned."""
+    monkeypatch.setattr(node, "_harvest_relief", lambda: None)
+    monkeypatch.setattr(node, "_next_viewpoint", lambda: ((3.0, 2.0), 99))
+    node.survey_max_viewpoints = 0            # budget already spent
+    node.survey_done = False
+    exhaust_the_turns(node)
+    node._do_settle()
+    assert node.survey_done
+    assert node.state == node.SELECT
+
+
+def test_a_visited_viewpoint_is_not_chosen_again(node, monkeypatch):
+    """MEASURED 2026-08-28: without this the survey went back to (-1.00, 3.00)
+    three times in a row — arriving taught it almost nothing, so the same spot
+    still scored best afterwards."""
+    monkeypatch.setattr(node, "_harvest_relief", lambda: None)
+    monkeypatch.setattr(node, "_next_viewpoint", lambda: ((3.0, 2.0), 99))
+    node.survey_done = False
+    exhaust_the_turns(node)
+    node._do_settle()
+    assert (3.0, 2.0) in node._failed_viewpoints
+    assert node._survey_visits == 1

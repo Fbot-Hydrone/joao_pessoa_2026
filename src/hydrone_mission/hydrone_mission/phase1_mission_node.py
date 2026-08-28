@@ -121,6 +121,7 @@ from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
                        ReliabilityPolicy)
 
 from geometry_msgs.msg import PoseStamped
+from nav_msgs.msg import Path
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
@@ -129,7 +130,7 @@ from mavros_msgs.srv import CommandBool, CommandTOL, SetMode
 
 from octomap_msgs.msg import Octomap
 
-from hydrone_map import octree
+from hydrone_map import octree, relief
 from hydrone_nav import coverage, planner, route
 from hydrone_msgs.msg import PadDetection, PadMap
 from hydrone_msgs.srv import MarkPadVisited, RegisterTakeoffBase
@@ -292,6 +293,33 @@ class Phase1MissionNode(Node):
         # Fewer newly visible cells than this does not pay for the drift the
         # trip costs.
         self.declare_parameter("coverage_min_gain", 4)
+        # Turn isolated relief in the occupancy map into weak candidates to
+        # investigate. See _harvest_relief.
+        # The survey cannot run for ever. Phase 1 allows 3 attempts in 30
+        # minutes, so a sweep that eats the attempt has cost the run whatever
+        # it learned. These are the two ways it ends other than running out of
+        # unseen arena.
+        self.declare_parameter("survey_max_viewpoints", 8)
+        self.declare_parameter("survey_max_stalls", 2)
+        # How much the predicted gain must fall for a trip to count as
+        # learning something.
+        self.declare_parameter("survey_progress_cells", 5)
+        self.declare_parameter("relief_leads", True)
+        # Deliberately BELOW the detector's own floor: relief is a reason to go
+        # look, not a sighting of a pad, and it must not outvote the camera in
+        # the map's fusion.
+        self.declare_parameter("relief_confidence", 0.35)
+        # Two relief hits this close are the same lump seen twice.
+        self.declare_parameter("relief_merge_m", 0.8)
+        # Regions the relief scan ignores, flattened [min_x, min_y, max_x,
+        # max_y, ...]. The house by default: it is known, it is big, and it
+        # would otherwise dominate every cluster. From config.yaml's `house`.
+        self.declare_parameter("relief_exclude",
+                               [-4.0, 2.0, 2.0, 4.0])
+        # Where the planned route is published for RViz. Informational only —
+        # nothing in the mission reads it back.
+        self.declare_parameter("out_plan", "/hydrone/nav/plan")
+        self.declare_parameter("out_relief", "/hydrone/pads/detections")
         self.declare_parameter("fresh_detection_s", 1.0)
 
         # ── Landing, and the plumbing ───────────────────────────────────────
@@ -390,6 +418,21 @@ class Phase1MissionNode(Node):
         self.coverage_viewpoint_m = float(p("coverage_viewpoint_m"))
         self.coverage_range_m = float(p("coverage_range_m"))
         self.coverage_min_gain = int(p("coverage_min_gain"))
+        self.survey_max_viewpoints = int(p("survey_max_viewpoints"))
+        self.survey_max_stalls = int(p("survey_max_stalls"))
+        self.survey_progress_cells = int(p("survey_progress_cells"))
+        self._survey_visits = 0
+        self._survey_stalls = 0
+        self._survey_last_gain = None
+        self.relief_leads = bool(p("relief_leads"))
+        self.relief_confidence = float(p("relief_confidence"))
+        self.relief_merge_m = float(p("relief_merge_m"))
+        e = [float(v) for v in p("relief_exclude")]
+        self.relief_exclude = [tuple(e[i:i + 4]) for i in range(0, len(e), 4)]
+        self._relief_seen: list[tuple[float, float]] = []
+        # False until the arena has been swept. See _do_settle: a candidate
+        # found during the sweep is remembered, not flown to.
+        self.survey_done = False
         self.fresh_s = float(p("fresh_detection_s"))
         self.dwell_s = float(p("dwell_s"))
         self.land_timeout = float(p("land_timeout_s"))
@@ -482,6 +525,9 @@ class Phase1MissionNode(Node):
         # including one added later by someone who never read this comment.
         # _stream, _set_mode and _start_call all refuse on None, so the failure
         # mode of forgetting a guard is a log line, not a spinning motor.
+        self.pub_plan = self.create_publisher(Path, p("out_plan"), 10)
+        self.pub_relief = (self.create_publisher(
+            PadDetection, p("out_relief"), 10) if self.relief_leads else None)
         self.pub_sp = None if self.dry_run else self.create_publisher(
             PoseStamped, "/mavros/setpoint_position/local", 10)
         self.pub_status = self.create_publisher(
@@ -682,6 +728,11 @@ class Phase1MissionNode(Node):
         self._travel_best = None
         self._viewpoint_leg = False
         self._failed_viewpoints.clear()
+        self.survey_done = False
+        self._relief_seen.clear()
+        self._survey_visits = 0
+        self._survey_stalls = 0
+        self._survey_last_gain = None
 
     # ────────────────────────────────────────────────────────────────────────
     # Setpoint stream
@@ -737,6 +788,8 @@ class Phase1MissionNode(Node):
         self._leg = []
         self._blocked_target = False
         target = (x, y, z)
+        here = (self.pose.pose.position.x, self.pose.pose.position.y,
+                self.pose.pose.position.z)
         # Decoded once, here, and used for every question this leg asks.
         self.octree_tree = self._tree()
         occ = self._occupancy()
@@ -745,10 +798,9 @@ class Phase1MissionNode(Node):
                 "no occupancy map — flying the leg straight, unchecked",
                 throttle_duration_sec=20.0)
             self._goto(x, y, z, yaw)
+            self._publish_plan([here, target], yaw)
             return
 
-        here = (self.pose.pose.position.x, self.pose.pose.position.y,
-                self.pose.pose.position.z)
         # `path_hits_obstacle`, not `path_is_clear_inflated`. The strict
         # version demands the whole leg be MEASURED empty, and in a
         # half-explored arena almost no leg is — every one would be reported
@@ -756,6 +808,7 @@ class Phase1MissionNode(Node):
         # detour is something actually in the way.
         if not octree.path_hits_obstacle(self.octree_tree, here, target):
             self._goto(x, y, z, yaw)
+            self._publish_plan([here, target], yaw)
             return
 
         self.get_logger().warn(
@@ -796,6 +849,7 @@ class Phase1MissionNode(Node):
             f"planned {len(path)} waypoints around the obstruction")
         # path[0] is where we already are; the rest are the leg.
         self._leg = [(p[0], p[1], p[2], yaw) for p in path[1:]]
+        self._publish_plan(path, yaw)
         wx, wy, wz, wyaw = self._leg.pop(0)
         self._goto(wx, wy, wz, wyaw)
 
@@ -1117,8 +1171,17 @@ class Phase1MissionNode(Node):
         if self._since_entered() < self.settle_s:
             return
 
+        # SURVEY FIRST. Until the arena has been swept, a candidate is
+        # something to REMEMBER, not something to fly to.
+        #
+        # Running at the first sighting is explore-nothing/exploit-everything
+        # in the worst order: the mission spends its battery on whichever base
+        # happened to be in front of the camera at takeoff, and the ones it
+        # never turned towards are never found at all. Sweeping first costs a
+        # later first landing and buys knowing how many bases there are and
+        # where — which is what "land on all of them" needs.
         pad = self._best_candidate()
-        if pad is not None:
+        if pad is not None and self.survey_done:
             self.rotations_done = 0
             self._enter(self.SELECT)
             return
@@ -1131,8 +1194,11 @@ class Phase1MissionNode(Node):
             # travel leg in 5.5 minutes — so a base behind the house, or
             # outside that cone, never existed to it. The detector was never
             # the limit; nobody looked there.
-            spot = self._next_viewpoint()
-            if spot is not None:
+            self._harvest_relief()
+            spot = (self._next_viewpoint()
+                    if self._survey_visits < self.survey_max_viewpoints
+                    else None)
+            if spot is not None and self._survey_gain_is_real(spot[1]):
                 (vx, vy), gain = spot
                 self.get_logger().info(
                     f"{self.rotations_done} turns and nothing new here, but "
@@ -1142,6 +1208,13 @@ class Phase1MissionNode(Node):
                 self.target_id = None
                 self.landing_for = self.LAND_PAD
                 self._viewpoint_leg = True
+                # Every viewpoint VISITED is avoided afterwards, not only the
+                # ones that could not be reached. MEASURED 2026-08-28: without
+                # this the survey went back to (-1.00, 3.00) three times in a
+                # row and never ended — arriving there taught it almost
+                # nothing, so the same spot still scored best afterwards.
+                self._failed_viewpoints.append((vx, vy))
+                self._survey_visits += 1
                 self._goto_via_map(vx, vy, self.takeoff_alt, self.setpoint[3])
                 self._enter(self.TRAVEL)
                 return
@@ -1157,6 +1230,20 @@ class Phase1MissionNode(Node):
             # certain touchdown on the floor. And the leg is not blind — the
             # takeoff base is the one position in the map that did not come
             # from the drifting estimate.
+            if not self.survey_done:
+                # The sweep is over: nothing unobserved is left worth flying
+                # to. Now spend the rest of the attempt landing.
+                self.survey_done = True
+                n = sum(1 for p in (self.pad_map.pads if self.pad_map else [])
+                        if self._is_candidate(p))
+                self.get_logger().info(
+                    f"SURVEY COMPLETE — the arena has been swept and "
+                    f"{n} candidate base(s) are in the map. Landing phase "
+                    f"begins.")
+                self.rotations_done = 0
+                self._enter(self.SELECT)
+                return
+
             hx, hy = self._takeoff_base_xy()
             self.get_logger().warn(
                 f"{self.rotations_done} turns and no new base in sight, and "
@@ -1177,6 +1264,115 @@ class Phase1MissionNode(Node):
             f"turn {self.rotations_done + 1}/{self.max_rotations}: "
             f"heading for {math.degrees(self.setpoint[3]):.0f} deg.")
         self._enter(self.ROTATE)
+
+    def _survey_gain_is_real(self, gain: int) -> bool:
+        """Is the coverage search still learning, or predicting the same gain?
+
+        `gain` is what a viewpoint is PREDICTED to reveal, and the prediction
+        is optimistic: it credits everything in range with line of sight, while
+        the octomap only integrates what the depth camera actually swept.
+        MEASURED 2026-08-28: the predicted gain went 28, 27, 27 across three
+        trips and never approached zero, so a survey that waits for it to run
+        out never ends.
+
+        The honest signal is whether the predictions are still IMPROVING. When
+        a trip does not reduce what the next one expects to find, the map has
+        stopped growing where this can reach, and the sweep is over — however
+        many cells the model still claims are out there.
+        """
+        if self._survey_last_gain is None:
+            self._survey_last_gain = gain
+            return True
+        if gain < self._survey_last_gain - self.survey_progress_cells:
+            self._survey_last_gain = gain
+            self._survey_stalls = 0
+            return True
+        self._survey_stalls += 1
+        self._survey_last_gain = min(self._survey_last_gain, gain)
+        if self._survey_stalls >= self.survey_max_stalls:
+            self.get_logger().info(
+                f"the sweep has stopped learning — {gain} cells still "
+                f"predicted unseen after {self._survey_stalls} trips that did "
+                f"not reduce it. They are behind something the camera cannot "
+                f"reach from anywhere it can stand.")
+            return False
+        return True
+
+    def _harvest_relief(self):
+        """Turn isolated relief in the occupancy map into leads to investigate.
+
+        The blue detector answers "does this look like a pad", from a camera,
+        and inherits the camera's problems — including one it cannot fix: a
+        base that is NOT ON THE FLOOR is placed wrongly however well it is
+        seen, because the ground-plane projection intersects the ray with
+        z = floor and an elevated base is not on that plane. Turning on the
+        spot does not help; the projection model is simply wrong for it.
+
+        The occupancy map does not share the problem: it measures where matter
+        is, in three dimensions, by ray-casting. So anything isolated standing
+        in the 0-1.5 m band with roughly a base's footprint, away from the
+        walls and outside the house, is a REASON TO GO LOOK.
+
+        These are published as ordinary detections with a LOW confidence, on
+        purpose. They are not sightings of a pad — nothing has said this is
+        blue — so they must not outvote the camera in the map's fusion. What
+        they buy is a position the mission will fly over, at which point the
+        belly camera and the rangefinder settle it.
+        """
+        if not self.relief_leads or self.pub_relief is None:
+            return
+        self.octree_tree = self._tree()
+        occ = self._occupancy()
+        if occ is None:
+            return
+        try:
+            spots = relief.relief_candidates(
+                occ, self.plan_bounds, self.coverage_cell_m,
+                exclude=self.relief_exclude)
+        except Exception as exc:
+            self.get_logger().error(f"relief scan failed: {exc}")
+            return
+
+        fresh = 0
+        for (x, y) in spots:
+            if any(math.hypot(x - px, y - py) < self.relief_merge_m
+                   for px, py in self._relief_seen):
+                continue
+            self._relief_seen.append((x, y))
+            fresh += 1
+            det = PadDetection()
+            det.header.stamp = self.get_clock().now().to_msg()
+            det.header.frame_id = (self.pose.header.frame_id
+                                   if self.pose is not None else "map")
+            det.camera = "relief"
+            det.confidence = self.relief_confidence
+            det.position_valid = True
+            det.position.x, det.position.y = float(x), float(y)
+            det.range_m = 1.0
+            det.source = PadDetection.SOURCE_NONE
+            self.pub_relief.publish(det)
+        if fresh:
+            self.get_logger().info(
+                f"relief scan: {fresh} new lump(s) standing in the base band — "
+                f"published as weak candidates to investigate")
+
+    def _publish_plan(self, points, yaw):
+        """The route, for RViz and for a human to check. Purely informational."""
+        if self.pub_plan is None:
+            return
+        path = Path()
+        path.header.stamp = self.get_clock().now().to_msg()
+        path.header.frame_id = (self.pose.header.frame_id
+                                if self.pose is not None else "map")
+        for p in points:
+            ps = PoseStamped()
+            ps.header = path.header
+            ps.pose.position.x, ps.pose.position.y = float(p[0]), float(p[1])
+            ps.pose.position.z = float(p[2])
+            ps.pose.orientation.z = math.sin(yaw / 2.0)
+            ps.pose.orientation.w = math.cos(yaw / 2.0)
+            path.poses.append(ps)
+        self.pub_plan.publish(path)
 
     def _next_viewpoint(self):
         """Where to fly to see arena this spot cannot, or None.
