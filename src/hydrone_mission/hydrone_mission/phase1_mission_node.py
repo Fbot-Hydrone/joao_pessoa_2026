@@ -299,6 +299,17 @@ class Phase1MissionNode(Node):
         # minutes, so a sweep that eats the attempt has cost the run whatever
         # it learned. These are the two ways it ends other than running out of
         # unseen arena.
+        # Point the camera where the map is still unobserved, instead of
+        # turning a blind full circle. False restores the old sweep.
+        # Sweep the arena by flying a rectangle rather than by spinning.
+        self.declare_parameter("survey_circuit", True)
+        # How far the circuit is inset from the arena bounds. Far enough that
+        # the drone is not skimming the wall, close enough that the camera
+        # still reaches the far side.
+        self.declare_parameter("survey_inset_m", 1.2)
+        # Spacing of the points along each edge — how often the yaw is
+        # re-aimed at the arena while travelling.
+        self.declare_parameter("survey_step_m", 2.0)
         self.declare_parameter("survey_max_viewpoints", 8)
         self.declare_parameter("survey_max_stalls", 2)
         # How much the predicted gain must fall for a trip to count as
@@ -418,12 +429,17 @@ class Phase1MissionNode(Node):
         self.coverage_viewpoint_m = float(p("coverage_viewpoint_m"))
         self.coverage_range_m = float(p("coverage_range_m"))
         self.coverage_min_gain = int(p("coverage_min_gain"))
+        self.survey_circuit = bool(p("survey_circuit"))
+        self.survey_inset_m = float(p("survey_inset_m"))
+        self.survey_step_m = float(p("survey_step_m"))
+        self._survey_path = None
         self.survey_max_viewpoints = int(p("survey_max_viewpoints"))
         self.survey_max_stalls = int(p("survey_max_stalls"))
         self.survey_progress_cells = int(p("survey_progress_cells"))
         self._survey_visits = 0
         self._survey_stalls = 0
         self._survey_last_gain = None
+        self._survey_path = None
         self.relief_leads = bool(p("relief_leads"))
         self.relief_confidence = float(p("relief_confidence"))
         self.relief_merge_m = float(p("relief_merge_m"))
@@ -733,6 +749,8 @@ class Phase1MissionNode(Node):
         self._survey_visits = 0
         self._survey_stalls = 0
         self._survey_last_gain = None
+        # A new attempt sweeps again, whatever the last one flew.
+        self._survey_path = None
 
     # ────────────────────────────────────────────────────────────────────────
     # Setpoint stream
@@ -1159,111 +1177,149 @@ class Phase1MissionNode(Node):
     # ── SETTLE ───────────────────────────────────────────────────────────────
 
     def _do_settle(self):
-        """Hold still, let the estimate stop moving, then read the map.
+        """Hold still, let the estimate stop moving, then decide what is next.
 
         The map is NOT read while this is counting down. That is the whole point
         of the state: a detection taken while yaw was still slewing is projected
         through a moving estimate, and the position it produces is wrong by
         metres. Waiting costs two seconds and buys a map entry that means what
         it says.
+
+        The order below is the mission's whole strategy, and each step exists
+        because the one before it was measured to be insufficient:
+
+        1. **Fly the circuit.** Sweep the arena before committing to anything.
+        2. **Land on what was found**, best candidate first.
+        3. **Short of the quota? Investigate the relief** the occupancy map
+           found — that is where an ELEVATED base hides, because the
+           ground-plane projection cannot place one.
+        4. **Still short? Go and look from somewhere new.**
+        5. **Otherwise go home** — and home, never here, because an off-base
+           landing is eliminatory.
         """
         self._hold()
         if self._since_entered() < self.settle_s:
             return
 
-        # SURVEY FIRST. Until the arena has been swept, a candidate is
-        # something to REMEMBER, not something to fly to.
+        # ── 1. the circuit ──────────────────────────────────────────────────
         #
-        # Running at the first sighting is explore-nothing/exploit-everything
-        # in the worst order: the mission spends its battery on whichever base
-        # happened to be in front of the camera at takeoff, and the ones it
-        # never turned towards are never found at all. Sweeping first costs a
-        # later first landing and buys knowing how many bases there are and
-        # where — which is what "land on all of them" needs.
+        # Turning on the spot cannot map an arena, and the directed version of
+        # it degenerated completely: MEASURED 2026-08-28, asked which
+        # directions had unobserved arena behind them an open arena answers
+        # "all of them", and the sweep came back 22, -22, 68, -68, 112, -112,
+        # 158, -158 — a full circle with the turns merely reordered. What
+        # limits the map is not where the camera POINTS but where it has
+        # PARALLAX; a camera that never translates never sees behind anything.
+        #
+        # So fly a rectangle inset from the walls with the camera aimed INWARD.
+        # One pass sweeps the whole floor, every base is seen from a changing
+        # angle, and the length can be read off the arena beforehand — worth
+        # more than a clever sweep that might converge, when the rules give
+        # three attempts in thirty minutes.
+        if not self.survey_done and self.survey_circuit:
+            if self._survey_path is None:
+                self._survey_path = coverage.rectangle_survey(
+                    self.plan_bounds, inset_m=self.survey_inset_m,
+                    z=self.takeoff_alt, step_m=self.survey_step_m)
+                self.get_logger().info(
+                    f"SURVEY: flying a {len(self._survey_path)}-point circuit "
+                    f"inset {self.survey_inset_m:.1f} m from the walls, camera "
+                    f"aimed at the arena.")
+            if self._survey_path:
+                x, y, z, yaw = self._survey_path.pop(0)
+                self._viewpoint_leg = True      # to LOOK: never confirms, never lands
+                self._goto_via_map(x, y, z, yaw)
+                self._enter(self.TRAVEL)
+                return
+            self.survey_done = True
+            self._harvest_relief()
+            n = sum(1 for p in (self.pad_map.pads if self.pad_map else [])
+                    if self._is_candidate(p))
+            self.get_logger().info(
+                f"SURVEY COMPLETE — circuit flown, {n} candidate base(s) in "
+                f"the map. Landing phase begins.")
+            self._enter(self.SELECT)
+            return
+
+        # ── 2. land on what was found ───────────────────────────────────────
+        #
+        # Only once the sweep is over. Running at the first sighting is
+        # explore-nothing/exploit-everything in the worst order: the battery
+        # goes on whichever base happened to be in front of the camera at
+        # takeoff, and the ones never turned towards are never found at all.
         pad = self._best_candidate()
         if pad is not None and self.survey_done:
             self.rotations_done = 0
             self._enter(self.SELECT)
             return
 
-        if self.rotations_done >= self.max_rotations:
-            # A full sweep from HERE found nothing. Before giving up, ask the
-            # occupancy map whether there is anywhere left that this spot
-            # cannot see. MEASURED 2026-08-27: without this the vehicle spends
-            # the entire mission turning at the point it took off from — one
-            # travel leg in 5.5 minutes — so a base behind the house, or
-            # outside that cone, never existed to it. The detector was never
-            # the limit; nobody looked there.
-            self._harvest_relief()
-            spot = (self._next_viewpoint()
-                    if self._survey_visits < self.survey_max_viewpoints
-                    else None)
-            if spot is not None and self._survey_gain_is_real(spot[1]):
-                (vx, vy), gain = spot
-                self.get_logger().info(
-                    f"{self.rotations_done} turns and nothing new here, but "
-                    f"{gain} unseen cells open up from ({vx:.2f}, {vy:.2f}) — "
-                    f"repositioning to look from there.")
-                self.rotations_done = 0
-                self.target_id = None
-                self.landing_for = self.LAND_PAD
-                self._viewpoint_leg = True
-                # Every viewpoint VISITED is avoided afterwards, not only the
-                # ones that could not be reached. MEASURED 2026-08-28: without
-                # this the survey went back to (-1.00, 3.00) three times in a
-                # row and never ended — arriving there taught it almost
-                # nothing, so the same spot still scored best afterwards.
-                self._failed_viewpoints.append((vx, vy))
-                self._survey_visits += 1
-                self._goto_via_map(vx, vy, self.takeoff_alt, self.setpoint[3])
-                self._enter(self.TRAVEL)
-                return
+        if self.rotations_done < self.max_rotations:
+            # A local look from wherever we are. Cheap, and it is what catches
+            # a base the circuit passed at a bad angle.
+            self._hold(yaw=wrap_pi(self.setpoint[3] - self.rotation_step))
+            self.get_logger().info(
+                f"turn {self.rotations_done + 1}/{self.max_rotations}: "
+                f"heading for {math.degrees(self.setpoint[3]):.0f} deg.")
+            self._enter(self.ROTATE)
+            return
 
-            # Go HOME, do not land here. Landing off a base is ELIMINATORY,
-            # and "land in place" is a guaranteed one — where the vehicle
-            # happens to be when the search gives up is the arena floor.
-            #
-            # The old reasoning for landing in place was that the position
-            # estimate had stopped being worth flying on, so a cross-arena leg
-            # was the last thing to attempt. That trade is the wrong way round
-            # against an eliminatory rule: a risky leg to a real base beats a
-            # certain touchdown on the floor. And the leg is not blind — the
-            # takeoff base is the one position in the map that did not come
-            # from the drifting estimate.
-            if not self.survey_done:
-                # The sweep is over: nothing unobserved is left worth flying
-                # to. Now spend the rest of the attempt landing.
-                self.survey_done = True
-                n = sum(1 for p in (self.pad_map.pads if self.pad_map else [])
-                        if self._is_candidate(p))
+        # ── 3. the relief, as the reserve ───────────────────────────────────
+        #
+        # Deliberately after the circuit and the blue candidates, not mixed in
+        # with them. An elevated base is the one the ground-plane projection
+        # places wrongly however well it is seen — the ray is intersected with
+        # z = floor and the base is not on that plane — so it is exactly the
+        # base most likely to still be missing. The occupancy map measured
+        # where the matter is; what it cannot say is whether the matter is a
+        # base, which is why this costs a hover and not a landing.
+        if self.landed_count < self.target_bases and self._relief_leads_left():
+            self._harvest_relief()
+            if self._best_candidate() is not None:
                 self.get_logger().info(
-                    f"SURVEY COMPLETE — the arena has been swept and "
-                    f"{n} candidate base(s) are in the map. Landing phase "
-                    f"begins.")
-                self.rotations_done = 0
+                    f"only {self.landed_count}/{self.target_bases} base(s) and "
+                    f"the blue candidates are exhausted — investigating the "
+                    f"relief the occupancy map found.")
                 self._enter(self.SELECT)
                 return
 
-            hx, hy = self._takeoff_base_xy()
-            self.get_logger().warn(
-                f"{self.rotations_done} turns and no new base in sight, and "
-                f"nothing unseen left worth flying to — returning to the "
-                f"takeoff base at ({hx:.2f}, {hy:.2f}) to end the run. NOT "
-                f"landing here: off-base landings are eliminatory.")
+        # ── 4. look from somewhere new ──────────────────────────────────────
+        spot = (self._next_viewpoint()
+                if self._survey_visits < self.survey_max_viewpoints else None)
+        if spot is not None and self._survey_gain_is_real(spot[1]):
+            (vx, vy), gain = spot
+            self.get_logger().info(
+                f"nothing new here, but {gain} unseen cells open up from "
+                f"({vx:.2f}, {vy:.2f}) — repositioning to look from there.")
+            self.rotations_done = 0
+            # Every viewpoint VISITED is avoided afterwards, not only the ones
+            # that could not be reached. MEASURED 2026-08-28: without this the
+            # search went back to (-1.00, 3.00) three times in a row and never
+            # ended — arriving taught it almost nothing, so the same spot still
+            # scored best afterwards.
+            self._failed_viewpoints.append((vx, vy))
+            self._survey_visits += 1
             self.target_id = None
-            self.landing_for = self.LAND_FINAL
-            self._viewpoint_leg = False
-            self._goto_via_map(hx, hy, self.takeoff_alt, self.setpoint[3])
+            self.landing_for = self.LAND_PAD
+            self._viewpoint_leg = True
+            self._goto_via_map(vx, vy, self.takeoff_alt, self.setpoint[3])
             self._enter(self.TRAVEL)
             return
 
-        # Aim the next turn here rather than inside ROTATE, so ROTATE is a pure
-        # "are we there yet" and has no first-tick special case to get wrong.
-        self._hold(yaw=wrap_pi(self.setpoint[3] - self.rotation_step))
-        self.get_logger().info(
-            f"turn {self.rotations_done + 1}/{self.max_rotations}: "
-            f"heading for {math.degrees(self.setpoint[3]):.0f} deg.")
-        self._enter(self.ROTATE)
+        # ── 5. home ─────────────────────────────────────────────────────────
+        hx, hy = self._takeoff_base_xy()
+        self.get_logger().warn(
+            f"nothing left to find — returning to the takeoff base at "
+            f"({hx:.2f}, {hy:.2f}) to end the run. NOT landing here: off-base "
+            f"landings are eliminatory.")
+        self.target_id = None
+        self.landing_for = self.LAND_FINAL
+        self._viewpoint_leg = False
+        self._goto_via_map(hx, hy, self.takeoff_alt, self.setpoint[3])
+        self._enter(self.TRAVEL)
+
+    def _relief_leads_left(self) -> bool:
+        """Is there relief that has not already been turned into a lead?"""
+        return self.relief_leads and self.pub_relief is not None
 
     def _survey_gain_is_real(self, gain: int) -> bool:
         """Is the coverage search still learning, or predicting the same gain?

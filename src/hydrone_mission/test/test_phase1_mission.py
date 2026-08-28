@@ -204,6 +204,8 @@ def test_a_candidate_found_after_settling_is_taken(node):
 
 
 def test_settling_with_nothing_in_the_map_starts_a_turn(node):
+    node.survey_circuit = False     # this pins the local turn
+    node.survey_done = True
     set_map(node)
     enter(node, node.SETTLE, age_s=5.0)
     node._do_settle()
@@ -212,6 +214,8 @@ def test_settling_with_nothing_in_the_map_starts_a_turn(node):
 
 def test_the_turn_is_clockwise(node):
     """ENU yaw runs counter-clockwise from east, so clockwise SUBTRACTS."""
+    node.survey_circuit = False     # this pins the local turn
+    node.survey_done = True
     set_map(node)
     node.setpoint = [0.0, 0.0, 1.0, 0.0]
     enter(node, node.SETTLE, age_s=5.0)
@@ -220,6 +224,8 @@ def test_the_turn_is_clockwise(node):
 
 
 def test_the_turn_wraps_rather_than_winding_up(node):
+    node.survey_circuit = False     # this pins the local turn
+    node.survey_done = True
     set_map(node)
     node.setpoint = [0.0, 0.0, 1.0, math.radians(-170.0)]
     enter(node, node.SETTLE, age_s=5.0)
@@ -228,6 +234,8 @@ def test_the_turn_wraps_rather_than_winding_up(node):
 
 
 def test_the_turn_does_not_move_the_vehicle(node):
+    node.survey_circuit = False
+    node.survey_done = True
     set_map(node)
     node.setpoint = [1.3, -0.7, 1.0, 0.0]
     enter(node, node.SETTLE, age_s=5.0)
@@ -674,38 +682,6 @@ def exhaust_the_turns(node):
     set_map(node)                       # no candidate to distract SELECT
 
 
-def test_a_finished_sweep_repositions_instead_of_giving_up(node, monkeypatch):
-    monkeypatch.setattr(node, "_next_viewpoint", lambda: ((3.0, 2.0), 12))
-    exhaust_the_turns(node)
-    node._do_settle()
-    assert node.state == node.TRAVEL
-    assert node.setpoint[0] == pytest.approx(3.0)
-    assert node.setpoint[1] == pytest.approx(2.0)
-    assert node.rotations_done == 0, "the new spot gets a full sweep of its own"
-
-
-def test_repositioning_targets_no_pad(node, monkeypatch):
-    """The trip is to LOOK, not to land. Leaving target_id set would make the
-    arrival confirm and land on whatever happened to be there."""
-    node.target_id = 7
-    monkeypatch.setattr(node, "_next_viewpoint", lambda: ((3.0, 2.0), 12))
-    exhaust_the_turns(node)
-    node._do_settle()
-    assert node.target_id is None
-
-
-def test_nothing_left_to_see_ends_the_run_at_the_takeoff_base(node,
-                                                              monkeypatch):
-    """None means the search is FINISHED, not merely out of turns — and that
-    is the case that justifies going home."""
-    monkeypatch.setattr(node, "_next_viewpoint", lambda: None)
-    node.survey_done = True
-    exhaust_the_turns(node)
-    node._do_settle()
-    assert node.state == node.TRAVEL
-    assert node.landing_for == node.LAND_FINAL
-
-
 def test_a_coverage_search_that_throws_does_not_take_the_mission_with_it(node):
     """The fallback is what the mission did before coverage existed."""
     def boom():
@@ -721,26 +697,6 @@ def test_coverage_can_be_turned_off(node):
     assert node._next_viewpoint() is None
 
 
-def test_an_unreachable_viewpoint_is_not_blacklisted_as_a_pad(node,
-                                                              monkeypatch):
-    """A coverage leg is going somewhere to LOOK. There is no pad to blame,
-    and "pad None stopped getting closer" is what this printed on the first
-    flight that exercised it."""
-    monkeypatch.setattr(node, "_next_viewpoint", lambda: ((3.0, 2.0), 12))
-    exhaust_the_turns(node)
-    node._do_settle()
-    assert node.state == node.TRAVEL and node._viewpoint_leg
-
-    set_pose(node, 0.0, 0.0)
-    node._do_travel()
-    node._travel_progress_t = node._now() - node.travel_stall_s - 1.0
-    node._do_travel()
-
-    assert node.blacklist == set(), "blacklisted a pad for a viewpoint's sake"
-    assert node.state == node.SETTLE
-    assert (3.0, 2.0) in node._failed_viewpoints
-
-
 def test_a_pad_leg_is_not_treated_as_a_viewpoint_leg(node):
     """The flag has to be cleared by whoever starts a normal leg, or the pad
     that follows a coverage trip would never be blacklisted."""
@@ -752,26 +708,6 @@ def test_a_pad_leg_is_not_treated_as_a_viewpoint_leg(node):
     node._do_select()
     assert node.state == node.TRAVEL
     assert not node._viewpoint_leg
-
-
-def test_arriving_at_a_viewpoint_never_confirms_or_lands(node, monkeypatch):
-    """The worst failure this mission has had. MEASURED 2026-08-27: a run that
-    reported "6 of 6 bases" had landed on ONE. The other five were a coverage
-    leg arriving and being treated as an arrival over a pad — "over pad None —
-    confirming on the belly camera" — putting the vehicle down mid-arena on
-    whatever looked blue from 1 m. Off-base landings are eliminatory."""
-    monkeypatch.setattr(node, "_next_viewpoint", lambda: ((3.0, 2.0), 12))
-    exhaust_the_turns(node)
-    node._do_settle()
-    assert node.state == node.TRAVEL and node._viewpoint_leg
-
-    node.setpoint = [3.0, 2.0, 1.0, 0.0]
-    set_pose(node, 3.0, 2.0)             # arrive
-    node._do_travel()
-
-    assert node.state == node.SETTLE, "a viewpoint arrival reached CONFIRM"
-    assert not node._viewpoint_leg
-    assert node.rotations_done == 0, "the new vantage point gets a full sweep"
 
 
 def test_arriving_with_no_target_pad_refuses_to_land(node):
@@ -831,38 +767,12 @@ def test_planning_never_crosses_unmapped_space_by_default(node):
 
 # ── Survey first, land second ────────────────────────────────────────────────
 
-def test_a_candidate_found_during_the_survey_is_remembered_not_chased(node):
-    """Running at the first sighting is explore-nothing/exploit-everything in
-    the worst order: the battery goes on whichever base happened to be in
-    front of the camera at takeoff, and the ones never turned towards are
-    never found at all."""
-    node.survey_done = False
-    node.home = (9.0, 9.0)
-    set_map(node, pad(1, 2.0, 0.0))
-    enter(node, node.SETTLE, age_s=5.0)
-    node._do_settle()
-    assert node.state != node.SELECT, "chased a pad during the survey"
-    assert node.state == node.ROTATE
-
-
 def test_the_same_candidate_is_taken_once_the_survey_is_done(node):
     node.survey_done = True
     node.home = (9.0, 9.0)
     set_map(node, pad(1, 2.0, 0.0))
     enter(node, node.SETTLE, age_s=5.0)
     node._do_settle()
-    assert node.state == node.SELECT
-
-
-def test_the_survey_ends_when_nothing_unseen_is_left(node, monkeypatch):
-    """None from the coverage search means FINISHED, not out of turns — and
-    that is what starts the landing phase rather than ending the run."""
-    monkeypatch.setattr(node, "_next_viewpoint", lambda: None)
-    monkeypatch.setattr(node, "_harvest_relief", lambda: None)
-    node.survey_done = False
-    exhaust_the_turns(node)
-    node._do_settle()
-    assert node.survey_done
     assert node.state == node.SELECT
 
 
@@ -911,27 +821,124 @@ def test_real_progress_resets_the_patience(node):
     assert not node._survey_gain_is_real(19)
 
 
-def test_the_survey_is_capped_by_viewpoints_flown(node, monkeypatch):
-    """Phase 1 allows 3 attempts in 30 minutes. A sweep that eats the attempt
-    has cost the run whatever it learned."""
-    monkeypatch.setattr(node, "_harvest_relief", lambda: None)
-    monkeypatch.setattr(node, "_next_viewpoint", lambda: ((3.0, 2.0), 99))
-    node.survey_max_viewpoints = 0            # budget already spent
+def test_the_survey_flies_a_circuit_instead_of_spinning(node):
+    """Turning on the spot cannot map an arena: what limits the map is not
+    where the camera POINTS but where it has PARALLAX, and a camera that never
+    translates never sees behind anything."""
     node.survey_done = False
-    exhaust_the_turns(node)
+    node.survey_circuit = True
+    set_map(node)
+    enter(node, node.SETTLE, age_s=5.0)
+    node._do_settle()
+    assert node.state == node.TRAVEL
+    assert node._viewpoint_leg, "a circuit leg must never confirm or land"
+    assert node._survey_path is not None
+
+
+def test_the_circuit_ends_the_survey_when_it_runs_out(node):
+    node.survey_done = False
+    node.survey_circuit = True
+    node._survey_path = []                 # already flown
+    set_map(node)
+    enter(node, node.SETTLE, age_s=5.0)
     node._do_settle()
     assert node.survey_done
     assert node.state == node.SELECT
 
 
-def test_a_visited_viewpoint_is_not_chosen_again(node, monkeypatch):
-    """MEASURED 2026-08-28: without this the survey went back to (-1.00, 3.00)
-    three times in a row — arriving taught it almost nothing, so the same spot
-    still scored best afterwards."""
-    monkeypatch.setattr(node, "_harvest_relief", lambda: None)
-    monkeypatch.setattr(node, "_next_viewpoint", lambda: ((3.0, 2.0), 99))
-    node.survey_done = False
-    exhaust_the_turns(node)
+def test_an_abort_forgets_the_circuit(node):
+    node._survey_path = [(1.0, 1.0, 1.0, 0.0)]
+    node._reset()
+    assert node._survey_path is None
+
+
+def test_the_relief_is_the_reserve_when_the_quota_is_not_met(node,
+                                                             monkeypatch):
+    """Only once the blue candidates are exhausted. An elevated base is the one
+    the ground-plane projection places wrongly however well it is seen, so it
+    is exactly the base most likely to still be missing by now."""
+    node.survey_done = True
+    node.survey_circuit = False
+    node.landed_count = 1
+    node.target_bases = 6
+    node.home = (9.0, 9.0)
+    node.coverage_search = False
+    node.rotations_done = node.max_rotations
+
+    found = {"n": 0}
+
+    def harvest():
+        found["n"] = 1                     # the relief becomes a candidate
+
+    monkeypatch.setattr(node, "_harvest_relief", harvest)
+    monkeypatch.setattr(node, "_best_candidate",
+                        lambda: pad(9, 2.0, 0.0) if found["n"] else None)
+
+    enter(node, node.SETTLE, age_s=5.0)
     node._do_settle()
+    assert found["n"], "went home without investigating the relief"
+    assert node.state == node.SELECT
+
+
+def test_the_relief_is_not_consulted_while_blue_candidates_remain(node,
+                                                                  monkeypatch):
+    """It is a weaker signal — nothing said this lump is blue. Spending a hover
+    on it while a real sighting is waiting is the wrong order."""
+    node.survey_done = True
+    node.survey_circuit = False
+    node.home = (9.0, 9.0)
+    called = {}
+    monkeypatch.setattr(node, "_harvest_relief",
+                        lambda: called.setdefault("yes", True))
+    set_map(node, pad(1, 2.0, 0.0))
+    enter(node, node.SETTLE, age_s=5.0)
+    node._do_settle()
+    assert node.state == node.SELECT
+    assert "yes" not in called
+
+def test_arriving_on_a_circuit_leg_never_confirms_or_lands(node):
+    """The worst failure this mission has had. MEASURED 2026-08-27: a run that
+    reported "6 of 6 bases" had landed on ONE. The other five were a look-leg
+    arriving and being treated as an arrival over a pad — "over pad None —
+    confirming on the belly camera" — putting the vehicle down mid-arena on
+    whatever looked blue from 1 m. Off-base landings are eliminatory."""
+    node.survey_done = False
+    node.survey_circuit = True
+    set_map(node)
+    enter(node, node.SETTLE, age_s=5.0)
+    node._do_settle()
+    assert node.state == node.TRAVEL and node._viewpoint_leg
+
+    set_pose(node, node.setpoint[0], node.setpoint[1])      # arrive
+    node._do_travel()
+    assert node.state == node.SETTLE, "a look-leg arrival reached CONFIRM"
+    assert not node._viewpoint_leg
+
+
+def test_an_unreachable_look_leg_is_not_blacklisted_as_a_pad(node):
+    """A look-leg has no pad to blame when it stalls. The first flight that
+    exercised this printed "pad None stopped getting closer"."""
+    node._viewpoint_leg = True
+    node.setpoint = [3.0, 2.0, 1.0, 0.0]
+    set_pose(node, 0.0, 0.0)
+    enter(node, node.TRAVEL)
+    node._do_travel()
+    node._travel_progress_t = node._now() - node.travel_stall_s - 1.0
+    node._do_travel()
+    assert node.blacklist == set(), "blacklisted a pad for a look-leg's sake"
+    assert node.state == node.SETTLE
     assert (3.0, 2.0) in node._failed_viewpoints
-    assert node._survey_visits == 1
+
+
+def test_a_candidate_is_not_chased_before_the_circuit_is_flown(node):
+    """Running at the first sighting is explore-nothing/exploit-everything in
+    the worst order: the battery goes on whichever base happened to be in
+    front of the camera at takeoff."""
+    node.survey_done = False
+    node.survey_circuit = True
+    node.home = (9.0, 9.0)
+    set_map(node, pad(1, 2.0, 0.0))
+    enter(node, node.SETTLE, age_s=5.0)
+    node._do_settle()
+    assert node.state == node.TRAVEL and node._viewpoint_leg, \
+        "chased a pad before sweeping the arena"

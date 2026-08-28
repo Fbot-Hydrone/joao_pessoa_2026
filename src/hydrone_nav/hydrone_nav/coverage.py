@@ -196,3 +196,53 @@ def next_viewpoint(occupancy, *, frm, yaw, bounds, z,
     if best is None:
         return None
     return (best[1], best[2])
+
+
+def rectangle_survey(bounds, *, inset_m=1.2, z=1.0, step_m=2.0,
+                     centre=None):
+    """A rectangular circuit that sweeps the arena, as (x, y, z, yaw) points.
+
+    Standing still and turning is the wrong shape for this problem, and
+    MEASURED 2026-08-28 it degenerates completely: asked which directions had
+    unobserved arena behind them, an open arena answers "all of them" — the
+    directed sweep came back 22, -22, 68, -68, 112, -112, 158, -158, which is
+    a full circle with the turns merely reordered. Spinning cannot do better,
+    because what limits the map is not where the camera POINTS but where it
+    has PARALLAX. A camera that never translates never sees behind anything.
+
+    So: fly. A circuit inset from the walls, with the camera aimed INWARD at
+    the arena, sweeps the whole floor in one pass and sees every base from a
+    changing angle — which is also what the depth camera needs to fill the
+    occupancy map. Inward matters: aimed outward this would spend the entire
+    flight photographing the four walls, which is the complaint that started
+    it.
+
+    `step_m` puts intermediate points along each edge so the yaw is re-aimed
+    as the vehicle travels, rather than only at the corners.
+
+    Deterministic and cheap on purpose. The competition gives three attempts
+    in thirty minutes, so a sweep whose length can be read off the arena
+    beforehand is worth more than a clever one that might converge.
+    """
+    (min_x, min_y, _), (max_x, max_y, _) = bounds
+    x0, x1 = min_x + inset_m, max_x - inset_m
+    y0, y1 = min_y + inset_m, max_y - inset_m
+    if x1 <= x0 or y1 <= y0:
+        return []
+    cx, cy = centre if centre is not None else ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
+
+    corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    pts = []
+    for a, b in zip(corners, corners[1:] + corners[:1]):
+        dist = math.hypot(b[0] - a[0], b[1] - a[1])
+        n = max(1, int(math.ceil(dist / step_m)))
+        for k in range(n):
+            t = k / n
+            pts.append((a[0] + (b[0] - a[0]) * t,
+                        a[1] + (b[1] - a[1]) * t))
+
+    out = []
+    for (x, y) in pts:
+        yaw = math.atan2(cy - y, cx - x)      # look at the arena, not the wall
+        out.append((x, y, z, yaw))
+    return out

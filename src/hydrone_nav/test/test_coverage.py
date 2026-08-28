@@ -197,3 +197,63 @@ def test_avoiding_everything_reachable_ends_the_search():
     assert next_viewpoint(occ, frm=(0.0, 1.0), yaw=0.0, bounds=BOUNDS, z=Z,
                           cell_m=RES, viewpoint_m=RES, min_gain=1,
                           sensor_range=1.5, avoid=avoid) is None
+
+
+# ── the rectangular sweep ────────────────────────────────────────────────────
+#
+# Standing still and turning is the wrong shape. MEASURED 2026-08-28: asked
+# which directions had unobserved arena behind them, an open arena answers
+# "all of them" — the directed sweep came back 22, -22, 68, -68, 112, -112,
+# 158, -158, a full circle with the turns merely reordered.
+
+def test_the_circuit_stays_inside_the_arena():
+    from hydrone_nav.coverage import rectangle_survey
+    pts = rectangle_survey(((-4.0, -4.0, 0.0), (4.0, 4.0, 2.0)), inset_m=1.0)
+    assert pts
+    for x, y, _, _ in pts:
+        assert -3.0 - 1e-9 <= x <= 3.0 + 1e-9
+        assert -3.0 - 1e-9 <= y <= 3.0 + 1e-9
+
+
+def test_the_camera_looks_at_the_arena_not_at_the_wall():
+    """Aimed outward this would spend the whole flight photographing the four
+    walls, which is the complaint that started it."""
+    from hydrone_nav.coverage import rectangle_survey
+    pts = rectangle_survey(((-4.0, -4.0, 0.0), (4.0, 4.0, 2.0)), inset_m=1.0)
+    for x, y, _, yaw in pts:
+        to_centre = math.atan2(-y, -x)
+        err = abs((yaw - to_centre + math.pi) % (2 * math.pi) - math.pi)
+        assert err < 1e-6, f"({x}, {y}) looks away from the arena"
+
+
+def test_it_visits_all_four_sides():
+    from hydrone_nav.coverage import rectangle_survey
+    pts = rectangle_survey(((-4.0, -4.0, 0.0), (4.0, 4.0, 2.0)), inset_m=1.0,
+                           step_m=2.0)
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    assert min(xs) == pytest.approx(-3.0)
+    assert max(xs) == pytest.approx(3.0)
+    assert min(ys) == pytest.approx(-3.0)
+    assert max(ys) == pytest.approx(3.0)
+
+
+def test_a_finer_step_puts_more_points_on_each_edge():
+    """The yaw is re-aimed as the vehicle travels, not only at the corners."""
+    from hydrone_nav.coverage import rectangle_survey
+    b = ((-4.0, -4.0, 0.0), (4.0, 4.0, 2.0))
+    assert len(rectangle_survey(b, step_m=1.0)) > len(
+        rectangle_survey(b, step_m=3.0))
+
+
+def test_an_arena_smaller_than_the_inset_yields_no_circuit():
+    """Better an empty plan than a rectangle turned inside out."""
+    from hydrone_nav.coverage import rectangle_survey
+    assert rectangle_survey(((-1.0, -1.0, 0.0), (1.0, 1.0, 2.0)),
+                            inset_m=2.0) == []
+
+
+def test_the_altitude_is_carried_through():
+    from hydrone_nav.coverage import rectangle_survey
+    pts = rectangle_survey(((-4.0, -4.0, 0.0), (4.0, 4.0, 2.0)), z=1.4)
+    assert all(p[2] == pytest.approx(1.4) for p in pts)
