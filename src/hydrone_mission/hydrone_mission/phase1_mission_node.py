@@ -406,6 +406,10 @@ class Phase1MissionNode(Node):
         # is the arena's net.
         self.declare_parameter("arena_floor_z", 0.3)
         self.declare_parameter("arena_ceiling_z", 2.5)
+        # How far inside the boundary the vehicle is kept. The airframe has a
+        # radius, the position estimate has an error, and the line on the floor
+        # has no give in it — so the demand stops short of it.
+        self.declare_parameter("arena_keepout_m", 0.3)
         # Whether a plan may cross space no ray has reached. FALSE.
         #
         # This was true, on the argument that the fallback — the straight line
@@ -564,6 +568,8 @@ class Phase1MissionNode(Node):
         z0 = float(self.get_parameter("arena_floor_z").value)
         z1 = float(self.get_parameter("arena_ceiling_z").value)
         self.plan_bounds = ((cx - hx, cy - hy, z0), (cx + hx, cy + hy, z1))
+        self.arena_keepout_m = float(
+            self.get_parameter("arena_keepout_m").value)
         self.plan_allow_unknown = bool(
             self.get_parameter("plan_allow_unknown").value)
         self._call: _Call | None = None
@@ -825,7 +831,7 @@ class Phase1MissionNode(Node):
         # just has nowhere to send it.
         if self.pub_sp is None or not self.stream_setpoint:
             return
-        x, y, z, yaw = self.setpoint
+        x, y, z, yaw = self._fenced(self.setpoint)
         sp = PoseStamped()
         sp.header.stamp = self.get_clock().now().to_msg()
         sp.header.frame_id = "map"
@@ -835,6 +841,48 @@ class Phase1MissionNode(Node):
         sp.pose.orientation.z = math.sin(yaw / 2.0)
         sp.pose.orientation.w = math.cos(yaw / 2.0)
         self.pub_sp.publish(sp)
+
+    def _fenced(self, setpoint):
+        """Clamp a setpoint inside the arena. The last line, and the only one.
+
+        The occupancy map knows about WALLS, and in the simulator's arena — as
+        in the real hall — the walls stand well outside the competition
+        boundary. That boundary is a line on the floor: nothing physical stops
+        the vehicle crossing it, nothing in the map objects, and the planner
+        happily routes through the space beyond because the space beyond is
+        genuinely empty.
+
+        So the fence is arithmetic, not perception, and it lives HERE rather
+        than at the six places that command a position. _stream is the single
+        point at which a setpoint reaches the FCU: _goto, _hold, the waypoint
+        queue and the centring servo all end up here, so a guard here cannot be
+        bypassed by a caller that forgets about it — and the caller that
+        forgets is the one that would have crossed the line.
+
+        Horizontal only. Height is bounded by the net above and the floor
+        below, both of which are real, and clamping z would fight the landing
+        descent — which is the FCU's, not this node's.
+
+        WHAT THIS CANNOT DO: keep the VEHICLE inside. It keeps the DEMAND
+        inside. If the position estimate is wrong — and flown on the VO it has
+        been wrong by 4 m in an 8 m arena — the vehicle can be over the line
+        while believing it is well inside, and no amount of clamping a number
+        computed from that estimate will notice. The fence is worth having
+        because it removes the failures that ARE arithmetic; it is not a
+        substitute for the estimate being right.
+        """
+        x, y, z, yaw = setpoint
+        (min_x, min_y, _), (max_x, max_y, _) = self.plan_bounds
+        k = self.arena_keepout_m
+        cx = min(max(x, min_x + k), max_x - k)
+        cy = min(max(y, min_y + k), max_y - k)
+        if cx != x or cy != y:
+            self.get_logger().warn(
+                f"setpoint ({x:.2f}, {y:.2f}) is outside the arena — holding "
+                f"at ({cx:.2f}, {cy:.2f}). The walls are further out than the "
+                f"boundary; nothing physical stops us here.",
+                throttle_duration_sec=5.0)
+        return (cx, cy, z, yaw)
 
     def _goto(self, x: float, y: float, z: float, yaw: float):
         self.setpoint = [x, y, z, yaw]

@@ -201,6 +201,17 @@ def generate_launch_description():
             "arena_centre_y", default_value="0.0",
             description="See arena_centre_x."),
         DeclareLaunchArgument(
+            "arena_keepout_m", default_value="0.3",
+            description="How far inside the boundary the vehicle is kept. The "
+                        "occupancy map knows about WALLS, and the walls stand "
+                        "well outside the competition boundary — that boundary "
+                        "is a line on the floor, so nothing physical stops the "
+                        "vehicle crossing it and nothing in the map objects. "
+                        "This clamps every setpoint at the one point they all "
+                        "pass through. It bounds the DEMAND, not the vehicle: "
+                        "a wrong position estimate can still put the airframe "
+                        "over the line while the number says otherwise."),
+        DeclareLaunchArgument(
             "survey_inset_m", default_value="1.2",
             description="How far the U is flown inside the walls. With "
                         "arena_size this is what sets the length of each leg: "
@@ -591,6 +602,8 @@ def generate_launch_description():
                 LaunchConfiguration("arena_centre_x"), value_type=float),
             "arena_centre_y": ParameterValue(
                 LaunchConfiguration("arena_centre_y"), value_type=float),
+            "arena_keepout_m": ParameterValue(
+                LaunchConfiguration("arena_keepout_m"), value_type=float),
             "survey_inset_m": ParameterValue(
                 LaunchConfiguration("survey_inset_m"), value_type=float),
             "survey_alt_m": ParameterValue(

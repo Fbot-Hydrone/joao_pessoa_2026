@@ -1326,3 +1326,68 @@ def test_an_arena_not_centred_on_where_the_drone_armed():
                    arena_floor_z=0.3, arena_ceiling_z=2.5)
     assert n.plan_bounds == ((-2.0, -5.0, 0.3), (6.0, 3.0, 2.5))
     n.destroy_node()
+
+
+# ── The arena boundary is a line on the floor, not a wall ────────────────────
+#
+# The occupancy map knows about WALLS, and in the simulator's arena — as in the
+# real hall — the walls stand well outside the competition boundary. Nothing
+# physical stops the vehicle crossing it and nothing in the map objects,
+# because the space beyond genuinely is empty.
+
+def test_a_setpoint_outside_the_arena_is_clamped(node):
+    n = arena_node(arena_size_x=8.0, arena_size_y=8.0, arena_keepout_m=0.3)
+    x, y, _, _ = n._fenced((9.0, -7.0, 1.0, 0.0))
+    assert x == pytest.approx(3.7)
+    assert y == pytest.approx(-3.7)
+    n.destroy_node()
+
+
+def test_a_setpoint_inside_the_arena_is_untouched(node):
+    n = arena_node(arena_size_x=8.0, arena_size_y=8.0, arena_keepout_m=0.3)
+    assert n._fenced((1.0, -2.0, 1.5, 0.4)) == (1.0, -2.0, 1.5, 0.4)
+    n.destroy_node()
+
+
+def test_the_fence_follows_the_arena_size(node):
+    """A 5 x 6 m arena fences at 5/2 and 6/2, less the keepout."""
+    n = arena_node(arena_size_x=5.0, arena_size_y=6.0, arena_keepout_m=0.5)
+    x, y, _, _ = n._fenced((99.0, 99.0, 1.0, 0.0))
+    assert x == pytest.approx(2.0)
+    assert y == pytest.approx(2.5)
+    n.destroy_node()
+
+
+def test_the_fence_follows_an_off_centre_arena(node):
+    n = arena_node(arena_size_x=8.0, arena_size_y=8.0,
+                   arena_centre_x=2.0, arena_centre_y=-1.0,
+                   arena_keepout_m=0.0)
+    x, y, _, _ = n._fenced((99.0, -99.0, 1.0, 0.0))
+    assert x == pytest.approx(6.0)
+    assert y == pytest.approx(-5.0)
+    n.destroy_node()
+
+
+def test_the_fence_leaves_height_alone(node):
+    """The net above and the floor below are real, and clamping z would fight
+    the landing descent — which is the FCU's, not this node's."""
+    n = arena_node(arena_size_x=8.0, arena_size_y=8.0)
+    assert n._fenced((0.0, 0.0, 99.0, 0.0))[2] == 99.0
+    assert n._fenced((0.0, 0.0, -5.0, 0.0))[2] == -5.0
+    n.destroy_node()
+
+
+def test_nothing_can_reach_the_fcu_without_passing_the_fence(node):
+    """The guard is at _stream, the single point a setpoint reaches the FCU —
+    not at the six places that command a position. A caller that forgets the
+    fence is exactly the caller that would have crossed the line."""
+    published = []
+    node.arena_keepout_m = 0.3
+    node.pub_sp = type("P", (), {"publish": lambda _s, m: published.append(m)})()
+    node.stream_setpoint = True
+    node.setpoint = [99.0, 99.0, 1.0, 0.0]      # set directly, bypassing _goto
+    node._stream()
+    assert published
+    (min_x, min_y, _), (max_x, max_y, _) = node.plan_bounds
+    assert published[0].pose.position.x <= max_x - 0.3 + 1e-9
+    assert published[0].pose.position.y <= max_y - 0.3 + 1e-9
