@@ -232,7 +232,12 @@ class PadMapNode(Node):
         # a pad a metre across. Yaw is the one that stays strict: 10 deg/s over
         # the same 0.1 s is 1.7 deg, which at 6 m of range is already 0.18 m,
         # and it grows with distance while the translation error does not.
-        self.declare_parameter("max_map_speed", 1.0)
+        # ACOPLADO A WP_SPD. This must sit ABOVE the vehicle's cruise speed,
+        # which holybro_sitl.parm sets to 1.5 m/s, or the sweep spends its
+        # whole flight above the gate and the map learns nothing from it —
+        # which is exactly the failure this parameter was raised to fix once
+        # already. Raising WP_SPD without raising this one silently undoes it.
+        self.declare_parameter("max_map_speed", 2.0)
         self.declare_parameter("max_map_yaw_rate_deg", 10.0)
         # How far from the registered takeoff base a detection is still THAT
         # base. Wider than merge_radius on purpose: the start base is seen from

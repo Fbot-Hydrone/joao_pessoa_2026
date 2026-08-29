@@ -201,6 +201,27 @@ def generate_launch_description():
             "arena_centre_y", default_value="0.0",
             description="See arena_centre_x."),
         DeclareLaunchArgument(
+            "settle_moving_s", default_value="0.5",
+            description="Pause after a pure TRANSLATION, s. `settle_s` guards "
+                        "against a slewing yaw estimate; a leg flown on a "
+                        "fixed heading has none to wait for. MEASURED on an "
+                        "8x8 arena: the U's 23 waypoints at the full 5 s were "
+                        "115 s of the level's ~200 s, more than half the sweep "
+                        "spent waiting for a yaw estimate that never moved. "
+                        "This is the knob that makes the search quick — not "
+                        "the vehicle's speed, which is WP_SPD in "
+                        "config/params/holybro_sitl.parm."),
+        DeclareLaunchArgument(
+            "max_map_speed", default_value="2.0",
+            description="How fast the vehicle may be moving for pad_map to "
+                        "believe a detection, m/s. MUST SIT ABOVE the cruise "
+                        "speed (WP_SPD, 1.5 m/s in holybro_sitl.parm) or the "
+                        "sweep flies its whole flight above the gate and the "
+                        "map learns nothing — MEASURED: 39 detections refused "
+                        "against 4 accepted, and the mission came back 4 of 6 "
+                        "bases. Raising WP_SPD without raising this undoes it "
+                        "silently."),
+        DeclareLaunchArgument(
             "arena_keepout_m", default_value="0.3",
             description="How far inside the boundary the vehicle is kept. The "
                         "occupancy map knows about WALLS, and the walls stand "
@@ -423,6 +444,8 @@ def generate_launch_description():
                 LaunchConfiguration("arena_centre_x"), value_type=float),
             "arena_centre_y": ParameterValue(
                 LaunchConfiguration("arena_centre_y"), value_type=float),
+            "max_map_speed": ParameterValue(
+                LaunchConfiguration("max_map_speed"), value_type=float),
             "require_armed": ParameterValue(
                 LaunchConfiguration("require_armed"), value_type=bool),
             # The default 20 s is wall-clock, and BiguaSim runs ~5-8x below
@@ -604,6 +627,8 @@ def generate_launch_description():
                 LaunchConfiguration("arena_centre_y"), value_type=float),
             "arena_keepout_m": ParameterValue(
                 LaunchConfiguration("arena_keepout_m"), value_type=float),
+            "settle_moving_s": ParameterValue(
+                LaunchConfiguration("settle_moving_s"), value_type=float),
             "survey_inset_m": ParameterValue(
                 LaunchConfiguration("survey_inset_m"), value_type=float),
             "survey_alt_m": ParameterValue(

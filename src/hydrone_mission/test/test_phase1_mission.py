@@ -308,6 +308,7 @@ def test_a_full_search_makes_exactly_max_rotations_turns(node):
 # ── Choosing what to do with the air ─────────────────────────────────────────
 
 def test_a_confirmed_candidate_is_flown_to(node):
+    node.survey_done = True          # the landing phase
     node.home = (9.0, 9.0)
     set_pose(node, 0.0, 0.0)
     set_map(node, pad(4, 2.0, 1.0))
@@ -335,6 +336,7 @@ def test_nothing_in_the_map_falls_through_to_the_search(node):
 
 
 def test_the_quota_sends_the_drone_home(node):
+    node.survey_done = True          # the landing phase
     node.landed_count = 2
     set_map(node, pad(0, -0.5, 0.2, takeoff_base=True),
             pad(4, 2.0, 1.0))
@@ -346,6 +348,8 @@ def test_the_quota_sends_the_drone_home(node):
 
 def test_home_falls_back_to_where_we_armed(node):
     """If registration failed there is no takeoff-base entry to fly to."""
+    node.survey_done = True          # the landing phase
+    node.survey_done = True          # the landing phase
     node.home = (1.25, -3.5)
     node.landed_count = 2
     set_map(node, pad(4, 2.0, 1.0))
@@ -707,6 +711,7 @@ def test_coverage_can_be_turned_off(node):
 def test_a_pad_leg_is_not_treated_as_a_viewpoint_leg(node):
     """The flag has to be cleared by whoever starts a normal leg, or the pad
     that follows a coverage trip would never be blacklisted."""
+    node.survey_done = True          # the landing phase
     node._viewpoint_leg = True
     node.landed_count = 0
     set_map(node, pad(4, 3.0, 0.0))
@@ -1391,3 +1396,80 @@ def test_nothing_can_reach_the_fcu_without_passing_the_fence(node):
     (min_x, min_y, _), (max_x, max_y, _) = node.plan_bounds
     assert published[0].pose.position.x <= max_x - 0.3 + 1e-9
     assert published[0].pose.position.y <= max_y - 0.3 + 1e-9
+
+
+# ── The settle guards a TURN, not a translation ──────────────────────────────
+
+def test_a_pure_translation_barely_settles(node):
+    """MEASURED on an 8x8 arena: the U's 23 waypoints at the full 5 s were
+    115 s of the level's ~200 s — more than half the sweep spent waiting for a
+    yaw estimate that never moved. The U holds a fixed heading down each leg."""
+    node._last_settle_yaw = 0.0
+    node.setpoint = [1.0, 2.0, 1.0, 0.0]
+    assert node._settle_needed() == pytest.approx(node.settle_moving_s)
+
+
+def test_a_heading_change_settles_in_full(node):
+    """A detection taken while yaw is slewing is projected through a moving
+    estimate and lands in the map metres out. That is what the pause is for,
+    and it stays."""
+    node._last_settle_yaw = 0.0
+    node.setpoint = [1.0, 2.0, 1.0, math.radians(90.0)]
+    assert node._settle_needed() == pytest.approx(node.settle_s)
+
+
+def test_a_tiny_heading_wobble_is_not_a_turn(node):
+    node._last_settle_yaw = 0.0
+    node.setpoint = [1.0, 2.0, 1.0, math.radians(2.0)]
+    assert node._settle_needed() == pytest.approx(node.settle_moving_s)
+
+
+def test_the_first_settle_of_a_run_is_the_full_one(node):
+    """Nothing is known about the heading the vehicle arrived on."""
+    node._last_settle_yaw = None
+    assert node._settle_needed() == pytest.approx(node.settle_s)
+
+
+def test_an_abort_forgets_the_settled_heading(node):
+    node._last_settle_yaw = 1.0
+    node._reset()
+    assert node._last_settle_yaw is None
+
+
+def test_the_settle_still_waits_before_reading_the_map(node):
+    """Shortening it must not remove it: the vehicle still has to have stopped
+    before a detection is believed."""
+    node.survey_done = True
+    node.survey_circuit = False
+    node._last_settle_yaw = 0.0
+    node.setpoint = [0.0, 0.0, 1.0, 0.0]
+    node.home = (9.0, 9.0)
+    set_map(node, pad(1, 2.0, 0.0))
+    enter(node, node.SETTLE, age_s=0.0)
+    node._do_settle()
+    assert node.state == node.SETTLE, "read the map without settling at all"
+
+
+def test_select_will_not_start_landing_before_the_survey(node):
+    """TAKEOFF hands straight to SELECT, so this is a SECOND door into the
+    landing phase and it had no lock on it. It went unnoticed because the map
+    is empty at takeoff — MEASURED 2026-08-29, once detections started being
+    accepted while the vehicle moves, a candidate existed by the time SELECT
+    first ran and the mission flew to FOUR bases before the sweep began."""
+    node.survey_done = False
+    node.home = (9.0, 9.0)
+    node.landed_count = 0
+    set_map(node, pad(1, 2.0, 0.0))
+    enter(node, node.SELECT)
+    node._do_select()
+    assert node.state == node.SETTLE, "started landing before surveying"
+
+
+def test_takeoff_into_select_still_reaches_the_survey(node):
+    """The path the bug came in through."""
+    node.survey_done = False
+    node.home = (9.0, 9.0)
+    set_map(node, pad(1, 2.0, 0.0))
+    enter(node, node.SELECT)
+    node._do_select()
+    assert node.state == node.SETTLE

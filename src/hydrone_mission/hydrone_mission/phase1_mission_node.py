@@ -410,6 +410,12 @@ class Phase1MissionNode(Node):
         # radius, the position estimate has an error, and the line on the floor
         # has no give in it — so the demand stops short of it.
         self.declare_parameter("arena_keepout_m", 0.3)
+        # The settle after a pure TRANSLATION. The full `settle_s` guards
+        # against a slewing yaw estimate; a leg flown on a fixed heading has no
+        # slewing yaw to wait for. See _settle_needed.
+        self.declare_parameter("settle_moving_s", 0.5)
+        # How much heading change counts as having turned.
+        self.declare_parameter("settle_yaw_tol_deg", 5.0)
         # Whether a plan may cross space no ray has reached. FALSE.
         #
         # This was true, on the argument that the fallback — the straight line
@@ -459,6 +465,9 @@ class Phase1MissionNode(Node):
         self.rotation_step = math.radians(float(p("rotation_step_deg")))
         self.max_rotations = int(p("max_rotations"))
         self.settle_s = float(p("settle_s"))
+        self.settle_moving_s = float(p("settle_moving_s"))
+        self.settle_yaw_tol = math.radians(float(p("settle_yaw_tol_deg")))
+        self._last_settle_yaw = None
         self.yaw_tol = math.radians(float(p("yaw_tol_deg")))
         self.rotate_timeout = float(p("rotate_timeout_s"))
         self.arrive_tol = float(p("arrive_tol_m"))
@@ -806,6 +815,7 @@ class Phase1MissionNode(Node):
         self._failed_viewpoints.clear()
         self.survey_done = False
         self.investigating = False
+        self._last_settle_yaw = None
         self._relief_seen.clear()
         self._survey_visits = 0
         self._survey_stalls = 0
@@ -1235,6 +1245,21 @@ class Phase1MissionNode(Node):
         if self.pose is None:
             return
 
+        # SURVEY FIRST, and this gate has to be HERE as well as in _do_settle.
+        # TAKEOFF hands straight to SELECT, so this is a second door into the
+        # landing phase and it had no lock on it.
+        #
+        # It went unnoticed because the map is empty at takeoff, so
+        # `_best_candidate` came back None and the mission fell through to the
+        # search by accident. MEASURED 2026-08-29, once detections started
+        # being accepted while the vehicle moves: a candidate now exists by the
+        # time SELECT first runs, and the mission flew to FOUR bases before the
+        # sweep had begun — exactly the explore-nothing order the survey exists
+        # to prevent.
+        if not self.survey_done:
+            self._enter(self.SETTLE)
+            return
+
         if self.landed_count >= self.target_bases:
             hx, hy = self._takeoff_base_xy()
             self.get_logger().info(
@@ -1326,8 +1351,9 @@ class Phase1MissionNode(Node):
            landing is eliminatory.
         """
         self._hold()
-        if self._since_entered() < self.settle_s:
+        if self._since_entered() < self._settle_needed():
             return
+        self._last_settle_yaw = self.setpoint[3]
 
         # ── 1. the circuit ──────────────────────────────────────────────────
         #
@@ -1503,6 +1529,31 @@ class Phase1MissionNode(Node):
         self._viewpoint_leg = False
         self._goto_via_map(hx, hy, self.takeoff_alt, self.setpoint[3])
         self._enter(self.TRAVEL)
+
+    def _settle_needed(self) -> float:
+        """How long to hold still here — and usually the answer is barely.
+
+        This pause exists for ONE reason, written into its own description: a
+        detection taken while yaw is slewing is projected through a moving
+        estimate and lands in the map metres out. It is a guard against
+        TURNING.
+
+        The survey does not turn. The U holds a fixed heading down each leg and
+        turns twice, at its corners, standing still. So paying the full pause
+        at every one of its waypoints is paying for a hazard that is not there
+        — MEASURED on an 8x8 arena: 23 waypoints at 5 s is 115 s of the level's
+        ~200 s, more than half the sweep spent waiting for a yaw estimate that
+        never moved.
+
+        So: the full pause after a heading change, a short one after a pure
+        translation. The vehicle still has to have ARRIVED — that is
+        `arrive_tol`, and it is unaffected.
+        """
+        if self._last_settle_yaw is None:
+            return self.settle_s
+        turned = abs(wrap_pi(self.setpoint[3] - self._last_settle_yaw))
+        return (self.settle_s if turned > self.settle_yaw_tol
+                else self.settle_moving_s)
 
     def _uninvestigated(self):
         """Pads the map holds but has not confirmed, and nobody has looked at.
