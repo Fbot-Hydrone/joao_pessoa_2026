@@ -214,13 +214,13 @@ def _inward_yaw(edge_a, edge_b, centre):
     return math.atan2(centre[1] - my, centre[0] - mx)
 
 
-def u_sweep(bounds, *, inset_m=1.2, z=2.0, step_m=1.5, start_corner=2):
-    """Three sides of the arena, heading FIXED on each, as (x, y, z, yaw).
+def u_sweep(bounds, *, inset_m=1.2, z=2.0, start_corner=2):
+    """Three sides of the arena, as (x, y, z, yaw). FOUR POINTS PER LEG-END.
 
     LEVEL 1 of the search. The vehicle takes off, translates along one edge
     without rotating at all, turns 90 degrees at the corner, runs the next
-    edge, turns 90 degrees again, runs the third. Two turns in the whole
-    sweep, both at corners, and the camera faces INTO the arena throughout.
+    edge, turns 90 degrees again, runs the third. Two turns in the whole sweep,
+    both at corners, and the camera faces INTO the arena throughout.
 
     Why three sides and not four: from the third edge the camera already looks
     back across everything the fourth would cover, so the fourth is a minute of
@@ -231,6 +231,23 @@ def u_sweep(bounds, *, inset_m=1.2, z=2.0, step_m=1.5, start_corner=2):
     the centre each step turns CONTINUOUSLY along every edge. Turning only at
     corners is what lets the detector work a stable scene and keeps the
     odometry out of the manoeuvre this arena breaks it on.
+
+    NO INTERMEDIATE POINTS. A leg is a straight line flown on one heading, so
+    a point in the middle of it does nothing except tell the vehicle to stop.
+    ArduCopter's GUIDED treats a position target as "go there and halt", and
+    the mission waits to arrive before releasing the next one — so every
+    intermediate point was a full decelerate-and-accelerate.
+
+    MEASURED with the numbers this stack flies at: WP_SPD 1.5 m/s and WP_ACC
+    1.5 m/s/s means reaching cruise takes 1 s and 0.75 m, and stopping the
+    same. At the old 1.5 m spacing the vehicle NEVER REACHED CRUISE anywhere
+    in the sweep — each hop was pure ramp, ~2.0 s for 1.5 m, an average of
+    0.75 m/s against an airframe capable of twice that. One 5.6 m leg flown
+    whole is ~4.7 s; the same leg in four hops is ~8 s plus three pauses.
+
+    The intermediate points were inherited from the rectangle that came before,
+    where the heading WAS re-aimed at every step and they had a job. Here they
+    had none.
 
     `start_corner` indexes the inset rectangle's corners counter-clockwise from
     (min_x, min_y). It should be the one nearest where the drone took off, so
@@ -247,28 +264,19 @@ def u_sweep(bounds, *, inset_m=1.2, z=2.0, step_m=1.5, start_corner=2):
     k = start_corner % 4
     order = [corners[(k + i) % 4] for i in range(4)]
 
+    # TRANSLATE, THEN TURN — never both at once. A setpoint that changes
+    # position and heading together asks the vehicle to yaw while it is still
+    # moving, and yawing under translation is where this arena's odometry loses
+    # the most: the camera sweeps, matching fails, and the rotation that really
+    # happened is never recorded.
+    #
+    # So a corner is two setpoints at the SAME position: the leg that arrives
+    # there (still on the old heading) and then a pure turn, standing still.
     out = []
-    for a, b in zip(order, order[1:]):          # three legs, not four
+    for i, (a, b) in enumerate(zip(order, order[1:])):   # three legs, not four
         yaw = _inward_yaw(a, b, centre)
-        # TRANSLATE, THEN TURN — never both at once. A setpoint that changes
-        # position and heading together asks the vehicle to yaw while it is
-        # still moving, and yawing under translation is where this arena's
-        # odometry loses the most: the camera sweeps, matching fails, and the
-        # rotation that really happened is never recorded.
-        #
-        # So each corner emits the SAME POSITION twice: once holding the
-        # heading that was flown in on, once with the new one. The first is
-        # "arrive and stop", the second is "now turn, standing still".
-        if out:
-            out.append((a[0], a[1], z, out[-1][3]))    # arrive on the old yaw
-            out.append((a[0], a[1], z, yaw))           # turn on the spot
-        dist = math.hypot(b[0] - a[0], b[1] - a[1])
-        n = max(1, int(math.ceil(dist / step_m)))
-        for i in range(n + 1):
-            t = i / n
-            pt = (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, z, yaw)
-            if not out or out[-1] != pt:
-                out.append(pt)
+        out.append((a[0], a[1], z, yaw))    # at the corner, now on the new yaw
+        out.append((b[0], b[1], z, yaw))    # fly the whole leg, one setpoint
     return out
 
 

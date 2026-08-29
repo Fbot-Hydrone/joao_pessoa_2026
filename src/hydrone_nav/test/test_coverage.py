@@ -263,11 +263,25 @@ def test_an_arena_smaller_than_the_inset_yields_no_sweep():
 B8 = ((-4.0, -4.0, 0.0), (4.0, 4.0, 2.5))
 
 
+def test_the_u_has_no_intermediate_points_on_a_leg():
+    """A leg is a straight line flown on one heading, and GUIDED stops dead at
+    every position target — so a point in the middle only costs a full
+    decelerate-and-accelerate. MEASURED with WP_SPD 1.5 and WP_ACC 1.5: at the
+    old 1.5 m spacing the vehicle NEVER REACHED CRUISE anywhere in the sweep,
+    averaging 0.75 m/s against an airframe capable of twice that."""
+    from hydrone_nav.coverage import u_sweep
+    pts = u_sweep(B8, inset_m=1.0)
+    # 4 corners visited, with the two turning ones held twice: 3 legs.
+    assert len(pts) == 6
+    xs_ys = [p[:2] for p in pts]
+    assert len(set(xs_ys)) == 4, "a leg has a point in the middle of it"
+
+
 def test_the_u_turns_only_at_its_two_corners():
     """Every earlier shape failed on rotation: spinning has no parallax, and a
     circuit that re-aims at the centre turns continuously along every edge."""
     from hydrone_nav.coverage import u_sweep
-    pts = u_sweep(B8, inset_m=1.0, step_m=1.5)
+    pts = u_sweep(B8, inset_m=1.0)
     yaws = [p[3] for p in pts]
     turns = sum(1 for a, b in zip(yaws, yaws[1:]) if abs(a - b) > 1e-9)
     assert turns == 2, f"turned {turns} times; the U turns twice"
@@ -275,7 +289,7 @@ def test_the_u_turns_only_at_its_two_corners():
 
 def test_each_leg_of_the_u_turns_ninety_degrees():
     from hydrone_nav.coverage import u_sweep
-    pts = u_sweep(B8, inset_m=1.0, step_m=1.5)
+    pts = u_sweep(B8, inset_m=1.0)
     yaws = [p[3] for p in pts]
     for a, b in zip(yaws, yaws[1:]):
         d = abs((b - a + math.pi) % (2 * math.pi) - math.pi)
@@ -295,7 +309,7 @@ def test_the_u_covers_three_sides_not_four():
     """From the third edge the camera already looks back across what a fourth
     would cover, so the fourth is battery spent re-photographing the map."""
     from hydrone_nav.coverage import u_sweep
-    pts = u_sweep(B8, inset_m=1.0, step_m=10.0)     # corners only
+    pts = u_sweep(B8, inset_m=1.0)     # corners only
     sides = {round(p[3], 6) for p in pts}
     assert len(sides) == 3
 
@@ -305,7 +319,7 @@ def test_the_u_starts_at_the_corner_it_is_told_to():
     starts without a transit leg."""
     from hydrone_nav.coverage import u_sweep
     for k in range(4):
-        pts = u_sweep(B8, inset_m=1.0, step_m=10.0, start_corner=k)
+        pts = u_sweep(B8, inset_m=1.0, start_corner=k)
         corners = [(-3.0, -3.0), (3.0, -3.0), (3.0, 3.0), (-3.0, 3.0)]
         assert pts[0][:2] == pytest.approx(corners[k])
 
@@ -371,7 +385,7 @@ def test_the_u_never_translates_and_turns_at_the_same_time():
     the camera sweeps, matching fails, and the rotation that really happened is
     never recorded. Every heading change must happen at a standstill."""
     from hydrone_nav.coverage import u_sweep
-    pts = u_sweep(B8, inset_m=1.0, step_m=1.5)
+    pts = u_sweep(B8, inset_m=1.0)
     for a, b in zip(pts, pts[1:]):
         moved = (a[0], a[1]) != (b[0], b[1])
         turned = abs((b[3] - a[3] + math.pi) % (2 * math.pi) - math.pi) > 1e-9
@@ -381,7 +395,7 @@ def test_the_u_never_translates_and_turns_at_the_same_time():
 
 def test_each_corner_is_visited_twice_to_stop_before_turning():
     from hydrone_nav.coverage import u_sweep
-    pts = u_sweep(B8, inset_m=1.0, step_m=10.0)     # corners only
+    pts = u_sweep(B8, inset_m=1.0)     # corners only
     seen = {}
     for x, y, _, _ in pts:
         seen[(round(x, 6), round(y, 6))] = seen.get((round(x, 6), round(y, 6)), 0) + 1

@@ -248,7 +248,13 @@ def generate_launch_description():
                         "into it — and below the net at 2.5 m."),
         DeclareLaunchArgument(
             "survey_step_m", default_value="1.5",
-            description="Spacing of the waypoints along each leg of the U."),
+            description="Waypoint spacing along a LAWNMOWER lane (search "
+                        "level 4 only). The U has no intermediate points: a "
+                        "leg is a straight line on one heading, so a point in "
+                        "the middle of it does nothing but tell the vehicle to "
+                        "stop — and GUIDED stops dead at every position "
+                        "target. At 1.5 m spacing the drone never even reached "
+                        "cruise speed anywhere in the sweep."),
         DeclareLaunchArgument(
             "level2_climb_m", default_value="0.5",
             description="Search level 2 is the same U this much higher."),

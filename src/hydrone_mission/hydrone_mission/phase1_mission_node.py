@@ -307,8 +307,9 @@ class Phase1MissionNode(Node):
         # the drone is not skimming the wall, close enough that the camera
         # still reaches the far side.
         self.declare_parameter("survey_inset_m", 1.2)
-        # Spacing of the points along each edge — how often the yaw is
-        # re-aimed at the arena while travelling.
+        # Spacing along a LAWNMOWER lane (level 4 only). The U has no
+        # intermediate points: a leg is a straight line on one heading, and a
+        # point in the middle of it only tells the vehicle to stop.
         self.declare_parameter("survey_step_m", 1.5)
         # Height of the sweep. ABOVE THE HOUSE (1.5 m roof in the competition
         # arena) and below the net at 2.5 m — the passes fly over it, and at
@@ -1603,8 +1604,7 @@ class Phase1MissionNode(Node):
         if self._level == 1:
             self._survey_path = coverage.u_sweep(
                 self.plan_bounds, inset_m=self.survey_inset_m,
-                z=self.survey_alt, step_m=self.survey_step_m,
-                start_corner=self._nearest_corner())
+                z=self.survey_alt, start_corner=self._nearest_corner())
             self.get_logger().info(
                 f"SEARCH LEVEL 1: the U at {self.survey_alt:.1f} m — "
                 f"{len(self._survey_path)} points, two corner turns, camera "
@@ -1615,7 +1615,6 @@ class Phase1MissionNode(Node):
             z = self.survey_alt + self.level2_climb_m
             self._survey_path = coverage.u_sweep(
                 self.plan_bounds, inset_m=self.survey_inset_m, z=z,
-                step_m=self.survey_step_m,
                 start_corner=self._nearest_corner())
             self.get_logger().info(
                 f"SEARCH LEVEL 2: the same U at {z:.1f} m — a base seen "
