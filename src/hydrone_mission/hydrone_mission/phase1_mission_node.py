@@ -381,15 +381,31 @@ class Phase1MissionNode(Node):
         self.declare_parameter("takeoff_timeout_s", 45.0)
         self.declare_parameter("service_timeout_s", 30.0)
         self.declare_parameter("setpoint_hz", 10.0)
-        # The box the planner may search in, [min_x, min_y, min_z, max_x,
-        # max_y, max_z] in the pose frame. Worth setting: without bounds a
-        # search that cannot reach its goal expands outwards through open
-        # space until the expansion cap stops it, which costs a second of
-        # nothing at the moment a leg begins. The default is the competition
-        # arena with a metre of slack, floored above the landing pads and
-        # ceilinged at the net.
-        self.declare_parameter("plan_bounds",
-                               [-5.0, -5.0, 0.3, 5.0, 5.0, 2.5])
+        # THE ARENA, and the single place its size is written down.
+        #
+        # Everything geometric derives from these: the box the planner may
+        # search in, the U's leg lengths, the lawnmower's lanes, and (in
+        # pad_map, from the same launch arguments) the line past which a
+        # detection is refused as being behind a wall. They used to be two sets
+        # of numbers in two nodes — the planner's box was +/-5 m and the map's
+        # was +/-4.5 m for the same 8x8 m arena — which is one edit away from
+        # a mission that plans through a wall the map already refuses to see.
+        #
+        # 8 x 8 m is the competition arena. The team's own is 5 x 6 m; that is
+        # `arena_size_x:=5.0 arena_size_y:=6.0` and nothing else changes.
+        self.declare_parameter("arena_size_x", 8.0)
+        self.declare_parameter("arena_size_y", 8.0)
+        # Where the arena's centre sits in the pose frame. Zero in the
+        # simulator, where the EKF origin is the middle of the arena. NOT
+        # necessarily zero on the real drone: `map` is where the vehicle armed,
+        # which is a takeoff base somewhere in the arena, not its centre.
+        self.declare_parameter("arena_centre_x", 0.0)
+        self.declare_parameter("arena_centre_y", 0.0)
+        # The height band a plan may use. The floor is above the pads — they
+        # are somewhere to land, not something to fly round — and the ceiling
+        # is the arena's net.
+        self.declare_parameter("arena_floor_z", 0.3)
+        self.declare_parameter("arena_ceiling_z", 2.5)
         # Whether a plan may cross space no ray has reached. FALSE.
         #
         # This was true, on the argument that the fallback — the straight line
@@ -541,8 +557,13 @@ class Phase1MissionNode(Node):
         self._failed_viewpoints: list[tuple[float, float]] = []
         self._octomap_msg = None        # raw and latched; see _cb_octomap
         self.octree_tree = None         # decoded per leg, in _goto_via_map
-        b = [float(v) for v in self.get_parameter("plan_bounds").value]
-        self.plan_bounds = (tuple(b[:3]), tuple(b[3:]))
+        cx = float(self.get_parameter("arena_centre_x").value)
+        cy = float(self.get_parameter("arena_centre_y").value)
+        hx = float(self.get_parameter("arena_size_x").value) / 2.0
+        hy = float(self.get_parameter("arena_size_y").value) / 2.0
+        z0 = float(self.get_parameter("arena_floor_z").value)
+        z1 = float(self.get_parameter("arena_ceiling_z").value)
+        self.plan_bounds = ((cx - hx, cy - hy, z0), (cx + hx, cy + hy, z1))
         self.plan_allow_unknown = bool(
             self.get_parameter("plan_allow_unknown").value)
         self._call: _Call | None = None

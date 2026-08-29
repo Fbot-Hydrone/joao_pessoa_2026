@@ -1271,3 +1271,58 @@ def test_the_target_pixel_is_a_parameter_for_an_off_centre_lens(node):
     is level — that is what "centred" means. On a misaligned airframe it is
     measured once by hovering over a known pad."""
     assert node.get_parameter("pad_target_uv").value == [320.0, 240.0]
+
+
+# ── The arena is one number, not two sets of corners ─────────────────────────
+
+def arena_node(**kw):
+    params = [rclpy.parameter.Parameter("auto_start", value=False)]
+    params += [rclpy.parameter.Parameter(k, value=v) for k, v in kw.items()]
+    return Phase1MissionNode(parameter_overrides=params)
+
+
+def test_the_planning_box_comes_from_the_arena_size():
+    """A 5 x 6 m arena is `arena_size_x:=5.0 arena_size_y:=6.0` and nothing
+    else — it sets the U's legs, the planner's box and the lawnmower's lanes
+    at once."""
+    n = arena_node(arena_size_x=5.0, arena_size_y=6.0,
+                   arena_floor_z=0.3, arena_ceiling_z=2.5)
+    assert n.plan_bounds == ((-2.5, -3.0, 0.3), (2.5, 3.0, 2.5))
+    n.destroy_node()
+
+
+def test_the_u_shrinks_with_the_arena():
+    """The whole point of parametrising it: the competition arena is 8 x 8 and
+    the team's own is 5 x 6."""
+    big = arena_node(arena_size_x=8.0, arena_size_y=8.0, survey_inset_m=1.2)
+    small = arena_node(arena_size_x=5.0, arena_size_y=6.0, survey_inset_m=1.2)
+    big._level = small._level = 1
+    big._begin_level()
+    small._begin_level()
+    big_leg = max(p[0] for p in big._survey_path) - min(p[0] for p in big._survey_path)
+    small_leg = max(p[0] for p in small._survey_path) - min(p[0] for p in small._survey_path)
+    assert big_leg == pytest.approx(8.0 - 2 * 1.2)
+    assert small_leg == pytest.approx(5.0 - 2 * 1.2)
+    big.destroy_node()
+    small.destroy_node()
+
+
+def test_the_inset_sets_the_leg_length():
+    """leg = size - 2*inset. On a 5 x 6 arena the inset wants to be smaller
+    than on an 8 x 8 one."""
+    a = arena_node(arena_size_x=6.0, arena_size_y=6.0, survey_inset_m=0.5)
+    a._level = 1
+    a._begin_level()
+    leg = max(p[0] for p in a._survey_path) - min(p[0] for p in a._survey_path)
+    assert leg == pytest.approx(5.0)
+    a.destroy_node()
+
+
+def test_an_arena_not_centred_on_where_the_drone_armed():
+    """`map` is where the vehicle armed, which on the real drone is a takeoff
+    base somewhere in the arena, not its centre."""
+    n = arena_node(arena_size_x=8.0, arena_size_y=8.0,
+                   arena_centre_x=2.0, arena_centre_y=-1.0,
+                   arena_floor_z=0.3, arena_ceiling_z=2.5)
+    assert n.plan_bounds == ((-2.0, -5.0, 0.3), (6.0, 3.0, 2.5))
+    n.destroy_node()

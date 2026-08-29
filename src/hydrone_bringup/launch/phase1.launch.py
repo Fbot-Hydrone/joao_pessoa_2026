@@ -174,6 +174,69 @@ def generate_launch_description():
             "feature_map", default_value="true",
             description="Run the world/coverage mapper over the ZED's point "
                         "cloud. Pure observer — turn it off to save CPU."),
+        # ── The arena, and the search flown over it ─────────────────────────
+        #
+        # ONE place. The mission derives its planning box from these and
+        # pad_map derives the line past which a detection is behind a wall, so
+        # the two cannot drift apart — they did, at +/-5 m and +/-4.5 m for the
+        # same 8x8 m arena.
+        DeclareLaunchArgument(
+            "arena_size_x", default_value="8.0",
+            description="Arena width in metres, along x. 8.0 is the "
+                        "competition arena; the team's own is 5 x 6, which is "
+                        "arena_size_x:=5.0 arena_size_y:=6.0 and nothing "
+                        "else. It sets the U's leg lengths, the planner's box, "
+                        "the lawnmower's lanes and pad_map's wall."),
+        DeclareLaunchArgument(
+            "arena_size_y", default_value="8.0",
+            description="Arena depth in metres, along y. See arena_size_x."),
+        DeclareLaunchArgument(
+            "arena_centre_x", default_value="0.0",
+            description="Where the arena's centre sits in the pose frame. "
+                        "Zero in the simulator, where the EKF origin IS the "
+                        "middle of the arena. Not necessarily zero on the real "
+                        "drone: `map` is where the vehicle armed, which is a "
+                        "takeoff base somewhere in the arena, not its centre."),
+        DeclareLaunchArgument(
+            "arena_centre_y", default_value="0.0",
+            description="See arena_centre_x."),
+        DeclareLaunchArgument(
+            "survey_inset_m", default_value="1.2",
+            description="How far the U is flown inside the walls. With "
+                        "arena_size this is what sets the length of each leg: "
+                        "leg = size - 2*inset. Far enough not to skim a wall, "
+                        "close enough that the camera still reaches the far "
+                        "side — on a 5 x 6 m arena it wants to be smaller "
+                        "than on an 8 x 8 one."),
+        DeclareLaunchArgument(
+            "survey_alt_m", default_value="2.0",
+            description="Height of the survey sweep. ABOVE THE HOUSE — its "
+                        "roof is 1.5 m in the competition arena and the cruise "
+                        "height is 1 m, so a sweep at takeoff_alt would fly "
+                        "into it — and below the net at 2.5 m."),
+        DeclareLaunchArgument(
+            "survey_step_m", default_value="1.5",
+            description="Spacing of the waypoints along each leg of the U."),
+        DeclareLaunchArgument(
+            "level2_climb_m", default_value="0.5",
+            description="Search level 2 is the same U this much higher."),
+        DeclareLaunchArgument(
+            "lawnmower_lane_m", default_value="1.5",
+            description="Lane spacing of search level 4, the last resort. "
+                        "Tighter is more thorough and costs proportionally "
+                        "more flight."),
+        DeclareLaunchArgument(
+            "max_search_level", default_value="4",
+            description="How far the search ladder may climb: 1 the U, 2 the "
+                        "U higher, 3 rotate and investigate the relief, 4 the "
+                        "lawnmower. Lower it to cap what one attempt costs."),
+        DeclareLaunchArgument(
+            "centre_on_pad", default_value="true",
+            description="Centre the vehicle over the pad during the "
+                        "confirmation hover using the belly camera. The "
+                        "pixel-to-metre mapping is learned in flight (two "
+                        "orthogonal probes), so no mounting constant is "
+                        "assumed and any camera orientation works."),
         DeclareLaunchArgument(
             "octomap", default_value="true",
             description="Run the 3-D occupancy map (cloud_filter_node + "
@@ -339,6 +402,16 @@ def generate_launch_description():
         output="screen",
         parameters=[{
             "range_topic": LaunchConfiguration("range_topic"),
+            # The same arena the mission plans in. One source, so the map
+            # cannot refuse a position the planner is happy to fly to.
+            "arena_size_x": ParameterValue(
+                LaunchConfiguration("arena_size_x"), value_type=float),
+            "arena_size_y": ParameterValue(
+                LaunchConfiguration("arena_size_y"), value_type=float),
+            "arena_centre_x": ParameterValue(
+                LaunchConfiguration("arena_centre_x"), value_type=float),
+            "arena_centre_y": ParameterValue(
+                LaunchConfiguration("arena_centre_y"), value_type=float),
             "require_armed": ParameterValue(
                 LaunchConfiguration("require_armed"), value_type=bool),
             # The default 20 s is wall-clock, and BiguaSim runs ~5-8x below
@@ -509,6 +582,29 @@ def generate_launch_description():
             "takeoff_alt": ParameterValue(takeoff_alt, value_type=float),
             "target_bases": ParameterValue(
                 LaunchConfiguration("target_bases"), value_type=int),
+            # The arena and the search flown over it. See the arguments.
+            "arena_size_x": ParameterValue(
+                LaunchConfiguration("arena_size_x"), value_type=float),
+            "arena_size_y": ParameterValue(
+                LaunchConfiguration("arena_size_y"), value_type=float),
+            "arena_centre_x": ParameterValue(
+                LaunchConfiguration("arena_centre_x"), value_type=float),
+            "arena_centre_y": ParameterValue(
+                LaunchConfiguration("arena_centre_y"), value_type=float),
+            "survey_inset_m": ParameterValue(
+                LaunchConfiguration("survey_inset_m"), value_type=float),
+            "survey_alt_m": ParameterValue(
+                LaunchConfiguration("survey_alt_m"), value_type=float),
+            "survey_step_m": ParameterValue(
+                LaunchConfiguration("survey_step_m"), value_type=float),
+            "level2_climb_m": ParameterValue(
+                LaunchConfiguration("level2_climb_m"), value_type=float),
+            "lawnmower_lane_m": ParameterValue(
+                LaunchConfiguration("lawnmower_lane_m"), value_type=float),
+            "max_search_level": ParameterValue(
+                LaunchConfiguration("max_search_level"), value_type=int),
+            "centre_on_pad": ParameterValue(
+                LaunchConfiguration("centre_on_pad"), value_type=bool),
             "rotation_step_deg": ParameterValue(
                 LaunchConfiguration("rotation_step_deg"), value_type=float),
             "max_rotations": ParameterValue(
