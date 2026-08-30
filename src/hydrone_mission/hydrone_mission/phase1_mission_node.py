@@ -458,10 +458,14 @@ class Phase1MissionNode(Node):
         # Gap between repeats of a mode/arm/takeoff command. MAVROS acking a
         # command is not the same as ArduPilot accepting it, so every command is
         # re-sent on this period until /mavros/state shows the effect.
+        # How far off the ground counts as airborne, at which point the mission
+        # takes the climb over from the FCU. See _do_takeoff.
+        self.declare_parameter("takeoff_handover_m", 0.35)
         self.declare_parameter("retry_period_s", 2.0)
 
         p = lambda n: self.get_parameter(n).value
         self.takeoff_alt = float(p("takeoff_alt"))
+        self.takeoff_handover_m = float(p("takeoff_handover_m"))
         self.target_bases = int(p("target_bases"))
         self.rotation_step = math.radians(float(p("rotation_step_deg")))
         self.max_rotations = int(p("max_rotations"))
@@ -586,6 +590,7 @@ class Phase1MissionNode(Node):
         self._pending: str | None = None    # what _call is for
         self._last_cmd_t = 0.0              # when the last command went out
         self._takeoff_tries = 0
+        self._takeoff_accepted = False
         # Down-camera looks accepted during the current CONFIRM.
         self._confirm_hits = 0
         self._z_hist: list[tuple[float, float]] = []
@@ -692,6 +697,24 @@ class Phase1MissionNode(Node):
                 "  stop the vehicle ARMING — set an arming check it cannot\n"
                 "  pass, and take the props off.\n"
                 "════════════════════════════════════════════════════════")
+
+        # The heights have to agree with each other, and they are set in three
+        # different places. MEASURED 2026-08-30: takeoff_alt was 3.0 while
+        # arena_ceiling_z was 2.5 — the vehicle cruised a metre ABOVE the
+        # ceiling the planner is allowed to use, so every leg it flew was
+        # outside the box A* searches in. Nothing crashed, and nothing said so
+        # either.
+        if self.takeoff_alt > self.plan_bounds[1][2]:
+            self.get_logger().error(
+                f"takeoff_alt ({self.takeoff_alt:.2f} m) is ABOVE "
+                f"arena_ceiling_z ({self.plan_bounds[1][2]:.2f} m). The "
+                f"vehicle will cruise above the box the planner may use, so "
+                f"every leg is outside it. Lower takeoff_alt or raise the "
+                f"ceiling — the arena is netted and the bases go to 1.5 m.")
+        if self.survey_alt > self.plan_bounds[1][2]:
+            self.get_logger().error(
+                f"survey_alt ({self.survey_alt:.2f} m) is above "
+                f"arena_ceiling_z ({self.plan_bounds[1][2]:.2f} m).")
 
         self.get_logger().info(
             f"phase1_mission ready — takeoff to {self.takeoff_alt:.1f} m, "
@@ -1179,16 +1202,40 @@ class Phase1MissionNode(Node):
         # plane, a perfect 1.5 m climb reached z=0.74 while this test wanted
         # 1.35, so the mission re-sent takeoff forever — and ArduPilot rejected
         # every one of them, because the vehicle was already flying.
+        # HAND OVER AS SOON AS WE ARE OFF THE GROUND, and let the position
+        # controller fly the rest. The mission owns the altitude; the FCU only
+        # owns "get airborne".
+        #
+        # Not a bug fix — the FCU was obeying takeoff_alt exactly, and the
+        # ~2.9 m climbs in every log are what a takeoff_alt of 3 m looks like.
+        # It is a matter of who decides: with the handover, the height flown is
+        # the launch parameter enforced by the same position controller and the
+        # same arena fence as every other leg, instead of whatever NAV_TAKEOFF
+        # does on the airframe of the day. That difference matters most on the
+        # real drone, where nobody has measured what its takeoff does.
+        #
+        # `takeoff_handover_m` is deliberately small: high enough that the
+        # airframe is clear of the surface and a position setpoint will not
+        # drive it back into the pad, low enough that the FCU's climb never
+        # gets far.
         climbed = (self.pose.pose.position.z - self._takeoff_start_z
                    if self.pose is not None else 0.0)
-        if self.pose is not None and climbed >= self.takeoff_alt - 0.15:
+        if self.pose is not None and climbed >= min(
+                self.takeoff_handover_m, self.takeoff_alt - 0.15):
             x = self.pose.pose.position.x
             y = self.pose.pose.position.y
             yaw = yaw_of(self.pose)
             self.get_logger().info(
-                f"airborne — climbed {climbed:.2f} m to z="
-                f"{self.pose.pose.position.z:.2f} m, "
+                f"airborne — off the ground by {climbed:.2f} m at z="
+                f"{self.pose.pose.position.z:.2f} m; taking over and holding "
+                f"z={self.takeoff_alt:.2f} m, "
                 f"heading {math.degrees(yaw):.0f} deg.")
+            # ABSOLUTE, because every other leg of this mission commands
+            # takeoff_alt absolute — _do_select, the return home, the coverage
+            # legs. Making the takeoff relative to the pad instead would leave
+            # the vehicle at a different height from the one the very next
+            # setpoint asks for, and it would climb or drop for no reason at
+            # the handover.
             self._goto(x, y, self.takeoff_alt, yaw)
             self.rotations_done = 0
             if self._land_after_takeoff:
@@ -1210,8 +1257,24 @@ class Phase1MissionNode(Node):
         if self.dry_run:
             return
 
-        if self._poll_call() == "pending":
+        status = self._poll_call()
+        if status == "pending":
             return
+        if status == "ok":
+            # ACCEPTED. The climb is happening; do not command it again.
+            #
+            # This is why the drone climbed 2.9 m when asked for 1.0. The retry
+            # below fired every retry_period regardless, and each accepted
+            # NAV_TAKEOFF RESTARTS the climb from wherever the vehicle is now —
+            # so they stack. MEASURED 2026-08-30: 25 accepted takeoff commands
+            # across 5 climbs, five per climb, 5 x ~0.6 m = the 2.9 m seen in
+            # every log.
+            #
+            # The retry is right for a MODE change, which ArduPilot can ack and
+            # then decline; it is wrong for a takeoff, where an ACCEPTED ack
+            # means the thing is already under way. Re-sending only makes sense
+            # after a refusal, and that path is below.
+            self._takeoff_accepted = True
 
         if self._since_entered() > self.takeoff_timeout:
             self._takeoff_tries += 1
@@ -1229,7 +1292,8 @@ class Phase1MissionNode(Node):
             self._enter(self.ARMING)
             return
 
-        if self._now() - self._last_cmd_t >= self.retry_period:
+        if (not self._takeoff_accepted
+                and self._now() - self._last_cmd_t >= self.retry_period):
             req = CommandTOL.Request()
             req.altitude = float(self.takeoff_alt)
             self._start_call("takeoff", self.cli_takeoff, req)
@@ -2320,6 +2384,7 @@ class Phase1MissionNode(Node):
             return
 
         self._takeoff_tries = 0
+        self._takeoff_accepted = False
         self.target_id = None
         self.get_logger().info(
             f"taking off again — {self.landed_count}/{self.target_bases} "
@@ -2372,6 +2437,8 @@ class Phase1MissionNode(Node):
         if state != self.state:
             self.get_logger().info(f"[{self.state} -> {state}]")
         if state == self.TAKEOFF:
+            # A new climb: nothing has been accepted for it yet.
+            self._takeoff_accepted = False
             # The altitude this climb starts from. takeoff_alt is a height ABOVE
             # WHATEVER WE ARE STANDING ON, and pose.z is absolute in the FCU's
             # local frame (zeroed at the FIRST takeoff plane), so the two are

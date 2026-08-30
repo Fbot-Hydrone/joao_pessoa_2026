@@ -1533,3 +1533,114 @@ def test_a_dry_run_still_lands_on_stillness(node):
     node.dry_run = True
     node._do_land()
     assert node.state == node.DWELL
+
+
+# ── One takeoff command per climb ────────────────────────────────────────────
+
+def test_an_accepted_takeoff_is_not_commanded_again(node):
+    """This is why the drone climbed 2.9 m when asked for 1.0: the retry fired
+    every retry_period regardless, and each accepted NAV_TAKEOFF RESTARTS the
+    climb from wherever the vehicle is now, so they stack. MEASURED
+    2026-08-30: 25 accepted takeoff commands across 5 climbs — five per climb,
+    5 x ~0.6 m = the 2.9 m in every log.
+
+    The retry is right for a MODE change, which ArduPilot can ack and then
+    decline. It is wrong for a takeoff, where an accepted ack means the climb
+    is already under way."""
+    enter(node, node.TAKEOFF)
+    assert not node._takeoff_accepted
+    node._takeoff_accepted = True
+    node._last_cmd_t = node._now() - 999.0      # the retry would fire
+    sent = []
+    node._start_call = lambda *a, **k: sent.append(a)
+    node.dry_run = False
+    set_pose(node, 0.0, 0.0, z=0.1)
+    node._takeoff_start_z = 0.0
+    node._do_takeoff()
+    assert sent == [], "commanded a takeoff that was already under way"
+
+
+def test_a_refused_takeoff_is_commanded_again(node):
+    """The retry still exists — it is the refusal path that needs it."""
+    enter(node, node.TAKEOFF)
+    node._takeoff_accepted = False
+    node._last_cmd_t = node._now() - 999.0
+    sent = []
+    node._start_call = lambda *a, **k: sent.append(a)
+    node.dry_run = False
+    set_pose(node, 0.0, 0.0, z=0.1)
+    node._takeoff_start_z = 0.0
+    node._do_takeoff()
+    assert sent, "a refused takeoff was never retried"
+
+
+def test_each_new_climb_starts_with_nothing_accepted(node):
+    node._takeoff_accepted = True
+    enter(node, node.TAKEOFF)
+    assert not node._takeoff_accepted
+
+
+# ── The mission owns the altitude, the FCU only owns "get airborne" ──────────
+
+def test_the_climb_is_taken_over_as_soon_as_we_are_off_the_ground(node):
+    """Who decides the height. With the handover it is the launch parameter,
+    enforced by the same position controller and the same arena fence as every
+    other leg, instead of whatever NAV_TAKEOFF does on the airframe of the day
+    — which nobody has measured on the real drone."""
+    node.dry_run = False
+    set_pose(node, 1.0, 2.0, z=0.0)
+    enter(node, node.TAKEOFF)
+    set_pose(node, 1.0, 2.0, z=node.takeoff_handover_m + 0.01)
+    node._do_takeoff()
+    assert node.state == node.SELECT, "still waiting on the FCU's own climb"
+
+
+def test_it_does_not_hand_over_while_still_on_the_pad(node):
+    """A position setpoint sent before the airframe is clear would drive it
+    back into the surface."""
+    node.dry_run = False
+    set_pose(node, 1.0, 2.0, z=0.0)
+    enter(node, node.TAKEOFF)
+    set_pose(node, 1.0, 2.0, z=0.05)
+    node._do_takeoff()
+    assert node.state == node.TAKEOFF
+
+
+def test_the_held_altitude_matches_every_other_leg(node):
+    """ABSOLUTE takeoff_alt, because _do_select, the return home and the
+    coverage legs all command it absolute. A takeoff that settled somewhere
+    else would climb or drop for no reason at the very next setpoint."""
+    node.dry_run = False
+    set_pose(node, 1.0, 2.0, z=1.5)          # standing on a raised pad
+    enter(node, node.TAKEOFF)
+    set_pose(node, 1.0, 2.0, z=1.5 + node.takeoff_handover_m + 0.01)
+    node._do_takeoff()
+    assert node.setpoint[2] == pytest.approx(node.takeoff_alt)
+
+
+def test_the_held_altitude_from_the_floor_is_just_takeoff_alt(node):
+    node.dry_run = False
+    set_pose(node, 0.0, 0.0, z=0.0)
+    enter(node, node.TAKEOFF)
+    set_pose(node, 0.0, 0.0, z=node.takeoff_handover_m + 0.01)
+    node._do_takeoff()
+    assert node.setpoint[2] == pytest.approx(node.takeoff_alt)
+
+
+def test_a_cruise_altitude_above_the_ceiling_is_reported(node, capfd):
+    """MEASURED 2026-08-30: takeoff_alt was 3.0 while arena_ceiling_z was 2.5 —
+    the vehicle cruised a metre ABOVE the box A* is allowed to search in, so
+    every leg it flew was outside it. Nothing crashed, and nothing said so."""
+    capfd.readouterr()
+    n = arena_node(takeoff_alt=3.0, arena_ceiling_z=2.5)
+    text = "".join(capfd.readouterr())
+    assert "ABOVE" in text and "arena_ceiling_z" in text
+    n.destroy_node()
+
+
+def test_consistent_heights_say_nothing(node, capfd):
+    capfd.readouterr()
+    n = arena_node(takeoff_alt=2.0, survey_alt_m=1.8, arena_ceiling_z=2.5)
+    text = "".join(capfd.readouterr())
+    assert "ABOVE" not in text
+    n.destroy_node()
