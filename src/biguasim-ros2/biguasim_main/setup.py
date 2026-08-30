@@ -28,6 +28,7 @@ setup(
         'console_scripts': [
             'biguasim_node = biguasim_main.biguasim_node:main',
             'ardubridge_node = biguasim_main.ardubridge_node:main',
+            'remote_ardubridge_node = biguasim_main.remote_ardubridge_node:main',
         ],
     },
 )
