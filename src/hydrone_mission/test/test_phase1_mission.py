@@ -1473,3 +1473,63 @@ def test_takeoff_into_select_still_reaches_the_survey(node):
     enter(node, node.SELECT)
     node._do_select()
     assert node.state == node.SETTLE
+
+
+# ── Touchdown is the FCU's word, not ours ────────────────────────────────────
+#
+# MEASURED 2026-08-29 on an elevated base: the stillness heuristic fired at
+# z=0.86, the mission called it landed, went to ARMING and switched to GUIDED —
+# WHICH HALTS A LAND DESCENT. Every takeoff after that was refused, correctly,
+# because from ArduCopter's point of view the vehicle was still flying. The log
+# says so twice: "EKF3 IMU0 MAG0 IN-FLIGHT yaw alignment complete" after the
+# mission believed it was parked, and z drifting UP from 0.86 to 1.13.
+
+def land_state(node, *, armed, z, entry_z=2.0):
+    node.dry_run = False
+    node.mav_state.mode = "LAND"
+    node.mav_state.armed = armed
+    node._land_entry_z = entry_z
+    set_pose(node, 0.0, 0.0, z=z)
+    # a full window of stillness at this height
+    node._z_hist = [(node._now() - node.land_settle - 1.0, z),
+                    (node._now(), z)]
+
+
+def test_stillness_alone_is_not_a_landing(node):
+    """It is a good touchdown DETECTOR and a bad touchdown PROOF: on an
+    elevated pad the descent slows near the surface and a 2 s window of small
+    movement looks exactly like resting on it."""
+    enter(node, node.LAND)
+    land_state(node, armed=True, z=0.86)
+    node._do_land()
+    assert node.state == node.LAND, "called it a landing without the FCU"
+
+
+def test_the_fcu_disarming_is_what_ends_the_landing(node):
+    enter(node, node.LAND)
+    land_state(node, armed=False, z=0.86)
+    node._do_land()
+    assert node.state == node.DWELL
+
+
+def test_a_landing_that_the_fcu_never_confirms_says_so_loudly(node, capfd):
+    """Carrying on is right — the mission must not stall — but the next
+    takeoff will probably be refused, and the log has to say why."""
+    enter(node, node.LAND, age_s=node.land_timeout + 1.0)
+    land_state(node, armed=True, z=0.86)
+    capfd.readouterr()
+    node._do_land()
+    text = "".join(capfd.readouterr())
+    assert node.state == node.DWELL
+    assert "never disarmed" in text
+
+
+def test_a_dry_run_still_lands_on_stillness(node):
+    """There is no FCU to disarm: the vehicle is unarmed for the whole run by
+    construction, so the disarm signal carries no information at all."""
+    node.dry_run = True
+    enter(node, node.LAND)
+    land_state(node, armed=False, z=0.86)
+    node.dry_run = True
+    node._do_land()
+    assert node.state == node.DWELL

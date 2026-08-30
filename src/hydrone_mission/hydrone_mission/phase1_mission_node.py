@@ -2144,16 +2144,44 @@ class Phase1MissionNode(Node):
         # touchdown the instant LAND was entered — at hover height, writing that
         # height into the pad. Ignore it there and let stillness-plus-descent
         # decide, which is what the person setting the drone down produces.
+        # THE FCU'S DISARM IS THE ONLY AUTHORITATIVE SIGNAL, and waiting for it
+        # is not caution, it is the difference between the mission working and
+        # not.
+        #
+        # MEASURED 2026-08-29 on an elevated base. The stillness heuristic below
+        # fired at z=0.86, the mission called it landed, went to ARMING and
+        # switched the mode to GUIDED — WHICH HALTS A LAND DESCENT. From then
+        # on ArduCopter refused every takeoff, correctly, because from its point
+        # of view the vehicle had never landed and was still flying. The log
+        # says so twice: "EKF3 IMU0 MAG0 IN-FLIGHT yaw alignment complete"
+        # arrives after the mission believes it is parked, and z drifts UP from
+        # 0.86 to 1.13 — a vehicle on a pad cannot rise 27 cm.
+        #
+        # Stillness is a good touchdown DETECTOR and a bad touchdown PROOF. On
+        # an elevated pad the descent slows near the surface and a 2 s window of
+        # small movement looks exactly like resting on it. The FCU has a real
+        # landing detector — throttle, climb rate and attitude together — and
+        # DISARM_DELAY (3 s, holybro_sitl.parm) is how long after it trips the
+        # motors stop.
+        #
+        # So stillness now only ARMS the wait; the disarm ends it. If the disarm
+        # never comes, `land_timeout` still carries the mission on, and says
+        # loudly that the FCU never agreed.
         disarmed = (not self.dry_run) and (not self.mav_state.armed)
         still = self._z_is_still()
         descended = (self._land_entry_z is not None
                      and self.pose is not None
                      and (self._land_entry_z - self.pose.pose.position.z)
                      >= self.min_descent)
+        if still and descended and not disarmed and not self.dry_run:
+            self._throttle(
+                "stopped and descended, waiting for the FCU to disarm before "
+                "calling it a landing — switching to GUIDED while it is still "
+                "descending is what makes every later takeoff fail.")
 
         # No extra debounce: _z_is_still already demands a FULL land_settle_s
         # window of stillness before it returns true, and a disarm is definitive.
-        if disarmed or (still and descended):
+        if disarmed or (self.dry_run and still and descended):
             z = self.pose.pose.position.z if self.pose else 0.0
             why = "disarmed" if disarmed else "descended and stopped"
             if self.landing_for == self.LAND_PAD:
@@ -2170,9 +2198,12 @@ class Phase1MissionNode(Node):
             return
 
         if self._since_entered() > self.land_timeout:
-            self.get_logger().warn(
-                f"no touchdown within {self.land_timeout:.0f} s — carrying on "
-                "anyway so the mission does not stall here.")
+            self.get_logger().error(
+                f"the FCU never disarmed within {self.land_timeout:.0f} s. "
+                f"Carrying on so the mission does not stall — but it does NOT "
+                f"believe we landed, so the next takeoff will probably be "
+                f"refused. Check LAND is reaching the surface (z="
+                f"{self.pose.pose.position.z if self.pose else 0.0:.2f} m).")
             self._enter(self.DWELL)
 
     def _report_landing_anchor(self):
