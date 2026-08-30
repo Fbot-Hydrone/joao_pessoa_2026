@@ -85,24 +85,10 @@ class RemoteArduBridgeNode(Node):
             raise RuntimeError("Veiculo desconhecido: {}".format(agent_type))
         profile = VEHICLE_REGISTRY[match]
 
-        # ArduPilot's own sensors, plus whatever the YAML adds for ROS. A
-        # sensor named in both is taken from ArduPilot's list: getting the
-        # EKF's inputs wrong is a far worse failure than a camera at an
-        # unexpected rate.
-        sensors = RemoteArduRunner.build_sensors(
-            profile,
-            ticks_per_sec=scenario_cfg.get('ticks_per_sec', 200),
-            extra=agent_cfg.get('sensors', []))
-
-        # ros_publish is the YAML's call, per sensor. The ones ArduPilot added
-        # default to off, so the EKF's inputs do not silently become four extra
-        # topics nobody asked for.
-        wanted = {spec.get('sensor_name', spec['sensor_type']): spec.get('ros_publish', False)
-                  for spec in agent_cfg.get('sensors', [])}
-        for spec in sensors:
-            spec['ros_publish'] = wanted.get(
-                spec.get('sensor_name', spec['sensor_type']), False)
-
+        # The YAML's sensors go on top of the ones ArduPilot needs. The
+        # ArduPilot set is built by the runner at connect time, from the tick
+        # rate the world reports -- not from ticks_per_sec in this YAML, which
+        # describes a simulator this node is not running and can disagree.
         self.runner = RemoteArduRunner(
             profile,
             package_name=scenario_cfg.get('package_name', DEFAULT_PACKAGE_NAME),
@@ -111,21 +97,32 @@ class RemoteArduBridgeNode(Node):
             address=self._param('world_address'),
             port=self._param('world_port'),
             instance=self._param('instance'),
-            sensors=sensors,
+            extra_sensors=agent_cfg.get('sensors', []),
             location=tuple(agent_cfg.get('location', [0, 0, 5])),
             rotation=tuple(agent_cfg.get('rotation', [0, 0, 0])),
             dynamics=agent_cfg.get('dynamics', {}),
-            ticks_per_sec=scenario_cfg.get('ticks_per_sec', 200),
             gps_origin=GPS_ORIGIN,
             stream_backlog=self._param('stream_backlog'),
             client_id="ardubridge-{}".format(agent),
         )
 
         info = self.runner.connect()
-        self.get_logger().info("conectado ao mundo | tick {} | input delay {}".format(
-            info.get('tick'), info.get('input_delay')))
+        self.get_logger().info(
+            "conectado ao mundo | tick {} | {} Hz | input delay {}".format(
+                info.get('tick'), self.runner.ticks_per_sec,
+                info.get('input_delay')))
 
-        self._wire_ros(agent, agent_type, sensors, profile)
+        # ros_publish is the YAML's call, per sensor, and can only be applied
+        # once the runner has settled what the sensor list actually is. The
+        # ones ArduPilot added default to off, so the EKF's inputs do not
+        # silently become four extra topics nobody asked for.
+        wanted = {spec.get('sensor_name', spec['sensor_type']): spec.get('ros_publish', False)
+                  for spec in agent_cfg.get('sensors', [])}
+        for spec in self.runner.sensors:
+            spec['ros_publish'] = wanted.get(
+                spec.get('sensor_name', spec['sensor_type']), False)
+
+        self._wire_ros(agent, agent_type, self.runner.sensors, profile)
 
         self.get_logger().info(
             "aguardando SITL em udp/{} | MAVLink em tcp/{}".format(
