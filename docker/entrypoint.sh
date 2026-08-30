@@ -8,21 +8,35 @@ source /ws/install/setup.bash
 # the bs-drone-competition repo, mounted read-only by docker-compose. It is
 # installed on first container start; the copy to a temp dir keeps pip from
 # writing build artifacts into the mounted (host) repo.
-if ! python3 -c 'import biguasim' 2>/dev/null; then
-    if [ -d /opt/bs-drone-competition ]; then
-        echo "[entrypoint] installing biguasim from /opt/bs-drone-competition ..."
-        tmp=$(mktemp -d)
-        cp -r /opt/bs-drone-competition/pyproject.toml \
-              /opt/bs-drone-competition/setup.py \
-              /opt/bs-drone-competition/README.md \
-              /opt/bs-drone-competition/src \
-              "$tmp"/
-        pip3 install --no-cache-dir "$tmp"
-        rm -rf "$tmp"
-    else
+#
+# Keyed on the CONTENT of pyproject.toml rather than on whether biguasim
+# imports. "Is it installed?" goes stale the moment the package gains a
+# dependency: biguasim itself still imports, the install is skipped, and the
+# new dependency is never fetched. That is exactly how `import zmq` came to
+# fail after biguasim gained pyzmq -- the symptom points at the node, and the
+# cause is a guard that answered a question nobody was asking.
+BS_STAMP=/var/tmp/.biguasim-installed
+if [ -d /opt/bs-drone-competition ]; then
+    bs_want=$(md5sum /opt/bs-drone-competition/pyproject.toml | cut -d' ' -f1)
+else
+    bs_want=
+fi
+if [ -z "$bs_want" ]; then
+    if ! python3 -c 'import biguasim' 2>/dev/null; then
         echo "[entrypoint] WARNING: biguasim not installed and /opt/bs-drone-competition not mounted." >&2
-        echo "[entrypoint]          ardubridge_node will fail to import biguasim (see docker-compose.yml)." >&2
+        echo "[entrypoint]          the bridge node will fail to import biguasim (see docker-compose.yml)." >&2
     fi
+elif [ "$(cat "$BS_STAMP" 2>/dev/null)" != "$bs_want" ]; then
+    echo "[entrypoint] installing biguasim from /opt/bs-drone-competition ..."
+    tmp=$(mktemp -d)
+    cp -r /opt/bs-drone-competition/pyproject.toml \
+          /opt/bs-drone-competition/setup.py \
+          /opt/bs-drone-competition/README.md \
+          /opt/bs-drone-competition/src \
+          "$tmp"/
+    pip3 install --no-cache-dir "$tmp"
+    rm -rf "$tmp"
+    echo "$bs_want" > "$BS_STAMP"
 fi
 
 # Unreal Engine refuses to start as root ("Refusing to run with the root
