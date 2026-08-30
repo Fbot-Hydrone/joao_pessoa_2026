@@ -29,6 +29,10 @@ def generate_launch_description():
                               description='Host running the world process.'),
         DeclareLaunchArgument('world_port', default_value='8770',
                               description='Its request port; state is port+1.'),
+        DeclareLaunchArgument('instance', default_value='0',
+                              description='ArduPilot SITL instance. Shifts every '
+                                          'port by 10x this, which is how a second '
+                                          'vehicle avoids the first.'),
         DeclareLaunchArgument('report_every', default_value='0',
                               description='Log a frame/skip count every N ticks. 0 is silent.'),
     ]
@@ -44,6 +48,7 @@ def generate_launch_description():
             'params_file': str(params_file),
             'world_address': LaunchConfiguration('world_address'),
             'world_port': ParameterValue(LaunchConfiguration('world_port'), value_type=int),
+            'instance': ParameterValue(LaunchConfiguration('instance'), value_type=int),
             'report_every': ParameterValue(LaunchConfiguration('report_every'), value_type=int),
         }],
     )
