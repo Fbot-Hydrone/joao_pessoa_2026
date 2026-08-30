@@ -237,12 +237,42 @@ def generate_launch_description():
     dds_udp_parm = os.path.join(
         sitl_pkg, 'config', 'default_params', 'dds_udp.parm')
 
-    ardubridge = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(get_package_share_directory('biguasim_main'),
-                         'launch', 'ardubridge.launch.py')
+    # Local simulator, or one running somewhere else?
+    #
+    # Keyed off the environment rather than a launch argument on purpose. The
+    # argument would have to be re-declared and forwarded by every wrapper
+    # (hydrone_sim, phase1_sim, landing_sites_sim), and a re-declared argument
+    # carries the WRAPPER's default -- the exact trap documented at the top of
+    # phase1_sim.launch.py, where a tuned takeoff altitude was silently
+    # overridden. One env var read in one place has no such failure mode, and it
+    # reaches every entry point without any of them knowing about it.
+    #
+    # scripts/docker_up.sh --world <host[:port]> sets these.
+    world_address = os.environ.get('WORLD_ADDRESS', '').strip()
+    world_port = os.environ.get('WORLD_PORT', '8770').strip() or '8770'
+
+    if world_address:
+        # The world owns the engine; this container owns only SITL and the
+        # autonomy stack. Note the world PACKAGE still has to be installed here
+        # -- biguasim.server.protocol.build_id digests the local copy of the
+        # world config, and a client without it cannot match the world's digest.
+        ardubridge = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(get_package_share_directory('biguasim_main'),
+                             'launch', 'remote_ardubridge.launch.py')
+            ),
+            launch_arguments={
+                'world_address': world_address,
+                'world_port': world_port,
+            }.items(),
         )
-    )
+    else:
+        ardubridge = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(get_package_share_directory('biguasim_main'),
+                             'launch', 'ardubridge.launch.py')
+            )
+        )
 
     sitl_dds = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(

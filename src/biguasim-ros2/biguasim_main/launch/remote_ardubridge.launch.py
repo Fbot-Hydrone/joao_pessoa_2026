@@ -13,7 +13,8 @@ world process is actually running, or the build check refuses the connection.
 """
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration, ParameterValue
+from launch.substitutions import LaunchConfiguration
+from launch_ros.parameter_descriptions import ParameterValue
 import launch_ros.actions
 from ament_index_python.packages import get_package_share_directory
 from pathlib import Path

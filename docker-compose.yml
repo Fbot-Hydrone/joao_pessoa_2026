@@ -13,6 +13,12 @@ services:
       # - ROS_LOCALHOST_ONLY=1
       # Asset backend used by `biguasim.install(...)`; set on the host if used.
       - BS_WORLDS_URL=${BS_WORLDS_URL:-}
+      # Empty (the default) runs the simulator inside this container, as ever.
+      # Set, it runs SITL and the autonomy stack against a world process
+      # elsewhere -- sources_sim.launch.py reads these and swaps ardubridge_node
+      # for remote_ardubridge_node. scripts/docker_up.sh --world sets them.
+      - WORLD_ADDRESS=${WORLD_ADDRESS:-}
+      - WORLD_PORT=${WORLD_PORT:-8770}
     volumes:
       # UE5 viewport on the host X server (run `xhost +local:docker` first,
       # or use scripts/docker_up.sh)

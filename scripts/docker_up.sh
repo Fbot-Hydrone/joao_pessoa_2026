@@ -3,6 +3,7 @@
 #
 # Usage: scripts/docker_up.sh [--dev] [--no-build] [--phase1] [--landing-sites]
 #                             [--ground-truth] [--no-odom-print]
+#                             [--world HOST[:PORT]] [--world-port PORT]
 #                             [name:=value ...] [docker compose up args...]
 #   --dev             mount the project packages from the host into the
 #                     container (docker-compose.dev.yml) and skip the image
@@ -24,6 +25,25 @@
 #                     drone, which has none. See docs/LANDING-SITES.md §10.
 #   --no-odom-print   silence odom_error_node's 1 Hz VO-drift line (the CSV is
 #                     still written either way). On by default.
+#   --world HOST[:PORT]
+#                     fly against a BiguaSim world running in ANOTHER process,
+#                     instead of starting the simulator in this container.
+#                     SITL and the whole autonomy stack still run here; only the
+#                     physics, the sensor rendering and the collision checking
+#                     move. Several machines can then share one simulation and
+#                     SEE each other in it, which a local sim cannot do.
+#                     PORT defaults to 8770 (the world's request port; it also
+#                     uses PORT+1 to publish state).
+#                     Start the world with, on the other machine:
+#                       python tools/serve_world.py --package Competition \
+#                              --world CompetionMap --port 8770
+#   --world-port PORT the same port, given separately. Handy for an IPv6
+#                     literal, where HOST:PORT is ambiguous.
+#
+# Running against a world needs the world PACKAGE installed here too
+# (~/.local/share/biguasim, already bind-mounted): the client refuses to connect
+# unless its copy of the world matches the server's, because mismatched
+# collision geometry looks like broken physics rather than a version problem.
 #
 # Any argument containing ':=' is a LAUNCH argument and is appended to the
 # ros2 launch command inside the container, so the mission can be tuned without
@@ -43,11 +63,37 @@ HYDRONE_LAUNCH=hydrone_sim.launch.py
 ODOM_SOURCE=vo
 DEV_MODE=false
 DO_BUILD=true
+WORLD_ADDRESS="${WORLD_ADDRESS:-}"
+WORLD_PORT="${WORLD_PORT:-8770}"
 launch_args=()
 compose_args=()
+# --world and --world-port take a value, so the next argument belongs to them
+# rather than to compose. Tracked with a flag instead of shift/getopts to leave
+# the existing pass-everything-else-through behaviour exactly as it was.
+want_value=
 for arg in "$@"; do
+    if [ -n "$want_value" ]; then
+        case "$want_value" in
+            world)
+                # host:port, but only when the colon is unambiguous. An IPv6
+                # literal is full of colons and is left alone -- use
+                # --world-port for those, or bracket the address.
+                case "$arg" in
+                    \[*\]:*) WORLD_ADDRESS="${arg%:*}"; WORLD_PORT="${arg##*:}" ;;
+                    *:*:*)    WORLD_ADDRESS="$arg" ;;
+                    *:*)      WORLD_ADDRESS="${arg%:*}"; WORLD_PORT="${arg##*:}" ;;
+                    *)        WORLD_ADDRESS="$arg" ;;
+                esac
+                ;;
+            world-port) WORLD_PORT="$arg" ;;
+        esac
+        want_value=
+        continue
+    fi
     case "$arg" in
         --no-odom-print) ODOM_ERROR_PRINT=false ;;
+        --world)         want_value=world ;;
+        --world-port)    want_value=world-port ;;
         --phase1)        HYDRONE_LAUNCH=phase1_sim.launch.py ;;
         --landing-sites) HYDRONE_LAUNCH=landing_sites_sim.launch.py ;;
         --ground-truth)  ODOM_SOURCE=ground_truth ;;
@@ -69,6 +115,13 @@ export ODOM_ERROR_PRINT     # interpolated into `command:` in docker-compose.yml
 export HYDRONE_LAUNCH       # ditto — selects which launch file the container runs
 export ODOM_SOURCE          # ditto — what the EKF navigates on (vo|ground_truth)
 export HYDRONE_LAUNCH_ARGS  # ditto — extra name:=value pairs, possibly empty
+export WORLD_ADDRESS        # empty = simulate here; set = use a world elsewhere
+export WORLD_PORT           # its request port; state is published on PORT+1
+
+if [ -n "$want_value" ]; then
+    echo "ERROR: --$want_value needs a value" >&2
+    exit 1
+fi
 
 # Let the containerized UE5 viewport open on the host X server
 xhost +local:docker
@@ -110,6 +163,19 @@ if [ "$DEV_MODE" = true ]; then
     compose_files+=(-f docker-compose.dev.yml)
 fi
 
+if [ -n "$WORLD_ADDRESS" ]; then
+    # Bracket a bare IPv6 literal for display only; ZeroMQ's endpoint builder
+    # does the same thing to the real address. Without it the port looks like
+    # one more group of the address.
+    shown="$WORLD_ADDRESS"
+    case "$shown" in
+        \[*\]) ;;                      # already bracketed
+        *:*:*) shown="[$shown]" ;;     # a bare IPv6 literal
+    esac
+    echo "World        : $shown:$WORLD_PORT (remote — physics and sensors run there)"
+else
+    echo "World        : local (this container runs the simulator)"
+fi
 echo "Launch file  : $HYDRONE_LAUNCH"
 if [ -n "$HYDRONE_LAUNCH_ARGS" ]; then
     echo "Launch args  : $HYDRONE_LAUNCH_ARGS"
