@@ -24,7 +24,6 @@ Run inside the stack container, with the workspace built:
        src/hydrone_map/test/test_pad_pipeline.py -q'
 """
 
-import math
 import os
 import sys
 import time
@@ -361,9 +360,8 @@ def test_a_detection_outside_the_arena_is_refused():
         rclpy.init()
     try:
         node = PadMapNode(parameter_overrides=[
-            rclpy.parameter.Parameter("arena_size_x", value=8.0),
-            rclpy.parameter.Parameter("arena_size_y", value=8.0),
-            rclpy.parameter.Parameter("arena_margin_m", value=0.5),
+            rclpy.parameter.Parameter("arena_bounds",
+                                      value=[-4.5, -4.5, 4.5, 4.5]),
             rclpy.parameter.Parameter("require_armed", value=False),
         ])
         node.armed_once = True
@@ -380,92 +378,6 @@ def test_a_detection_outside_the_arena_is_refused():
             node._cb_detection(det)
             grew = len(node.pads) > before
             assert grew is inside, f"({x}, {y}) should be {'in' if inside else 'out'}"
-        node.destroy_node()
-    finally:
-        if started:
-            rclpy.shutdown()
-
-
-def test_the_motion_gate_allows_a_sweep_but_still_refuses_a_slew():
-    """The gate was sized for a search that stood still — "holding still costs
-    nothing here, the search is already rotate, settle, look". That premise
-    died when the search became FLY and look. MEASURED 2026-08-28 on seed 7:
-    39 detections refused for travelling against 4 accepted, and the mission
-    came back 4 of 6 bases.
-
-    Translation and yaw are not the same risk. The error is the motion during
-    the image-to-pose sync gap: 1 m/s over ~0.1 s is 0.1 m against a pad a
-    metre across, while 10 deg/s over the same gap is 1.7 deg, which at 6 m of
-    range is 0.18 m ALREADY and grows with distance.
-    """
-    from hydrone_map.pad_map_node import PadMapNode
-    from geometry_msgs.msg import TwistStamped
-
-    started = not rclpy.ok()
-    if started:
-        rclpy.init()
-    try:
-        node = PadMapNode()
-
-        def twist(speed, yaw_rate):
-            t = TwistStamped()
-            t.twist.linear.x = float(speed)
-            t.twist.angular.z = float(yaw_rate)
-            node.twist = t
-            return node._moving()[0]
-
-        assert not twist(0.8, 0.0), "refused a sweep at cruise speed"
-        assert twist(5.0, 0.0), "accepted a speed nothing could be projected at"
-        assert twist(0.0, math.radians(30.0)), "accepted a slew"
-        node.destroy_node()
-    finally:
-        if started:
-            rclpy.shutdown()
-
-
-def test_the_arena_is_described_by_its_size_not_by_four_corners():
-    """One source. The mission's planning box and this wall used to be two
-    different sets of numbers for the same arena — +/-5 m there and +/-4.5 m
-    here — which is one edit away from a mission that plans through a wall the
-    map already refuses to see.
-
-    A 5 x 6 m arena is `arena_size_x:=5.0 arena_size_y:=6.0` and nothing else.
-    """
-    from hydrone_map.pad_map_node import PadMapNode
-
-    started = not rclpy.ok()
-    if started:
-        rclpy.init()
-    try:
-        node = PadMapNode(parameter_overrides=[
-            rclpy.parameter.Parameter("arena_size_x", value=5.0),
-            rclpy.parameter.Parameter("arena_size_y", value=6.0),
-            rclpy.parameter.Parameter("arena_margin_m", value=0.5),
-        ])
-        assert node.arena_bounds == pytest.approx((-3.0, -3.5, 3.0, 3.5))
-        node.destroy_node()
-    finally:
-        if started:
-            rclpy.shutdown()
-
-
-def test_an_arena_that_is_not_centred_on_the_pose_origin():
-    """`map` is where the vehicle armed, which on the real drone is a takeoff
-    base somewhere in the arena, not its centre."""
-    from hydrone_map.pad_map_node import PadMapNode
-
-    started = not rclpy.ok()
-    if started:
-        rclpy.init()
-    try:
-        node = PadMapNode(parameter_overrides=[
-            rclpy.parameter.Parameter("arena_size_x", value=8.0),
-            rclpy.parameter.Parameter("arena_size_y", value=8.0),
-            rclpy.parameter.Parameter("arena_centre_x", value=2.0),
-            rclpy.parameter.Parameter("arena_centre_y", value=-1.0),
-            rclpy.parameter.Parameter("arena_margin_m", value=0.0),
-        ])
-        assert node.arena_bounds == pytest.approx((-2.0, -5.0, 6.0, 3.0))
         node.destroy_node()
     finally:
         if started:

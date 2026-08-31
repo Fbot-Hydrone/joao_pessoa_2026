@@ -214,13 +214,14 @@ def _inward_yaw(edge_a, edge_b, centre):
     return math.atan2(centre[1] - my, centre[0] - mx)
 
 
-def u_sweep(bounds, *, inset_m=1.2, z=2.0, start_corner=2):
-    """Three sides of the arena, as (x, y, z, yaw). FOUR POINTS PER LEG-END.
+def u_sweep(bounds, *, inset_m=1.2, z=2.0, start_corner=2,
+            side_x_m=None, side_y_m=None):
+    """Three sides of a rectangle, heading FIXED on each, as (x, y, z, yaw).
 
     LEVEL 1 of the search. The vehicle takes off, translates along one edge
     without rotating at all, turns 90 degrees at the corner, runs the next
-    edge, turns 90 degrees again, runs the third. Two turns in the whole sweep,
-    both at corners, and the camera faces INTO the arena throughout.
+    edge, turns 90 degrees again, runs the third. Two turns in the whole
+    sweep, both at corners, and the camera faces INTO the arena throughout.
 
     Why three sides and not four: from the third edge the camera already looks
     back across everything the fourth would cover, so the fourth is a minute of
@@ -232,30 +233,44 @@ def u_sweep(bounds, *, inset_m=1.2, z=2.0, start_corner=2):
     corners is what lets the detector work a stable scene and keeps the
     odometry out of the manoeuvre this arena breaks it on.
 
-    NO INTERMEDIATE POINTS. A leg is a straight line flown on one heading, so
-    a point in the middle of it does nothing except tell the vehicle to stop.
-    ArduCopter's GUIDED treats a position target as "go there and halt", and
-    the mission waits to arrive before releasing the next one — so every
-    intermediate point was a full decelerate-and-accelerate.
+    ONE SETPOINT PER LEG. A leg is a straight line flown on a single heading,
+    so a point in the middle of it does nothing except tell the vehicle to
+    stop: ArduCopter's GUIDED treats a position target as "go there and halt",
+    and the mission waits to arrive before releasing the next one. With
+    WP_SPD 1.5 m/s and WP_ACC 1.5 m/s/s, reaching cruise takes 1 s and 0.75 m
+    and stopping the same — so at the 1.5 m spacing this used to have, the
+    vehicle NEVER REACHED CRUISE anywhere in the sweep, averaging 0.75 m/s
+    against an airframe capable of twice that. Each leg is now flown whole, at
+    whatever speed the FCU is configured for (WP_SPD in holybro_sitl.parm).
 
-    MEASURED with the numbers this stack flies at: WP_SPD 1.5 m/s and WP_ACC
-    1.5 m/s/s means reaching cruise takes 1 s and 0.75 m, and stopping the
-    same. At the old 1.5 m spacing the vehicle NEVER REACHED CRUISE anywhere
-    in the sweep — each hop was pure ramp, ~2.0 s for 1.5 m, an average of
-    0.75 m/s against an airframe capable of twice that. One 5.6 m leg flown
-    whole is ~4.7 s; the same leg in four hops is ~8 s plus three pauses.
+    THE SIDE. By default the rectangle is the arena inset by `inset_m` on every
+    edge, so `leg = size - 2 * inset`. Pass `side_x_m` / `side_y_m` to state
+    the leg length outright instead: the rectangle is then that size, centred
+    in the arena, and `inset_m` is ignored for that axis. Either way it stays
+    inside the arena — a side longer than the arena is still clipped by the
+    bounds it was built from being the caller's own.
 
-    The intermediate points were inherited from the rectangle that came before,
-    where the heading WAS re-aimed at every step and they had a job. Here they
-    had none.
-
-    `start_corner` indexes the inset rectangle's corners counter-clockwise from
+    `start_corner` indexes the rectangle's corners counter-clockwise from
     (min_x, min_y). It should be the one nearest where the drone took off, so
     the sweep starts without a transit leg.
     """
     (min_x, min_y, _), (max_x, max_y, _) = bounds
-    x0, x1 = min_x + inset_m, max_x - inset_m
-    y0, y1 = min_y + inset_m, max_y - inset_m
+    cx, cy = (min_x + max_x) / 2.0, (min_y + max_y) / 2.0
+
+    if side_x_m and side_x_m > 0.0:
+        # CLAMPED to the arena. A stated side longer than the arena would put
+        # the sweep outside it, and outside the arena is where the competition
+        # ends the attempt — a typed number must not be able to fly the drone
+        # over the line.
+        x0 = max(cx - side_x_m / 2.0, min_x)
+        x1 = min(cx + side_x_m / 2.0, max_x)
+    else:
+        x0, x1 = min_x + inset_m, max_x - inset_m
+    if side_y_m and side_y_m > 0.0:
+        y0 = max(cy - side_y_m / 2.0, min_y)
+        y1 = min(cy + side_y_m / 2.0, max_y)
+    else:
+        y0, y1 = min_y + inset_m, max_y - inset_m
     if x1 <= x0 or y1 <= y0:
         return []
     centre = ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
@@ -273,7 +288,7 @@ def u_sweep(bounds, *, inset_m=1.2, z=2.0, start_corner=2):
     # So a corner is two setpoints at the SAME position: the leg that arrives
     # there (still on the old heading) and then a pure turn, standing still.
     out = []
-    for i, (a, b) in enumerate(zip(order, order[1:])):   # three legs, not four
+    for a, b in zip(order, order[1:]):          # three legs, not four
         yaw = _inward_yaw(a, b, centre)
         out.append((a[0], a[1], z, yaw))    # at the corner, now on the new yaw
         out.append((b[0], b[1], z, yaw))    # fly the whole leg, one setpoint

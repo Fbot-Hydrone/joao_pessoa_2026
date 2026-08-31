@@ -164,31 +164,23 @@ class PadMapNode(Node):
         self.declare_parameter("min_confidence", 0.50)
         # Beyond this range a projection is too uncertain to seed the map with.
         self.declare_parameter("max_range_m", 30.0)
-        # THE ARENA. Same four launch arguments the mission derives its
-        # planning box from, so the two can never disagree — they used to, at
-        # +/-4.5 m here and +/-5 m there for the same 8x8 m arena.
+        # The arena, as [min_x, min_y, max_x, max_y] in the world frame. A
+        # detection projected OUTSIDE it is refused.
         #
-        # A detection projected OUTSIDE it is refused, and this is not a
-        # tidy-up but a wall. The ground-plane projection intersects a camera
-        # ray with the floor, and a ray aimed at the top of a wall crosses that
-        # plane on the FAR SIDE of it — so a base gets mapped inside the
-        # masonry, the mission flies at it, and in a confined arena that is a
-        # collision. MEASURED 2026-08-28 on an 8x8 m arena: candidates at
-        # (4.99, 3.57) and (4.97, 0.05), and on earlier runs (10.23, -2.25) —
-        # two and a half metres past the wall.
+        # This is not a tidy-up, it is a wall. The ground-plane projection
+        # intersects a camera ray with the floor, and a ray aimed at the top of
+        # a wall crosses that plane on the FAR SIDE of it — so a base gets
+        # mapped inside the masonry, the mission flies at it, and in a confined
+        # arena that is a collision. MEASURED 2026-08-28 on an 8x8 m arena
+        # (regions run -4..+4): candidates at (4.99, 3.57) and (4.97, 0.05),
+        # and on earlier runs (10.23, -2.25) and (10.36, -2.26) — two and a
+        # half metres past the wall.
         #
-        # Nothing downstream can recover: pad_map has no idea where the walls
-        # are, route just flies to the nearest candidate, and the confirmation
-        # hover happens after the trip. The cheapest place to refuse it is
-        # here, the moment the position is computed.
-        self.declare_parameter("arena_size_x", 8.0)
-        self.declare_parameter("arena_size_y", 8.0)
-        self.declare_parameter("arena_centre_x", 0.0)
-        self.declare_parameter("arena_centre_y", 0.0)
-        # Slack outside the arena proper. A base is allowed to sit against a
-        # wall, and the projection of one has error, so the line is drawn a
-        # little wide — but nowhere near wide enough to admit the far side.
-        self.declare_parameter("arena_margin_m", 0.5)
+        # Nothing downstream can recover from this: pad_map has no idea where
+        # the walls are, route just flies to the nearest candidate, and the
+        # confirmation hover happens after the trip. The cheapest place to
+        # refuse it is here, the moment the position is computed.
+        self.declare_parameter("arena_bounds", [-4.5, -4.5, 4.5, 4.5])
         self.declare_parameter("min_observations", 3)
         self.declare_parameter("provisional_ttl_s", 20.0)
         # How close overhead the drone must be for the rangefinder to be
@@ -208,36 +200,14 @@ class PadMapNode(Node):
         # as the pose it is composed with, and while translating or slewing that
         # pose is stale by however long the estimator lags: the pad lands in the
         # map metres from where it is, and those phantoms are what the search
-        # then flies out to rule out. The two limits are sized differently on
-        # purpose: see max_map_speed below for why translation is cheap and
-        # yaw is not.
+        # then flies out to rule out. Holding still costs nothing here — the
+        # search is already rotate, settle, look.
         #
         # The EKF's own velocity, not a pose difference: at 30 Hz a centimetre
         # of pose noise differentiates to 0.3 m/s and would gate out everything.
         self.declare_parameter("velocity_topic",
                                "/mavros/local_position/velocity_local")
-        # 0.15 m/s until 2026-08-28, and the comment above explains the value:
-        # "holding still costs nothing here — the search is already rotate,
-        # settle, look". That premise died when the search became FLY and look.
-        #
-        # MEASURED on seed 7 with the U sweep: 39 detections refused for
-        # travelling against 4 accepted. The sweep translates continuously by
-        # design, so the gate was throwing away nine tenths of everything the
-        # camera found, and the mission came back 4 of 6 bases.
-        #
-        # The gate's real quantity is not speed, it is speed x the sync error
-        # between the image stamp and the pose stamp — the distance the vehicle
-        # moved between the picture and the position it is projected through.
-        # At 1 m/s and the ~0.1 s the streams are apart that is 0.1 m, against
-        # a pad a metre across. Yaw is the one that stays strict: 10 deg/s over
-        # the same 0.1 s is 1.7 deg, which at 6 m of range is already 0.18 m,
-        # and it grows with distance while the translation error does not.
-        # ACOPLADO A WP_SPD. This must sit ABOVE the vehicle's cruise speed,
-        # which holybro_sitl.parm sets to 1.5 m/s, or the sweep spends its
-        # whole flight above the gate and the map learns nothing from it —
-        # which is exactly the failure this parameter was raised to fix once
-        # already. Raising WP_SPD without raising this one silently undoes it.
-        self.declare_parameter("max_map_speed", 2.0)
+        self.declare_parameter("max_map_speed", 0.15)
         self.declare_parameter("max_map_yaw_rate_deg", 10.0)
         # How far from the registered takeoff base a detection is still THAT
         # base. Wider than merge_radius on purpose: the start base is seen from
@@ -255,11 +225,8 @@ class PadMapNode(Node):
         self.min_conf = float(p("min_confidence"))
         self.max_range = float(p("max_range_m"))
         self.min_obs = int(p("min_observations"))
-        cx, cy = float(p("arena_centre_x")), float(p("arena_centre_y"))
-        m = float(p("arena_margin_m"))
-        hx = float(p("arena_size_x")) / 2.0 + m
-        hy = float(p("arena_size_y")) / 2.0 + m
-        self.arena_bounds = (cx - hx, cy - hy, cx + hx, cy + hy)
+        b = [float(v) for v in p("arena_bounds")]
+        self.arena_bounds = (b[0], b[1], b[2], b[3])
         self.ttl = float(p("provisional_ttl_s"))
         self.overhead_radius = float(p("overhead_radius"))
         self.world_frame = p("world_frame")

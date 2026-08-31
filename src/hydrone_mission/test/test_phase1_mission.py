@@ -308,7 +308,6 @@ def test_a_full_search_makes_exactly_max_rotations_turns(node):
 # ── Choosing what to do with the air ─────────────────────────────────────────
 
 def test_a_confirmed_candidate_is_flown_to(node):
-    node.survey_done = True          # the landing phase
     node.home = (9.0, 9.0)
     set_pose(node, 0.0, 0.0)
     set_map(node, pad(4, 2.0, 1.0))
@@ -336,7 +335,6 @@ def test_nothing_in_the_map_falls_through_to_the_search(node):
 
 
 def test_the_quota_sends_the_drone_home(node):
-    node.survey_done = True          # the landing phase
     node.landed_count = 2
     set_map(node, pad(0, -0.5, 0.2, takeoff_base=True),
             pad(4, 2.0, 1.0))
@@ -348,8 +346,6 @@ def test_the_quota_sends_the_drone_home(node):
 
 def test_home_falls_back_to_where_we_armed(node):
     """If registration failed there is no takeoff-base entry to fly to."""
-    node.survey_done = True          # the landing phase
-    node.survey_done = True          # the landing phase
     node.home = (1.25, -3.5)
     node.landed_count = 2
     set_map(node, pad(4, 2.0, 1.0))
@@ -711,7 +707,6 @@ def test_coverage_can_be_turned_off(node):
 def test_a_pad_leg_is_not_treated_as_a_viewpoint_leg(node):
     """The flag has to be cleared by whoever starts a normal leg, or the pad
     that follows a coverage trip would never be blacklisted."""
-    node.survey_done = True          # the landing phase
     node._viewpoint_leg = True
     node.landed_count = 0
     set_map(node, pad(4, 3.0, 0.0))
@@ -1278,369 +1273,56 @@ def test_the_target_pixel_is_a_parameter_for_an_off_centre_lens(node):
     assert node.get_parameter("pad_target_uv").value == [320.0, 240.0]
 
 
-# ── The arena is one number, not two sets of corners ─────────────────────────
+# ── The U's legs, stated in metres ───────────────────────────────────────────
 
-def arena_node(**kw):
+def u_node(**kw):
     params = [rclpy.parameter.Parameter("auto_start", value=False)]
     params += [rclpy.parameter.Parameter(k, value=v) for k, v in kw.items()]
     return Phase1MissionNode(parameter_overrides=params)
 
 
-def test_the_planning_box_comes_from_the_arena_size():
-    """A 5 x 6 m arena is `arena_size_x:=5.0 arena_size_y:=6.0` and nothing
-    else — it sets the U's legs, the planner's box and the lawnmower's lanes
-    at once."""
-    n = arena_node(arena_size_x=5.0, arena_size_y=6.0,
-                   arena_floor_z=0.3, arena_ceiling_z=2.5)
-    assert n.plan_bounds == ((-2.5, -3.0, 0.3), (2.5, 3.0, 2.5))
+def test_the_u_side_can_be_set_in_metres(node):
+    """Set it when the sweep should be a particular size for a reason the
+    arena dimensions do not express."""
+    n = u_node(u_side_x_m=4.0, u_side_y_m=3.0)
+    n._level = 1
+    n._begin_level()
+    xs = [p[0] for p in n._survey_path]
+    ys = [p[1] for p in n._survey_path]
+    assert max(xs) - min(xs) == pytest.approx(4.0)
+    assert max(ys) - min(ys) == pytest.approx(3.0)
     n.destroy_node()
 
 
-def test_the_u_shrinks_with_the_arena():
-    """The whole point of parametrising it: the competition arena is 8 x 8 and
-    the team's own is 5 x 6."""
-    big = arena_node(arena_size_x=8.0, arena_size_y=8.0, survey_inset_m=1.2)
-    small = arena_node(arena_size_x=5.0, arena_size_y=6.0, survey_inset_m=1.2)
-    big._level = small._level = 1
-    big._begin_level()
-    small._begin_level()
-    big_leg = max(p[0] for p in big._survey_path) - min(p[0] for p in big._survey_path)
-    small_leg = max(p[0] for p in small._survey_path) - min(p[0] for p in small._survey_path)
-    assert big_leg == pytest.approx(8.0 - 2 * 1.2)
-    assert small_leg == pytest.approx(5.0 - 2 * 1.2)
-    big.destroy_node()
-    small.destroy_node()
-
-
-def test_the_inset_sets_the_leg_length():
-    """leg = size - 2*inset. On a 5 x 6 arena the inset wants to be smaller
-    than on an 8 x 8 one."""
-    a = arena_node(arena_size_x=6.0, arena_size_y=6.0, survey_inset_m=0.5)
-    a._level = 1
-    a._begin_level()
-    leg = max(p[0] for p in a._survey_path) - min(p[0] for p in a._survey_path)
-    assert leg == pytest.approx(5.0)
-    a.destroy_node()
-
-
-def test_an_arena_not_centred_on_where_the_drone_armed():
-    """`map` is where the vehicle armed, which on the real drone is a takeoff
-    base somewhere in the arena, not its centre."""
-    n = arena_node(arena_size_x=8.0, arena_size_y=8.0,
-                   arena_centre_x=2.0, arena_centre_y=-1.0,
-                   arena_floor_z=0.3, arena_ceiling_z=2.5)
-    assert n.plan_bounds == ((-2.0, -5.0, 0.3), (6.0, 3.0, 2.5))
+def test_zero_keeps_deriving_the_side_from_the_arena(node):
+    """leg = arena_size - 2 * survey_inset_m, which is what it always did."""
+    n = u_node(u_side_x_m=0.0, u_side_y_m=0.0, survey_inset_m=1.2)
+    n._level = 1
+    n._begin_level()
+    xs = [p[0] for p in n._survey_path]
+    lo, hi = n.plan_bounds
+    assert max(xs) - min(xs) == pytest.approx((hi[0] - lo[0]) - 2 * 1.2)
     n.destroy_node()
 
 
-# ── The arena boundary is a line on the floor, not a wall ────────────────────
-#
-# The occupancy map knows about WALLS, and in the simulator's arena — as in the
-# real hall — the walls stand well outside the competition boundary. Nothing
-# physical stops the vehicle crossing it and nothing in the map objects,
-# because the space beyond genuinely is empty.
-
-def test_a_setpoint_outside_the_arena_is_clamped(node):
-    n = arena_node(arena_size_x=8.0, arena_size_y=8.0, arena_keepout_m=0.3)
-    x, y, _, _ = n._fenced((9.0, -7.0, 1.0, 0.0))
-    assert x == pytest.approx(3.7)
-    assert y == pytest.approx(-3.7)
+def test_level_2_uses_the_same_side_as_level_1(node):
+    """It is the SAME U half a metre higher — a different shape would make the
+    two levels test different things."""
+    n = u_node(u_side_x_m=4.0, u_side_y_m=4.0)
+    n._level = 1
+    n._begin_level()
+    one = [p[:2] for p in n._survey_path]
+    n._level = 2
+    n._begin_level()
+    assert [p[:2] for p in n._survey_path] == one
     n.destroy_node()
 
 
-def test_a_setpoint_inside_the_arena_is_untouched(node):
-    n = arena_node(arena_size_x=8.0, arena_size_y=8.0, arena_keepout_m=0.3)
-    assert n._fenced((1.0, -2.0, 1.5, 0.4)) == (1.0, -2.0, 1.5, 0.4)
-    n.destroy_node()
-
-
-def test_the_fence_follows_the_arena_size(node):
-    """A 5 x 6 m arena fences at 5/2 and 6/2, less the keepout."""
-    n = arena_node(arena_size_x=5.0, arena_size_y=6.0, arena_keepout_m=0.5)
-    x, y, _, _ = n._fenced((99.0, 99.0, 1.0, 0.0))
-    assert x == pytest.approx(2.0)
-    assert y == pytest.approx(2.5)
-    n.destroy_node()
-
-
-def test_the_fence_follows_an_off_centre_arena(node):
-    n = arena_node(arena_size_x=8.0, arena_size_y=8.0,
-                   arena_centre_x=2.0, arena_centre_y=-1.0,
-                   arena_keepout_m=0.0)
-    x, y, _, _ = n._fenced((99.0, -99.0, 1.0, 0.0))
-    assert x == pytest.approx(6.0)
-    assert y == pytest.approx(-5.0)
-    n.destroy_node()
-
-
-def test_the_fence_leaves_height_alone(node):
-    """The net above and the floor below are real, and clamping z would fight
-    the landing descent — which is the FCU's, not this node's."""
-    n = arena_node(arena_size_x=8.0, arena_size_y=8.0)
-    assert n._fenced((0.0, 0.0, 99.0, 0.0))[2] == 99.0
-    assert n._fenced((0.0, 0.0, -5.0, 0.0))[2] == -5.0
-    n.destroy_node()
-
-
-def test_nothing_can_reach_the_fcu_without_passing_the_fence(node):
-    """The guard is at _stream, the single point a setpoint reaches the FCU —
-    not at the six places that command a position. A caller that forgets the
-    fence is exactly the caller that would have crossed the line."""
-    published = []
-    node.arena_keepout_m = 0.3
-    node.pub_sp = type("P", (), {"publish": lambda _s, m: published.append(m)})()
-    node.stream_setpoint = True
-    node.setpoint = [99.0, 99.0, 1.0, 0.0]      # set directly, bypassing _goto
-    node._stream()
-    assert published
-    (min_x, min_y, _), (max_x, max_y, _) = node.plan_bounds
-    assert published[0].pose.position.x <= max_x - 0.3 + 1e-9
-    assert published[0].pose.position.y <= max_y - 0.3 + 1e-9
-
-
-# ── The settle guards a TURN, not a translation ──────────────────────────────
-
-def test_a_pure_translation_barely_settles(node):
-    """MEASURED on an 8x8 arena: the U's 23 waypoints at the full 5 s were
-    115 s of the level's ~200 s — more than half the sweep spent waiting for a
-    yaw estimate that never moved. The U holds a fixed heading down each leg."""
-    node._last_settle_yaw = 0.0
-    node.setpoint = [1.0, 2.0, 1.0, 0.0]
-    assert node._settle_needed() == pytest.approx(node.settle_moving_s)
-
-
-def test_a_heading_change_settles_in_full(node):
-    """A detection taken while yaw is slewing is projected through a moving
-    estimate and lands in the map metres out. That is what the pause is for,
-    and it stays."""
-    node._last_settle_yaw = 0.0
-    node.setpoint = [1.0, 2.0, 1.0, math.radians(90.0)]
-    assert node._settle_needed() == pytest.approx(node.settle_s)
-
-
-def test_a_tiny_heading_wobble_is_not_a_turn(node):
-    node._last_settle_yaw = 0.0
-    node.setpoint = [1.0, 2.0, 1.0, math.radians(2.0)]
-    assert node._settle_needed() == pytest.approx(node.settle_moving_s)
-
-
-def test_the_first_settle_of_a_run_is_the_full_one(node):
-    """Nothing is known about the heading the vehicle arrived on."""
-    node._last_settle_yaw = None
-    assert node._settle_needed() == pytest.approx(node.settle_s)
-
-
-def test_an_abort_forgets_the_settled_heading(node):
-    node._last_settle_yaw = 1.0
-    node._reset()
-    assert node._last_settle_yaw is None
-
-
-def test_the_settle_still_waits_before_reading_the_map(node):
-    """Shortening it must not remove it: the vehicle still has to have stopped
-    before a detection is believed."""
-    node.survey_done = True
-    node.survey_circuit = False
-    node._last_settle_yaw = 0.0
-    node.setpoint = [0.0, 0.0, 1.0, 0.0]
-    node.home = (9.0, 9.0)
-    set_map(node, pad(1, 2.0, 0.0))
-    enter(node, node.SETTLE, age_s=0.0)
-    node._do_settle()
-    assert node.state == node.SETTLE, "read the map without settling at all"
-
-
-def test_select_will_not_start_landing_before_the_survey(node):
-    """TAKEOFF hands straight to SELECT, so this is a SECOND door into the
-    landing phase and it had no lock on it. It went unnoticed because the map
-    is empty at takeoff — MEASURED 2026-08-29, once detections started being
-    accepted while the vehicle moves, a candidate existed by the time SELECT
-    first ran and the mission flew to FOUR bases before the sweep began."""
-    node.survey_done = False
-    node.home = (9.0, 9.0)
-    node.landed_count = 0
-    set_map(node, pad(1, 2.0, 0.0))
-    enter(node, node.SELECT)
-    node._do_select()
-    assert node.state == node.SETTLE, "started landing before surveying"
-
-
-def test_takeoff_into_select_still_reaches_the_survey(node):
-    """The path the bug came in through."""
-    node.survey_done = False
-    node.home = (9.0, 9.0)
-    set_map(node, pad(1, 2.0, 0.0))
-    enter(node, node.SELECT)
-    node._do_select()
-    assert node.state == node.SETTLE
-
-
-# ── Touchdown is the FCU's word, not ours ────────────────────────────────────
-#
-# MEASURED 2026-08-29 on an elevated base: the stillness heuristic fired at
-# z=0.86, the mission called it landed, went to ARMING and switched to GUIDED —
-# WHICH HALTS A LAND DESCENT. Every takeoff after that was refused, correctly,
-# because from ArduCopter's point of view the vehicle was still flying. The log
-# says so twice: "EKF3 IMU0 MAG0 IN-FLIGHT yaw alignment complete" after the
-# mission believed it was parked, and z drifting UP from 0.86 to 1.13.
-
-def land_state(node, *, armed, z, entry_z=2.0):
-    node.dry_run = False
-    node.mav_state.mode = "LAND"
-    node.mav_state.armed = armed
-    node._land_entry_z = entry_z
-    set_pose(node, 0.0, 0.0, z=z)
-    # a full window of stillness at this height
-    node._z_hist = [(node._now() - node.land_settle - 1.0, z),
-                    (node._now(), z)]
-
-
-def test_stillness_alone_is_not_a_landing(node):
-    """It is a good touchdown DETECTOR and a bad touchdown PROOF: on an
-    elevated pad the descent slows near the surface and a 2 s window of small
-    movement looks exactly like resting on it."""
-    enter(node, node.LAND)
-    land_state(node, armed=True, z=0.86)
-    node._do_land()
-    assert node.state == node.LAND, "called it a landing without the FCU"
-
-
-def test_the_fcu_disarming_is_what_ends_the_landing(node):
-    enter(node, node.LAND)
-    land_state(node, armed=False, z=0.86)
-    node._do_land()
-    assert node.state == node.DWELL
-
-
-def test_a_landing_that_the_fcu_never_confirms_says_so_loudly(node, capfd):
-    """Carrying on is right — the mission must not stall — but the next
-    takeoff will probably be refused, and the log has to say why."""
-    enter(node, node.LAND, age_s=node.land_timeout + 1.0)
-    land_state(node, armed=True, z=0.86)
-    capfd.readouterr()
-    node._do_land()
-    text = "".join(capfd.readouterr())
-    assert node.state == node.DWELL
-    assert "never disarmed" in text
-
-
-def test_a_dry_run_still_lands_on_stillness(node):
-    """There is no FCU to disarm: the vehicle is unarmed for the whole run by
-    construction, so the disarm signal carries no information at all."""
-    node.dry_run = True
-    enter(node, node.LAND)
-    land_state(node, armed=False, z=0.86)
-    node.dry_run = True
-    node._do_land()
-    assert node.state == node.DWELL
-
-
-# ── One takeoff command per climb ────────────────────────────────────────────
-
-def test_an_accepted_takeoff_is_not_commanded_again(node):
-    """This is why the drone climbed 2.9 m when asked for 1.0: the retry fired
-    every retry_period regardless, and each accepted NAV_TAKEOFF RESTARTS the
-    climb from wherever the vehicle is now, so they stack. MEASURED
-    2026-08-30: 25 accepted takeoff commands across 5 climbs — five per climb,
-    5 x ~0.6 m = the 2.9 m in every log.
-
-    The retry is right for a MODE change, which ArduPilot can ack and then
-    decline. It is wrong for a takeoff, where an accepted ack means the climb
-    is already under way."""
-    enter(node, node.TAKEOFF)
-    assert not node._takeoff_accepted
-    node._takeoff_accepted = True
-    node._last_cmd_t = node._now() - 999.0      # the retry would fire
-    sent = []
-    node._start_call = lambda *a, **k: sent.append(a)
-    node.dry_run = False
-    set_pose(node, 0.0, 0.0, z=0.1)
-    node._takeoff_start_z = 0.0
-    node._do_takeoff()
-    assert sent == [], "commanded a takeoff that was already under way"
-
-
-def test_a_refused_takeoff_is_commanded_again(node):
-    """The retry still exists — it is the refusal path that needs it."""
-    enter(node, node.TAKEOFF)
-    node._takeoff_accepted = False
-    node._last_cmd_t = node._now() - 999.0
-    sent = []
-    node._start_call = lambda *a, **k: sent.append(a)
-    node.dry_run = False
-    set_pose(node, 0.0, 0.0, z=0.1)
-    node._takeoff_start_z = 0.0
-    node._do_takeoff()
-    assert sent, "a refused takeoff was never retried"
-
-
-def test_each_new_climb_starts_with_nothing_accepted(node):
-    node._takeoff_accepted = True
-    enter(node, node.TAKEOFF)
-    assert not node._takeoff_accepted
-
-
-# ── The mission owns the altitude, the FCU only owns "get airborne" ──────────
-
-def test_the_climb_is_taken_over_as_soon_as_we_are_off_the_ground(node):
-    """Who decides the height. With the handover it is the launch parameter,
-    enforced by the same position controller and the same arena fence as every
-    other leg, instead of whatever NAV_TAKEOFF does on the airframe of the day
-    — which nobody has measured on the real drone."""
-    node.dry_run = False
-    set_pose(node, 1.0, 2.0, z=0.0)
-    enter(node, node.TAKEOFF)
-    set_pose(node, 1.0, 2.0, z=node.takeoff_handover_m + 0.01)
-    node._do_takeoff()
-    assert node.state == node.SELECT, "still waiting on the FCU's own climb"
-
-
-def test_it_does_not_hand_over_while_still_on_the_pad(node):
-    """A position setpoint sent before the airframe is clear would drive it
-    back into the surface."""
-    node.dry_run = False
-    set_pose(node, 1.0, 2.0, z=0.0)
-    enter(node, node.TAKEOFF)
-    set_pose(node, 1.0, 2.0, z=0.05)
-    node._do_takeoff()
-    assert node.state == node.TAKEOFF
-
-
-def test_the_held_altitude_matches_every_other_leg(node):
-    """ABSOLUTE takeoff_alt, because _do_select, the return home and the
-    coverage legs all command it absolute. A takeoff that settled somewhere
-    else would climb or drop for no reason at the very next setpoint."""
-    node.dry_run = False
-    set_pose(node, 1.0, 2.0, z=1.5)          # standing on a raised pad
-    enter(node, node.TAKEOFF)
-    set_pose(node, 1.0, 2.0, z=1.5 + node.takeoff_handover_m + 0.01)
-    node._do_takeoff()
-    assert node.setpoint[2] == pytest.approx(node.takeoff_alt)
-
-
-def test_the_held_altitude_from_the_floor_is_just_takeoff_alt(node):
-    node.dry_run = False
-    set_pose(node, 0.0, 0.0, z=0.0)
-    enter(node, node.TAKEOFF)
-    set_pose(node, 0.0, 0.0, z=node.takeoff_handover_m + 0.01)
-    node._do_takeoff()
-    assert node.setpoint[2] == pytest.approx(node.takeoff_alt)
-
-
-def test_a_cruise_altitude_above_the_ceiling_is_reported(node, capfd):
-    """MEASURED 2026-08-30: takeoff_alt was 3.0 while arena_ceiling_z was 2.5 —
-    the vehicle cruised a metre ABOVE the box A* is allowed to search in, so
-    every leg it flew was outside it. Nothing crashed, and nothing said so."""
-    capfd.readouterr()
-    n = arena_node(takeoff_alt=3.0, arena_ceiling_z=2.5)
-    text = "".join(capfd.readouterr())
-    assert "ABOVE" in text and "arena_ceiling_z" in text
-    n.destroy_node()
-
-
-def test_consistent_heights_say_nothing(node, capfd):
-    capfd.readouterr()
-    n = arena_node(takeoff_alt=2.0, survey_alt_m=1.8, arena_ceiling_z=2.5)
-    text = "".join(capfd.readouterr())
-    assert "ABOVE" not in text
+def test_the_u_flies_one_setpoint_per_leg(node):
+    """GUIDED stops dead at every position target, so a point in the middle of
+    a straight leg only costs a full decelerate-and-accelerate."""
+    n = u_node()
+    n._level = 1
+    n._begin_level()
+    assert len(n._survey_path) == 6
     n.destroy_node()

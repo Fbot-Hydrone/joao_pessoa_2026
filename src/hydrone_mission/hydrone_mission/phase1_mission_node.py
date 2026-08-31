@@ -307,10 +307,18 @@ class Phase1MissionNode(Node):
         # the drone is not skimming the wall, close enough that the camera
         # still reaches the far side.
         self.declare_parameter("survey_inset_m", 1.2)
-        # Spacing along a LAWNMOWER lane (level 4 only). The U has no
-        # intermediate points: a leg is a straight line on one heading, and a
-        # point in the middle of it only tells the vehicle to stop.
+        # Waypoint spacing along a LAWNMOWER lane (search level 4 only). The U
+        # has no intermediate points: a leg is a straight line on one heading,
+        # so a point in the middle of it does nothing but tell the vehicle to
+        # stop, and GUIDED stops dead at every position target.
         self.declare_parameter("survey_step_m", 1.5)
+        # THE LENGTH OF THE U'S LEGS, in metres, stated outright. Zero means
+        # derive it from the arena: leg = arena_size - 2 * survey_inset_m.
+        # Set it when the sweep should be a particular size for a reason the
+        # arena dimensions do not express — a smaller rectangle in a big hall,
+        # or a shape matched to what the camera actually reaches.
+        self.declare_parameter("u_side_x_m", 0.0)
+        self.declare_parameter("u_side_y_m", 0.0)
         # Height of the sweep. ABOVE THE HOUSE (1.5 m roof in the competition
         # arena) and below the net at 2.5 m — the passes fly over it, and at
         # the 1 m cruise height they would fly INTO it. Higher also widens what
@@ -382,41 +390,15 @@ class Phase1MissionNode(Node):
         self.declare_parameter("takeoff_timeout_s", 45.0)
         self.declare_parameter("service_timeout_s", 30.0)
         self.declare_parameter("setpoint_hz", 10.0)
-        # THE ARENA, and the single place its size is written down.
-        #
-        # Everything geometric derives from these: the box the planner may
-        # search in, the U's leg lengths, the lawnmower's lanes, and (in
-        # pad_map, from the same launch arguments) the line past which a
-        # detection is refused as being behind a wall. They used to be two sets
-        # of numbers in two nodes — the planner's box was +/-5 m and the map's
-        # was +/-4.5 m for the same 8x8 m arena — which is one edit away from
-        # a mission that plans through a wall the map already refuses to see.
-        #
-        # 8 x 8 m is the competition arena. The team's own is 5 x 6 m; that is
-        # `arena_size_x:=5.0 arena_size_y:=6.0` and nothing else changes.
-        self.declare_parameter("arena_size_x", 8.0)
-        self.declare_parameter("arena_size_y", 8.0)
-        # Where the arena's centre sits in the pose frame. Zero in the
-        # simulator, where the EKF origin is the middle of the arena. NOT
-        # necessarily zero on the real drone: `map` is where the vehicle armed,
-        # which is a takeoff base somewhere in the arena, not its centre.
-        self.declare_parameter("arena_centre_x", 0.0)
-        self.declare_parameter("arena_centre_y", 0.0)
-        # The height band a plan may use. The floor is above the pads — they
-        # are somewhere to land, not something to fly round — and the ceiling
-        # is the arena's net.
-        self.declare_parameter("arena_floor_z", 0.3)
-        self.declare_parameter("arena_ceiling_z", 2.5)
-        # How far inside the boundary the vehicle is kept. The airframe has a
-        # radius, the position estimate has an error, and the line on the floor
-        # has no give in it — so the demand stops short of it.
-        self.declare_parameter("arena_keepout_m", 0.3)
-        # The settle after a pure TRANSLATION. The full `settle_s` guards
-        # against a slewing yaw estimate; a leg flown on a fixed heading has no
-        # slewing yaw to wait for. See _settle_needed.
-        self.declare_parameter("settle_moving_s", 0.5)
-        # How much heading change counts as having turned.
-        self.declare_parameter("settle_yaw_tol_deg", 5.0)
+        # The box the planner may search in, [min_x, min_y, min_z, max_x,
+        # max_y, max_z] in the pose frame. Worth setting: without bounds a
+        # search that cannot reach its goal expands outwards through open
+        # space until the expansion cap stops it, which costs a second of
+        # nothing at the moment a leg begins. The default is the competition
+        # arena with a metre of slack, floored above the landing pads and
+        # ceilinged at the net.
+        self.declare_parameter("plan_bounds",
+                               [-5.0, -5.0, 0.3, 5.0, 5.0, 2.5])
         # Whether a plan may cross space no ray has reached. FALSE.
         #
         # This was true, on the argument that the fallback — the straight line
@@ -458,21 +440,14 @@ class Phase1MissionNode(Node):
         # Gap between repeats of a mode/arm/takeoff command. MAVROS acking a
         # command is not the same as ArduPilot accepting it, so every command is
         # re-sent on this period until /mavros/state shows the effect.
-        # How far off the ground counts as airborne, at which point the mission
-        # takes the climb over from the FCU. See _do_takeoff.
-        self.declare_parameter("takeoff_handover_m", 0.35)
         self.declare_parameter("retry_period_s", 2.0)
 
         p = lambda n: self.get_parameter(n).value
         self.takeoff_alt = float(p("takeoff_alt"))
-        self.takeoff_handover_m = float(p("takeoff_handover_m"))
         self.target_bases = int(p("target_bases"))
         self.rotation_step = math.radians(float(p("rotation_step_deg")))
         self.max_rotations = int(p("max_rotations"))
         self.settle_s = float(p("settle_s"))
-        self.settle_moving_s = float(p("settle_moving_s"))
-        self.settle_yaw_tol = math.radians(float(p("settle_yaw_tol_deg")))
-        self._last_settle_yaw = None
         self.yaw_tol = math.radians(float(p("yaw_tol_deg")))
         self.rotate_timeout = float(p("rotate_timeout_s"))
         self.arrive_tol = float(p("arrive_tol_m"))
@@ -489,6 +464,8 @@ class Phase1MissionNode(Node):
         self.survey_circuit = bool(p("survey_circuit"))
         self.survey_inset_m = float(p("survey_inset_m"))
         self.survey_step_m = float(p("survey_step_m"))
+        self.u_side_x_m = float(p("u_side_x_m"))
+        self.u_side_y_m = float(p("u_side_y_m"))
         self.survey_alt = float(p("survey_alt_m"))
         self.level2_climb_m = float(p("level2_climb_m"))
         self.lawnmower_lane_m = float(p("lawnmower_lane_m"))
@@ -575,22 +552,14 @@ class Phase1MissionNode(Node):
         self._failed_viewpoints: list[tuple[float, float]] = []
         self._octomap_msg = None        # raw and latched; see _cb_octomap
         self.octree_tree = None         # decoded per leg, in _goto_via_map
-        cx = float(self.get_parameter("arena_centre_x").value)
-        cy = float(self.get_parameter("arena_centre_y").value)
-        hx = float(self.get_parameter("arena_size_x").value) / 2.0
-        hy = float(self.get_parameter("arena_size_y").value) / 2.0
-        z0 = float(self.get_parameter("arena_floor_z").value)
-        z1 = float(self.get_parameter("arena_ceiling_z").value)
-        self.plan_bounds = ((cx - hx, cy - hy, z0), (cx + hx, cy + hy, z1))
-        self.arena_keepout_m = float(
-            self.get_parameter("arena_keepout_m").value)
+        b = [float(v) for v in self.get_parameter("plan_bounds").value]
+        self.plan_bounds = (tuple(b[:3]), tuple(b[3:]))
         self.plan_allow_unknown = bool(
             self.get_parameter("plan_allow_unknown").value)
         self._call: _Call | None = None
         self._pending: str | None = None    # what _call is for
         self._last_cmd_t = 0.0              # when the last command went out
         self._takeoff_tries = 0
-        self._takeoff_accepted = False
         # Down-camera looks accepted during the current CONFIRM.
         self._confirm_hits = 0
         self._z_hist: list[tuple[float, float]] = []
@@ -697,24 +666,6 @@ class Phase1MissionNode(Node):
                 "  stop the vehicle ARMING — set an arming check it cannot\n"
                 "  pass, and take the props off.\n"
                 "════════════════════════════════════════════════════════")
-
-        # The heights have to agree with each other, and they are set in three
-        # different places. MEASURED 2026-08-30: takeoff_alt was 3.0 while
-        # arena_ceiling_z was 2.5 — the vehicle cruised a metre ABOVE the
-        # ceiling the planner is allowed to use, so every leg it flew was
-        # outside the box A* searches in. Nothing crashed, and nothing said so
-        # either.
-        if self.takeoff_alt > self.plan_bounds[1][2]:
-            self.get_logger().error(
-                f"takeoff_alt ({self.takeoff_alt:.2f} m) is ABOVE "
-                f"arena_ceiling_z ({self.plan_bounds[1][2]:.2f} m). The "
-                f"vehicle will cruise above the box the planner may use, so "
-                f"every leg is outside it. Lower takeoff_alt or raise the "
-                f"ceiling — the arena is netted and the bases go to 1.5 m.")
-        if self.survey_alt > self.plan_bounds[1][2]:
-            self.get_logger().error(
-                f"survey_alt ({self.survey_alt:.2f} m) is above "
-                f"arena_ceiling_z ({self.plan_bounds[1][2]:.2f} m).")
 
         self.get_logger().info(
             f"phase1_mission ready — takeoff to {self.takeoff_alt:.1f} m, "
@@ -839,7 +790,6 @@ class Phase1MissionNode(Node):
         self._failed_viewpoints.clear()
         self.survey_done = False
         self.investigating = False
-        self._last_settle_yaw = None
         self._relief_seen.clear()
         self._survey_visits = 0
         self._survey_stalls = 0
@@ -865,7 +815,7 @@ class Phase1MissionNode(Node):
         # just has nowhere to send it.
         if self.pub_sp is None or not self.stream_setpoint:
             return
-        x, y, z, yaw = self._fenced(self.setpoint)
+        x, y, z, yaw = self.setpoint
         sp = PoseStamped()
         sp.header.stamp = self.get_clock().now().to_msg()
         sp.header.frame_id = "map"
@@ -875,48 +825,6 @@ class Phase1MissionNode(Node):
         sp.pose.orientation.z = math.sin(yaw / 2.0)
         sp.pose.orientation.w = math.cos(yaw / 2.0)
         self.pub_sp.publish(sp)
-
-    def _fenced(self, setpoint):
-        """Clamp a setpoint inside the arena. The last line, and the only one.
-
-        The occupancy map knows about WALLS, and in the simulator's arena — as
-        in the real hall — the walls stand well outside the competition
-        boundary. That boundary is a line on the floor: nothing physical stops
-        the vehicle crossing it, nothing in the map objects, and the planner
-        happily routes through the space beyond because the space beyond is
-        genuinely empty.
-
-        So the fence is arithmetic, not perception, and it lives HERE rather
-        than at the six places that command a position. _stream is the single
-        point at which a setpoint reaches the FCU: _goto, _hold, the waypoint
-        queue and the centring servo all end up here, so a guard here cannot be
-        bypassed by a caller that forgets about it — and the caller that
-        forgets is the one that would have crossed the line.
-
-        Horizontal only. Height is bounded by the net above and the floor
-        below, both of which are real, and clamping z would fight the landing
-        descent — which is the FCU's, not this node's.
-
-        WHAT THIS CANNOT DO: keep the VEHICLE inside. It keeps the DEMAND
-        inside. If the position estimate is wrong — and flown on the VO it has
-        been wrong by 4 m in an 8 m arena — the vehicle can be over the line
-        while believing it is well inside, and no amount of clamping a number
-        computed from that estimate will notice. The fence is worth having
-        because it removes the failures that ARE arithmetic; it is not a
-        substitute for the estimate being right.
-        """
-        x, y, z, yaw = setpoint
-        (min_x, min_y, _), (max_x, max_y, _) = self.plan_bounds
-        k = self.arena_keepout_m
-        cx = min(max(x, min_x + k), max_x - k)
-        cy = min(max(y, min_y + k), max_y - k)
-        if cx != x or cy != y:
-            self.get_logger().warn(
-                f"setpoint ({x:.2f}, {y:.2f}) is outside the arena — holding "
-                f"at ({cx:.2f}, {cy:.2f}). The walls are further out than the "
-                f"boundary; nothing physical stops us here.",
-                throttle_duration_sec=5.0)
-        return (cx, cy, z, yaw)
 
     def _goto(self, x: float, y: float, z: float, yaw: float):
         self.setpoint = [x, y, z, yaw]
@@ -1202,40 +1110,16 @@ class Phase1MissionNode(Node):
         # plane, a perfect 1.5 m climb reached z=0.74 while this test wanted
         # 1.35, so the mission re-sent takeoff forever — and ArduPilot rejected
         # every one of them, because the vehicle was already flying.
-        # HAND OVER AS SOON AS WE ARE OFF THE GROUND, and let the position
-        # controller fly the rest. The mission owns the altitude; the FCU only
-        # owns "get airborne".
-        #
-        # Not a bug fix — the FCU was obeying takeoff_alt exactly, and the
-        # ~2.9 m climbs in every log are what a takeoff_alt of 3 m looks like.
-        # It is a matter of who decides: with the handover, the height flown is
-        # the launch parameter enforced by the same position controller and the
-        # same arena fence as every other leg, instead of whatever NAV_TAKEOFF
-        # does on the airframe of the day. That difference matters most on the
-        # real drone, where nobody has measured what its takeoff does.
-        #
-        # `takeoff_handover_m` is deliberately small: high enough that the
-        # airframe is clear of the surface and a position setpoint will not
-        # drive it back into the pad, low enough that the FCU's climb never
-        # gets far.
         climbed = (self.pose.pose.position.z - self._takeoff_start_z
                    if self.pose is not None else 0.0)
-        if self.pose is not None and climbed >= min(
-                self.takeoff_handover_m, self.takeoff_alt - 0.15):
+        if self.pose is not None and climbed >= self.takeoff_alt - 0.15:
             x = self.pose.pose.position.x
             y = self.pose.pose.position.y
             yaw = yaw_of(self.pose)
             self.get_logger().info(
-                f"airborne — off the ground by {climbed:.2f} m at z="
-                f"{self.pose.pose.position.z:.2f} m; taking over and holding "
-                f"z={self.takeoff_alt:.2f} m, "
+                f"airborne — climbed {climbed:.2f} m to z="
+                f"{self.pose.pose.position.z:.2f} m, "
                 f"heading {math.degrees(yaw):.0f} deg.")
-            # ABSOLUTE, because every other leg of this mission commands
-            # takeoff_alt absolute — _do_select, the return home, the coverage
-            # legs. Making the takeoff relative to the pad instead would leave
-            # the vehicle at a different height from the one the very next
-            # setpoint asks for, and it would climb or drop for no reason at
-            # the handover.
             self._goto(x, y, self.takeoff_alt, yaw)
             self.rotations_done = 0
             if self._land_after_takeoff:
@@ -1257,24 +1141,8 @@ class Phase1MissionNode(Node):
         if self.dry_run:
             return
 
-        status = self._poll_call()
-        if status == "pending":
+        if self._poll_call() == "pending":
             return
-        if status == "ok":
-            # ACCEPTED. The climb is happening; do not command it again.
-            #
-            # This is why the drone climbed 2.9 m when asked for 1.0. The retry
-            # below fired every retry_period regardless, and each accepted
-            # NAV_TAKEOFF RESTARTS the climb from wherever the vehicle is now —
-            # so they stack. MEASURED 2026-08-30: 25 accepted takeoff commands
-            # across 5 climbs, five per climb, 5 x ~0.6 m = the 2.9 m seen in
-            # every log.
-            #
-            # The retry is right for a MODE change, which ArduPilot can ack and
-            # then decline; it is wrong for a takeoff, where an ACCEPTED ack
-            # means the thing is already under way. Re-sending only makes sense
-            # after a refusal, and that path is below.
-            self._takeoff_accepted = True
 
         if self._since_entered() > self.takeoff_timeout:
             self._takeoff_tries += 1
@@ -1292,8 +1160,7 @@ class Phase1MissionNode(Node):
             self._enter(self.ARMING)
             return
 
-        if (not self._takeoff_accepted
-                and self._now() - self._last_cmd_t >= self.retry_period):
+        if self._now() - self._last_cmd_t >= self.retry_period:
             req = CommandTOL.Request()
             req.altitude = float(self.takeoff_alt)
             self._start_call("takeoff", self.cli_takeoff, req)
@@ -1308,21 +1175,6 @@ class Phase1MissionNode(Node):
         exactly one place, and it is made while airborne with the map in hand.
         """
         if self.pose is None:
-            return
-
-        # SURVEY FIRST, and this gate has to be HERE as well as in _do_settle.
-        # TAKEOFF hands straight to SELECT, so this is a second door into the
-        # landing phase and it had no lock on it.
-        #
-        # It went unnoticed because the map is empty at takeoff, so
-        # `_best_candidate` came back None and the mission fell through to the
-        # search by accident. MEASURED 2026-08-29, once detections started
-        # being accepted while the vehicle moves: a candidate now exists by the
-        # time SELECT first runs, and the mission flew to FOUR bases before the
-        # sweep had begun — exactly the explore-nothing order the survey exists
-        # to prevent.
-        if not self.survey_done:
-            self._enter(self.SETTLE)
             return
 
         if self.landed_count >= self.target_bases:
@@ -1416,9 +1268,8 @@ class Phase1MissionNode(Node):
            landing is eliminatory.
         """
         self._hold()
-        if self._since_entered() < self._settle_needed():
+        if self._since_entered() < self.settle_s:
             return
-        self._last_settle_yaw = self.setpoint[3]
 
         # ── 1. the circuit ──────────────────────────────────────────────────
         #
@@ -1595,31 +1446,6 @@ class Phase1MissionNode(Node):
         self._goto_via_map(hx, hy, self.takeoff_alt, self.setpoint[3])
         self._enter(self.TRAVEL)
 
-    def _settle_needed(self) -> float:
-        """How long to hold still here — and usually the answer is barely.
-
-        This pause exists for ONE reason, written into its own description: a
-        detection taken while yaw is slewing is projected through a moving
-        estimate and lands in the map metres out. It is a guard against
-        TURNING.
-
-        The survey does not turn. The U holds a fixed heading down each leg and
-        turns twice, at its corners, standing still. So paying the full pause
-        at every one of its waypoints is paying for a hazard that is not there
-        — MEASURED on an 8x8 arena: 23 waypoints at 5 s is 115 s of the level's
-        ~200 s, more than half the sweep spent waiting for a yaw estimate that
-        never moved.
-
-        So: the full pause after a heading change, a short one after a pure
-        translation. The vehicle still has to have ARRIVED — that is
-        `arrive_tol`, and it is unaffected.
-        """
-        if self._last_settle_yaw is None:
-            return self.settle_s
-        turned = abs(wrap_pi(self.setpoint[3] - self._last_settle_yaw))
-        return (self.settle_s if turned > self.settle_yaw_tol
-                else self.settle_moving_s)
-
     def _uninvestigated(self):
         """Pads the map holds but has not confirmed, and nobody has looked at.
 
@@ -1668,18 +1494,20 @@ class Phase1MissionNode(Node):
         if self._level == 1:
             self._survey_path = coverage.u_sweep(
                 self.plan_bounds, inset_m=self.survey_inset_m,
-                z=self.survey_alt, start_corner=self._nearest_corner())
+                z=self.survey_alt, start_corner=self._nearest_corner(),
+                side_x_m=self.u_side_x_m, side_y_m=self.u_side_y_m)
             self.get_logger().info(
                 f"SEARCH LEVEL 1: the U at {self.survey_alt:.1f} m — "
-                f"{len(self._survey_path)} points, two corner turns, camera "
-                f"facing into the arena.")
+                f"{len(self._survey_path)} setpoints, two corner turns, one "
+                f"per leg, camera facing into the arena.")
             return True
 
         if self._level == 2:
             z = self.survey_alt + self.level2_climb_m
             self._survey_path = coverage.u_sweep(
                 self.plan_bounds, inset_m=self.survey_inset_m, z=z,
-                start_corner=self._nearest_corner())
+                start_corner=self._nearest_corner(),
+                side_x_m=self.u_side_x_m, side_y_m=self.u_side_y_m)
             self.get_logger().info(
                 f"SEARCH LEVEL 2: the same U at {z:.1f} m — a base seen "
                 f"edge-on from below, or hidden by the house, opens up from "
@@ -2208,44 +2036,16 @@ class Phase1MissionNode(Node):
         # touchdown the instant LAND was entered — at hover height, writing that
         # height into the pad. Ignore it there and let stillness-plus-descent
         # decide, which is what the person setting the drone down produces.
-        # THE FCU'S DISARM IS THE ONLY AUTHORITATIVE SIGNAL, and waiting for it
-        # is not caution, it is the difference between the mission working and
-        # not.
-        #
-        # MEASURED 2026-08-29 on an elevated base. The stillness heuristic below
-        # fired at z=0.86, the mission called it landed, went to ARMING and
-        # switched the mode to GUIDED — WHICH HALTS A LAND DESCENT. From then
-        # on ArduCopter refused every takeoff, correctly, because from its point
-        # of view the vehicle had never landed and was still flying. The log
-        # says so twice: "EKF3 IMU0 MAG0 IN-FLIGHT yaw alignment complete"
-        # arrives after the mission believes it is parked, and z drifts UP from
-        # 0.86 to 1.13 — a vehicle on a pad cannot rise 27 cm.
-        #
-        # Stillness is a good touchdown DETECTOR and a bad touchdown PROOF. On
-        # an elevated pad the descent slows near the surface and a 2 s window of
-        # small movement looks exactly like resting on it. The FCU has a real
-        # landing detector — throttle, climb rate and attitude together — and
-        # DISARM_DELAY (3 s, holybro_sitl.parm) is how long after it trips the
-        # motors stop.
-        #
-        # So stillness now only ARMS the wait; the disarm ends it. If the disarm
-        # never comes, `land_timeout` still carries the mission on, and says
-        # loudly that the FCU never agreed.
         disarmed = (not self.dry_run) and (not self.mav_state.armed)
         still = self._z_is_still()
         descended = (self._land_entry_z is not None
                      and self.pose is not None
                      and (self._land_entry_z - self.pose.pose.position.z)
                      >= self.min_descent)
-        if still and descended and not disarmed and not self.dry_run:
-            self._throttle(
-                "stopped and descended, waiting for the FCU to disarm before "
-                "calling it a landing — switching to GUIDED while it is still "
-                "descending is what makes every later takeoff fail.")
 
         # No extra debounce: _z_is_still already demands a FULL land_settle_s
         # window of stillness before it returns true, and a disarm is definitive.
-        if disarmed or (self.dry_run and still and descended):
+        if disarmed or (still and descended):
             z = self.pose.pose.position.z if self.pose else 0.0
             why = "disarmed" if disarmed else "descended and stopped"
             if self.landing_for == self.LAND_PAD:
@@ -2262,12 +2062,9 @@ class Phase1MissionNode(Node):
             return
 
         if self._since_entered() > self.land_timeout:
-            self.get_logger().error(
-                f"the FCU never disarmed within {self.land_timeout:.0f} s. "
-                f"Carrying on so the mission does not stall — but it does NOT "
-                f"believe we landed, so the next takeoff will probably be "
-                f"refused. Check LAND is reaching the surface (z="
-                f"{self.pose.pose.position.z if self.pose else 0.0:.2f} m).")
+            self.get_logger().warn(
+                f"no touchdown within {self.land_timeout:.0f} s — carrying on "
+                "anyway so the mission does not stall here.")
             self._enter(self.DWELL)
 
     def _report_landing_anchor(self):
@@ -2384,7 +2181,6 @@ class Phase1MissionNode(Node):
             return
 
         self._takeoff_tries = 0
-        self._takeoff_accepted = False
         self.target_id = None
         self.get_logger().info(
             f"taking off again — {self.landed_count}/{self.target_bases} "
@@ -2437,8 +2233,6 @@ class Phase1MissionNode(Node):
         if state != self.state:
             self.get_logger().info(f"[{self.state} -> {state}]")
         if state == self.TAKEOFF:
-            # A new climb: nothing has been accepted for it yet.
-            self._takeoff_accepted = False
             # The altitude this climb starts from. takeoff_alt is a height ABOVE
             # WHATEVER WE ARE STANDING ON, and pose.z is absolute in the FCU's
             # local frame (zeroed at the FIRST takeoff plane), so the two are

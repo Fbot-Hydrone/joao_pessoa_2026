@@ -263,20 +263,6 @@ def test_an_arena_smaller_than_the_inset_yields_no_sweep():
 B8 = ((-4.0, -4.0, 0.0), (4.0, 4.0, 2.5))
 
 
-def test_the_u_has_no_intermediate_points_on_a_leg():
-    """A leg is a straight line flown on one heading, and GUIDED stops dead at
-    every position target — so a point in the middle only costs a full
-    decelerate-and-accelerate. MEASURED with WP_SPD 1.5 and WP_ACC 1.5: at the
-    old 1.5 m spacing the vehicle NEVER REACHED CRUISE anywhere in the sweep,
-    averaging 0.75 m/s against an airframe capable of twice that."""
-    from hydrone_nav.coverage import u_sweep
-    pts = u_sweep(B8, inset_m=1.0)
-    # 4 corners visited, with the two turning ones held twice: 3 legs.
-    assert len(pts) == 6
-    xs_ys = [p[:2] for p in pts]
-    assert len(set(xs_ys)) == 4, "a leg has a point in the middle of it"
-
-
 def test_the_u_turns_only_at_its_two_corners():
     """Every earlier shape failed on rotation: spinning has no parallax, and a
     circuit that re-aims at the centre turns continuously along every edge."""
@@ -309,7 +295,7 @@ def test_the_u_covers_three_sides_not_four():
     """From the third edge the camera already looks back across what a fourth
     would cover, so the fourth is battery spent re-photographing the map."""
     from hydrone_nav.coverage import u_sweep
-    pts = u_sweep(B8, inset_m=1.0)     # corners only
+    pts = u_sweep(B8, inset_m=1.0)
     sides = {round(p[3], 6) for p in pts}
     assert len(sides) == 3
 
@@ -395,9 +381,81 @@ def test_the_u_never_translates_and_turns_at_the_same_time():
 
 def test_each_corner_is_visited_twice_to_stop_before_turning():
     from hydrone_nav.coverage import u_sweep
-    pts = u_sweep(B8, inset_m=1.0)     # corners only
+    pts = u_sweep(B8, inset_m=1.0)
     seen = {}
     for x, y, _, _ in pts:
         seen[(round(x, 6), round(y, 6))] = seen.get((round(x, 6), round(y, 6)), 0) + 1
     assert sum(1 for n in seen.values() if n > 1) == 2, \
         "the two corners must each be held twice: arrive, then turn"
+
+
+def test_the_u_has_no_intermediate_points_on_a_leg():
+    """A leg is a straight line flown on one heading, and GUIDED stops dead at
+    every position target — so a point in the middle only costs a full
+    decelerate-and-accelerate. MEASURED with WP_SPD 1.5 and WP_ACC 1.5: at the
+    old 1.5 m spacing the vehicle NEVER REACHED CRUISE anywhere in the sweep,
+    averaging 0.75 m/s against an airframe capable of twice that."""
+    from hydrone_nav.coverage import u_sweep
+    pts = u_sweep(B8, inset_m=1.0)
+    assert len(pts) == 6, "three legs, two setpoints each"
+    assert len({p[:2] for p in pts}) == 4, "a leg has a point in the middle"
+
+
+def test_the_u_never_translates_and_turns_at_the_same_time():
+    """Yawing under translation is where this arena's odometry loses the most:
+    the camera sweeps, matching fails, and the rotation that really happened is
+    never recorded."""
+    from hydrone_nav.coverage import u_sweep
+    for a, b in zip(u_sweep(B8, inset_m=1.0), u_sweep(B8, inset_m=1.0)[1:]):
+        moved = (a[0], a[1]) != (b[0], b[1])
+        turned = abs((b[3] - a[3] + math.pi) % (2 * math.pi) - math.pi) > 1e-9
+        assert not (moved and turned), f"moved and turned at once {a[:2]}"
+
+
+# ── The leg length, stated outright ──────────────────────────────────────────
+
+def test_the_side_can_be_given_in_metres():
+    """Set it when the sweep should be a particular size for a reason the
+    arena dimensions do not express."""
+    from hydrone_nav.coverage import u_sweep
+    pts = u_sweep(B8, side_x_m=4.0, side_y_m=3.0)
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    assert max(xs) - min(xs) == pytest.approx(4.0)
+    assert max(ys) - min(ys) == pytest.approx(3.0)
+
+
+def test_a_stated_side_is_centred_in_the_arena():
+    from hydrone_nav.coverage import u_sweep
+    pts = u_sweep(((-4.0, -4.0, 0.0), (4.0, 4.0, 2.5)), side_x_m=4.0,
+                  side_y_m=4.0)
+    xs = [p[0] for p in pts]
+    assert min(xs) == pytest.approx(-2.0)
+    assert max(xs) == pytest.approx(2.0)
+
+
+def test_zero_falls_back_to_the_inset():
+    """leg = arena_size - 2 * inset, which is what it always did."""
+    from hydrone_nav.coverage import u_sweep
+    pts = u_sweep(B8, inset_m=1.0, side_x_m=0.0, side_y_m=0.0)
+    xs = [p[0] for p in pts]
+    assert max(xs) - min(xs) == pytest.approx(8.0 - 2 * 1.0)
+
+
+def test_the_two_axes_are_independent():
+    """The competition arena is 8 x 8 and the team's own is 5 x 6."""
+    from hydrone_nav.coverage import u_sweep
+    pts = u_sweep(B8, inset_m=1.0, side_x_m=3.0)     # y still derived
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    assert max(xs) - min(xs) == pytest.approx(3.0)
+    assert max(ys) - min(ys) == pytest.approx(6.0)
+
+
+def test_a_side_longer_than_the_arena_is_clamped_to_it():
+    """Outside the arena is where the competition ENDS THE ATTEMPT. A typed
+    number must not be able to fly the drone over the line."""
+    from hydrone_nav.coverage import u_sweep
+    pts = u_sweep(B8, side_x_m=40.0, side_y_m=40.0)
+    for x, y, _, _ in pts:
+        assert -4.0 - 1e-9 <= x <= 4.0 + 1e-9
+        assert -4.0 - 1e-9 <= y <= 4.0 + 1e-9

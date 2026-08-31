@@ -213,19 +213,3 @@ ATC_RATE_WPY_MAX 25
 # NOT touched, on purpose: WP_SPD_UP / WP_SPD_DN and PILOT_SPEED_UP. The climb
 # is the one part of the flight that already behaves, and GUIDED takeoff takes
 # its rate from those.
-
-# --- Landing: let the FCU say when it is down --------------------------------
-# The mission used to declare touchdown from its own stillness heuristic and
-# move straight on to re-arm and take off. MEASURED 2026-08-29 on an elevated
-# base: it called "LANDED at z=0.86", switched to GUIDED — which HALTS a LAND
-# descent — and every takeoff after that was refused, because from ArduCopter's
-# point of view the vehicle had never landed and was still flying. The clincher
-# in the log is "EKF3 IMU0 MAG0 IN-FLIGHT yaw alignment complete" arriving
-# after the mission believed it was parked, and z drifting UP from 0.86 to 1.13.
-#
-# The authoritative signal that the vehicle is down is the FCU disarming
-# itself, and ArduCopter does that DISARM_DELAY seconds after ITS OWN landing
-# detector trips. The default 10 s is far too long to wait six times in a
-# ten-minute attempt, so it comes down — the detector has already fired by
-# then, this is only the delay before the motors stop.
-DISARM_DELAY    3
