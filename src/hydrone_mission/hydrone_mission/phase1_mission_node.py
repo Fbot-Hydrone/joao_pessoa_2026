@@ -325,6 +325,24 @@ class Phase1MissionNode(Node):
         # adjacent lanes are flown minutes apart on an estimate that drifts,
         # and the gap between them is that drift.
         self.declare_parameter("sweep_overlap", 0.25)
+        # Height of the TALLEST surface the sweep flies over, m above the
+        # arena floor. The lane pitch comes from the camera's footprint, and a
+        # footprint is only as wide as the height above WHAT IS UNDER IT — not
+        # above the floor. MEASURED across six seeds: with this at 0, the
+        # number of bases found tracked the number sitting on the house roof
+        # exactly, and monotonically —
+        #
+        #     none on the roof (seeds 4, 10)   6 of 6
+        #     one  on the roof (seeds 1, 2)    5 of 6
+        #     two  on the roof (seeds 3, 5)    3 of 6
+        #
+        # because over a 1.5 m roof the drone is 1.7 m up, not 3.2, so the
+        # camera covers 2.55 m while the lanes were spaced 3.60 m apart. Over a
+        # metre of the one structure that carries raised bases was never
+        # looked at. 1.5 is the competition's own number: bases are 0 to 1.5 m
+        # and the house roof is 1.5 m, so nothing the sweep passes over is
+        # higher.
+        self.declare_parameter("sweep_max_surface_m", 1.5)
         self.declare_parameter("survey_circuit", True)
         # How far the circuit is inset from the arena bounds. Far enough that
         # the drone is not skimming the wall, close enough that the camera
@@ -548,6 +566,7 @@ class Phase1MissionNode(Node):
                 f"search_mode must be 'u' or 'map_sweep', got "
                 f"{self.search_mode!r}")
         self.sweep_overlap = float(p("sweep_overlap"))
+        self.sweep_max_surface = float(p("sweep_max_surface_m"))
         # Belly-camera intrinsics, filled by a subscription when map_sweep is
         # flying. None until the camera has published once.
         self._sweep_cam_info = None
@@ -813,14 +832,28 @@ class Phase1MissionNode(Node):
         than it had to, where guessing the other way leaves a strip of arena
         that no pass ever looks at — and this sweep passes once.
 
-        Height is measured to the FLOOR, not to the takeoff base: `ground_z` is
-        where the floor sits in this frame, and the takeoff base's top is zero.
+        Height is measured to the HIGHEST SURFACE the sweep passes over, not to
+        the floor and not to the takeoff base. That distinction is the whole
+        defect this method was written with: a footprint is as wide as the
+        height above WHAT IS UNDER IT, and over the house roof the drone is
+        1.5 m lower than it is over open floor. Spacing lanes for the floor
+        leaves a strip unscanned over exactly the structure that carries raised
+        bases — see sweep_max_surface_m for the six seeds that measured it.
         """
         info = self._sweep_cam_info
         if info is None:
             return None
         fx, fy = float(info.k[0]), float(info.k[4])
-        agl = self.takeoff_alt - self.ground_z
+        agl = self.takeoff_alt - self.ground_z - self.sweep_max_surface
+        if agl < 0.3:
+            # The camera is essentially on the surface: any swath computed here
+            # would be a sliver and the lane count would explode. Refuse rather
+            # than fly a sweep that cannot finish.
+            self.get_logger().warn(
+                f"cruise {self.takeoff_alt:.1f} m leaves only {agl:.2f} m over "
+                f"a {self.sweep_max_surface:.1f} m surface — no usable swath. "
+                "Raise takeoff_alt or lower sweep_max_surface_m.")
+            return None
         across, along = coverage.ground_swath(fx, fy, info.width, info.height,
                                               agl)
         return min(across, along) if across > 0.0 and along > 0.0 else None

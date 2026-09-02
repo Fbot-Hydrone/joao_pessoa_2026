@@ -546,3 +546,30 @@ def test_lanes_stay_inside_the_arena():
         for x, y, _, _ in camera_lawnmower(B8, swath_m=swath, z=2.5):
             assert -4.0 - 1e-9 <= x <= 4.0 + 1e-9
             assert -4.0 - 1e-9 <= y <= 4.0 + 1e-9
+
+
+def test_lanes_spaced_for_the_floor_leave_a_hole_over_a_raised_surface():
+    """The defect six seeds found, stated as arithmetic.
+
+    Lane pitch comes from the camera's footprint, and a footprint is only as
+    wide as the height above WHAT IS UNDER IT. Space lanes for the floor and
+    the strip over a 1.5 m structure is never scanned — which is where the
+    competition puts raised bases. MEASURED: bases found tracked the number on
+    the house roof, monotonically, 6/6 -> 5/6 -> 3/6.
+    """
+    from hydrone_nav.coverage import ground_swath, lane_spacing
+    cruise_above_floor = 3.2
+    roof = 1.5
+
+    over_floor = min(ground_swath(320.0, 320.0, 640, 480, cruise_above_floor))
+    over_roof = min(ground_swath(320.0, 320.0, 640, 480,
+                                 cruise_above_floor - roof))
+    pitch = lane_spacing(over_floor)
+
+    assert pitch > over_roof, (
+        "this test no longer reproduces the hole it exists to pin")
+    assert pitch - over_roof > 1.0, "the gap measured over a metre"
+
+    # Sizing the pitch for the ROOF closes it, at the cost of more lanes.
+    safe = lane_spacing(over_roof)
+    assert safe < over_roof, "adjacent swaths must overlap over the roof too"

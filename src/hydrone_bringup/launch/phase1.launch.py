@@ -170,6 +170,19 @@ def generate_launch_description():
                         "the short, near-vertical rays and keeps the long "
                         "shallow ones taken mid-lane."),
         DeclareLaunchArgument(
+            "sweep_max_surface_m", default_value="1.5",
+            description="Height of the TALLEST surface the map_sweep lanes "
+                        "fly over, m above the arena floor. The lane pitch "
+                        "comes from the camera's footprint, and a footprint is "
+                        "only as wide as the height above WHAT IS UNDER IT. "
+                        "MEASURED over six seeds with this at zero: bases "
+                        "found tracked the number sitting on the house roof, "
+                        "monotonically — none on the roof 6/6, one 5/6, two "
+                        "3/6 — because over a 1.5 m roof the camera covers "
+                        "2.55 m while lanes sat 3.60 m apart. 1.5 is the "
+                        "competition's own number for both the roof and the "
+                        "tallest base."),
+        DeclareLaunchArgument(
             "sweep_overlap", default_value="0.25",
             description="Fraction of each belly swath the next lane repeats, "
                         "in map_sweep. Covers the drift accumulated between "
@@ -716,6 +729,8 @@ def generate_launch_description():
             "search_mode": LaunchConfiguration("search_mode"),
             "sweep_overlap": ParameterValue(
                 LaunchConfiguration("sweep_overlap"), value_type=float),
+            "sweep_max_surface_m": ParameterValue(
+                LaunchConfiguration("sweep_max_surface_m"), value_type=float),
             "ground_z": ParameterValue(ground_z, value_type=float),
             "confirm_detections": ParameterValue(
                 LaunchConfiguration("confirm_detections"), value_type=int),
