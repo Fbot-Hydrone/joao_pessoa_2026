@@ -15,7 +15,13 @@ only positions the map should trust ever reach pad_map_node.
 
 Pixel -> world
 --------------
-Three routes, in order of preference:
+Four routes, in order of preference:
+
+  MAP           if `map_topic` is set, cast the pixel's own ray into the
+                occupancy map and take the first occupied voxel. The only route
+                that finds the TOP of a raised base without being told its
+                height, and the one the belly camera uses when it is the
+                camera that reports positions.
 
   DEPTH         if a registered depth image is available and finite at the pad
                 centroid, back-project the pixel with the intrinsics. Metric and
@@ -61,12 +67,16 @@ import numpy as np
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.qos import (
+    DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy)
 
 from geometry_msgs.msg import PoseStamped
+from octomap_msgs.msg import Octomap
 from sensor_msgs.msg import CameraInfo, Image, Range
 
 import tf2_ros
+
+from hydrone_map.octree import raycast, tree_from_msg
 
 from hydrone_msgs.msg import PadDetection
 
@@ -189,6 +199,18 @@ class PadDetectorNode(Node):
         # about 20 deg: beyond that the beam and the optical axis have parted
         # company and the range is not this camera's depth any more.
         self.declare_parameter("min_nadir_cos", 0.94)
+        # Occupancy-map topic, or "" to leave the route off. WHY IT IS THE
+        # FIRST CHOICE where it is available: a pixel is a DIRECTION, and
+        # turning one into a world position needs a surface. Every other route
+        # guesses which. The ground plane assumes a flat floor at `ground_z`
+        # and a competition base is raised 0 to 1.5 m. The rangefinder measures
+        # what is under the VEHICLE, which is the pad only while the pad is
+        # already centred. The map has the tops of the bases in it, swept there
+        # by the depth camera on the way past, so casting the pixel's own ray
+        # into it lands on the surface that pixel actually sees.
+        self.declare_parameter("map_topic", "")
+        # How far a pixel's ray may travel before giving up, m.
+        self.declare_parameter("map_max_range_m", 20.0)
         self.declare_parameter("close_px", 5)
         # How much of the field's area has to be marking, and how much of the
         # polar sweep has to meet marking at all. Both scale with how well the
@@ -249,6 +271,16 @@ class PadDetectorNode(Node):
         self.K: np.ndarray | None = None
         self.depth: np.ndarray | None = None
         self.pose: PoseStamped | None = None
+        # The last occupancy map, kept ENCODED, and the tree decoded from it.
+        # Decoding writes a temp file and reads it back (see hydrone_map.octree
+        # — octomap-python's readBinary takes a filename), which is far too
+        # much to do per frame at 10 Hz for a camera that sees a pad in a
+        # handful of them. So the message is stored on arrival and decoded only
+        # when a detection actually needs to be placed, and only if it has
+        # changed since the last decode.
+        self._map_msg = None
+        self._map_tree = None
+        self._map_decoded_stamp = None
         # base_link -> optical, resolved once from TF (it is a static mount).
         self.R_base_opt: np.ndarray | None = None
         self.t_base_opt: np.ndarray | None = None
@@ -283,13 +315,25 @@ class PadDetectorNode(Node):
             if depth_topic:
                 self.create_subscription(Image, depth_topic,
                                          self._cb_depth, sensor_qos)
+        self.map_topic = str(p("map_topic")) if self.project_position else ""
+        self.map_max_range = float(p("map_max_range_m"))
+        if self.map_topic:
+            # octomap_server publishes the tree LATCHED (transient local); a
+            # volatile subscriber joining late would wait for the next update
+            # instead of getting the map that already exists.
+            self.create_subscription(
+                Octomap, self.map_topic, self._cb_map,
+                QoSProfile(reliability=ReliabilityPolicy.RELIABLE,
+                           durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                           history=HistoryPolicy.KEEP_LAST, depth=1))
         if self.range_as_depth:
             self.create_subscription(Range, p("range_topic"),
                                      self._cb_range, sensor_qos)
         self.create_subscription(Image, p("image_topic"),
                                  self._cb_image, sensor_qos)
 
-        how = ("depth=" + depth_topic if depth_topic
+        how = ("map=" + self.map_topic if self.map_topic
+               else "depth=" + depth_topic if depth_topic
                else "ground-plane projection" if self.project_position
                else "DETECTION ONLY — publishes no position")
         self.get_logger().info(
@@ -308,6 +352,79 @@ class PadDetectorNode(Node):
 
     def _cb_pose(self, msg: PoseStamped):
         self.pose = msg
+
+    def _cb_map(self, msg: Octomap):
+        # Stored, not decoded. See _map_msg.
+        self._map_msg = msg
+
+    def _tree(self):
+        """The decoded occupancy tree, or None. Decodes at most once per map."""
+        if self._map_msg is None:
+            return None
+        stamp = (self._map_msg.header.stamp.sec,
+                 self._map_msg.header.stamp.nanosec)
+        if stamp != self._map_decoded_stamp:
+            try:
+                self._map_tree = tree_from_msg(self._map_msg)
+            except Exception as exc:
+                # A map that will not decode must not take the detector down:
+                # the projection falls through to the rangefinder and the
+                # camera keeps answering.
+                self._throttled_warn(f"occupancy map would not decode ({exc})")
+                self._map_tree = None
+            self._map_decoded_stamp = stamp
+        return self._map_tree
+
+    def _map_hit(self, p_cam, ray_world):
+        """Where this pixel's ray meets the mapped world, or None.
+
+        The ray starts at the CAMERA, so a vehicle sitting on a base has its
+        own base under it and the first occupied voxel is the thing being
+        looked at rather than the thing being stood on.
+
+        THE FRAMES ARE NOT THE SAME, and this is the trap the whole route
+        turns on. `p_cam` and `ray_world` are built from
+        /mavros/local_position/pose, so they are in the FCU's local ENU —
+        `map`. octomap_server publishes its tree in `odom` (frame_id in
+        phase1.launch.py), and in this stack those two are NOT the same world:
+        map_odom_node MEASURES the edge between them and it is nowhere near
+        identity — logged on a real run as
+
+            map->odom: xyz=(+0.01, +0.02, -0.78) yaw=+90.5 deg
+
+        because BiguaSim's odometry is NWU and vision_odom_bridge rotates it
+        +90 deg about Z before MAVROS sees it. Casting a map-frame ray into an
+        odom-frame tree would therefore miss by a right angle and three
+        quarters of a metre, and it would do it SILENTLY: every voxel along the
+        wrong ray reads unknown, castRay passes through unknown, and the answer
+        comes back as a clean "no hit" that looks exactly like an unmapped
+        arena. So the ray is carried into the tree's own frame and the hit is
+        carried back.
+        """
+        tree = self._tree()
+        if tree is None:
+            return None
+        tree_frame = self._map_msg.header.frame_id
+        pose_frame = self.pose.header.frame_id
+        if tree_frame and pose_frame and tree_frame != pose_frame:
+            try:
+                tf = self.tf_buffer.lookup_transform(
+                    tree_frame, pose_frame, rclpy.time.Time())
+            except tf2_ros.TransformException as exc:
+                self._throttled_warn(
+                    f"no TF {pose_frame} -> {tree_frame} ({exc}); the "
+                    "occupancy map cannot place this pixel")
+                return None
+            t = tf.transform.translation
+            q = tf.transform.rotation
+            R = quat_to_matrix(q.x, q.y, q.z, q.w)
+            off = np.array([t.x, t.y, t.z])
+            hit = raycast(tree, R @ p_cam + off, R @ ray_world,
+                          max_range=self.map_max_range)
+            # Back into the frame the caller — and the map, and the mission's
+            # setpoints — speak.
+            return None if hit is None else R.T @ (np.asarray(hit) - off)
+        return raycast(tree, p_cam, ray_world, max_range=self.map_max_range)
 
     def _cb_range(self, msg):
         self.range_m = float(msg.range)
@@ -454,6 +571,18 @@ class PadDetectorNode(Node):
             return None
         # Ray in the optical frame (Z forward, X right, Y down).
         ray_opt = np.array([(u - cx) / fx, (v - cy) / fy, 1.0])
+
+        # THE MAP FIRST, where it is available. It is the only route that knows
+        # what surface this particular pixel is looking at — the depth image
+        # measures it too, but the belly camera has none, and the rangefinder
+        # answers for the vehicle's own nadir rather than for the pixel.
+        if self.map_topic:
+            hit = self._map_hit(p_cam, R_world_opt @ ray_opt)
+            if hit is not None:
+                point = np.asarray(hit, dtype=float)
+                return (point, PadDetection.SOURCE_MAP,
+                        float(np.linalg.norm(point - p_cam)),
+                        self.pose.header.frame_id)
 
         depth = self._depth_at(u, v)
         if depth is None:

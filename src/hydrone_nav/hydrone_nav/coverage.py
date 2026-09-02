@@ -376,3 +376,175 @@ def lateral_sweep(bounds, *, inset_m=1.2, z=2.0, step_m=1.5):
     for k in range(n + 1):
         out.append((x1 - span * (k / n), y_lo, z, math.pi / 2.0))
     return out
+
+
+# ── Mapping first, then covering the floor with the camera ──────────────────
+# A different strategy from the ladder above, and a different division of
+# labour. There the forward camera both FOUND bases and PLACED them, and the
+# shapes were chosen so it could see across the arena. Here the forward camera
+# does neither: it flies the odometry and fills the occupancy map, and the
+# belly camera is the only thing that reports a pad.
+#
+# That changes what a sweep is for. The U skips its fourth side because the
+# third already looks back across everything the fourth would cover — true for
+# a camera looking sideways at the arena, and false for one looking straight
+# down, which only ever sees the strip under the vehicle. So the perimeter
+# closes, and the lanes that follow are spaced by what the belly camera
+# actually covers rather than by a number someone picked.
+
+
+def ground_swath(fx, fy, width_px, height_px, height_agl_m):
+    """What a NADIR camera covers on the ground, as (across, along) metres.
+
+    Straight pinhole geometry: a pixel at the image edge sits at an angle
+    atan((w/2) / fx) off the optical axis, so from `height_agl_m` up, the full
+    footprint is `height * width_px / fx` by `height * height_px / fy`.
+
+    This exists because the number differs by more than a factor of two between
+    the machine the code is tested on and the one it flies on. BiguaSim's belly
+    camera renders at 90 deg (fx = 320 for a 640-wide frame); the real one was
+    MEASURED at fx 814.6 for the same width, about 43 deg. At 2.5 m that is a
+    5.0 m footprint against a 2.0 m one — lanes spaced for the simulator would
+    leave 3 m unseen between every pass on the real drone. So nothing here may
+    be a constant: the caller reads fx/fy out of the live CameraInfo.
+    """
+    if fx <= 0.0 or fy <= 0.0 or height_agl_m <= 0.0:
+        return (0.0, 0.0)
+    return (height_agl_m * width_px / fx, height_agl_m * height_px / fy)
+
+
+def lane_spacing(swath_m, *, overlap=0.25):
+    """Lane pitch that leaves `overlap` of each swath shared with the next.
+
+    The overlap is not politeness. Lanes are flown on a position estimate that
+    drifts, and two adjacent lanes are flown minutes apart, so the gap between
+    them is the drift accumulated in between. A quarter of a swath at 2.5 m is
+    around a metre in the simulator, which is the order of the drift measured
+    across a full sweep — spacing lanes edge to edge would open real holes in
+    the coverage, and a hole in a single-pass sweep is a base that is never
+    seen at all.
+    """
+    return max(swath_m * (1.0 - overlap), 1e-3)
+
+
+def perimeter_sweep(bounds, *, inset_m=1.2, z=2.0, start_corner=2,
+                    side_x_m=None, side_y_m=None):
+    """All FOUR sides of the rectangle, closed, back where it started.
+
+    The mapping pass. `u_sweep` flies three sides and argues the fourth is a
+    minute spent re-photographing what is already in the map; that argument is
+    about a camera looking ACROSS the arena. This pass exists to fill the
+    occupancy map that everything downstream projects into, and the map is
+    built from the depth camera's own band — so the fourth side carries the
+    only view of the strip beside it, and closing the loop puts the vehicle
+    back on the takeoff base without a transit leg across the middle.
+
+    Same two rules as `u_sweep`, for the same measured reasons: one setpoint
+    per leg, and a corner is a pure turn standing still rather than a yaw
+    folded into a translation.
+    """
+    rect = _sweep_rect(bounds, inset_m, side_x_m, side_y_m)
+    if rect is None:
+        return []
+    (x0, y0, x1, y1) = rect
+    centre = ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
+
+    corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    k = start_corner % 4
+    order = [corners[(k + i) % 4] for i in range(4)]
+    order.append(order[0])                  # close it
+
+    out = []
+    for a, b in zip(order, order[1:]):      # four legs, not three
+        yaw = _inward_yaw(a, b, centre)
+        out.append((a[0], a[1], z, yaw))
+        out.append((b[0], b[1], z, yaw))
+    return out
+
+
+def camera_lawnmower(bounds, *, swath_m, z=2.0, overlap=0.25, margin_m=0.5,
+                     along="x"):
+    """Lanes spaced so the belly camera's own footprint covers the floor.
+
+    NOT `lawnmower` above. That one takes `lane_m` and `step_m` as numbers and
+    chops each lane into waypoints; this one derives the pitch from
+    `ground_swath` and flies each lane WHOLE, because a mid-lane setpoint only
+    tells ArduCopter's GUIDED to stop and start again — measured at 0.75 m/s
+    average against an airframe good for twice that.
+
+    The first and last lane centres sit HALF A SWATH inside the arena, not
+    `inset_m` inside it: what has to stay within the walls is the strip the
+    camera sees, and its centre is the vehicle. Insetting the vehicle by a
+    fixed margin instead leaves the outer half-swath hanging over the wall on
+    one side and a strip of floor unseen on the other. `margin_m` is the least
+    the vehicle may approach a wall, and it wins when the swath is wide enough
+    that half of it would put the vehicle outside that.
+
+    Heading follows the lane and flips 180 degrees at each end. For a camera
+    pointing straight down, heading changes what the footprint is ALIGNED with,
+    not what is under it — which is why the swath handed in should be the
+    camera's SHORTER ground dimension unless the caller knows which of its axes
+    ends up across-track. Conservative by a factor of at most 4:3 on a 640x480
+    frame, and the cost of being wrong the other way is a strip never looked at.
+    """
+    (min_x, min_y, _), (max_x, max_y, _) = bounds
+    pitch = lane_spacing(swath_m, overlap=overlap)
+    half = max(swath_m / 2.0, margin_m)
+    if along not in ("x", "y"):
+        raise ValueError(f"along must be 'x' or 'y', got {along!r}")
+
+    # The lane runs along `along`; lanes step across the other axis.
+    if along == "x":
+        run0, run1 = min_x + margin_m, max_x - margin_m
+        step0, step1 = min_y + half, max_y - half
+    else:
+        run0, run1 = min_y + margin_m, max_y - margin_m
+        step0, step1 = min_x + half, max_x - half
+    if run1 <= run0:
+        return []
+
+    # A single lane down the middle when the swath already spans the arena —
+    # `step1 < step0` means half a swath from each wall has met in the middle.
+    if step1 < step0:
+        centres = [(step0 + step1) / 2.0]
+    else:
+        n = max(1, int(math.ceil((step1 - step0) / pitch)))
+        centres = [step0 + (step1 - step0) * (i / n) for i in range(n + 1)]
+
+    out = []
+    forward = True
+    for c in centres:
+        a, b = (run0, run1) if forward else (run1, run0)
+        yaw = 0.0 if b > a else math.pi
+        if along == "y":
+            yaw = math.pi / 2.0 if b > a else -math.pi / 2.0
+        pa = (a, c) if along == "x" else (c, a)
+        pb = (b, c) if along == "x" else (c, b)
+        # Turn standing still at the head of the lane, then fly it whole.
+        out.append((pa[0], pa[1], z, yaw))
+        out.append((pb[0], pb[1], z, yaw))
+        forward = not forward
+    return out
+
+
+def _sweep_rect(bounds, inset_m, side_x_m, side_y_m):
+    """The rectangle a sweep is flown on, or None if it collapses.
+
+    Lifted out of `u_sweep` unchanged so `perimeter_sweep` cannot drift away
+    from it: both clamp a stated side to the arena, because a side longer than
+    the arena would put the sweep outside it and outside the arena is where the
+    competition ends the attempt.
+    """
+    (min_x, min_y, _), (max_x, max_y, _) = bounds
+    cx, cy = (min_x + max_x) / 2.0, (min_y + max_y) / 2.0
+    if side_x_m and side_x_m > 0.0:
+        x0 = max(cx - side_x_m / 2.0, min_x)
+        x1 = min(cx + side_x_m / 2.0, max_x)
+    else:
+        x0, x1 = min_x + inset_m, max_x - inset_m
+    if side_y_m and side_y_m > 0.0:
+        y0 = max(cy - side_y_m / 2.0, min_y)
+        y1 = min(cy + side_y_m / 2.0, max_y)
+    else:
+        y0, y1 = min_y + inset_m, max_y - inset_m
+    return None if (x1 <= x0 or y1 <= y0) else (x0, y0, x1, y1)

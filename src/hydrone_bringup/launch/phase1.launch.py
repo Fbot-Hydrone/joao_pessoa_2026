@@ -104,6 +104,76 @@ def generate_launch_description():
                         "empty, so no check ever runs and nothing is detected "
                         "or explained. phase1_real.launch.py sets this; see "
                         "docs/LANDING-SITES.md."),
+        # ── The map-sweep experiment ────────────────────────────────────────
+        # Every one of these defaults to what this launch has always done, so
+        # phase1_sim.launch.py is byte-for-byte the mission that landed on four
+        # bases. phase1_map_sweep.launch.py is the file that flips them, and it
+        # exists rather than a copy of this one so the two cannot drift apart.
+        DeclareLaunchArgument(
+            "search_mode", default_value="u",
+            description="Which shape the search flies. 'u' is the measured "
+                        "ladder built around the FORWARD camera. 'map_sweep' "
+                        "flies a closed perimeter to build the occupancy map, "
+                        "then lanes spaced by what the BELLY camera actually "
+                        "covers — see phase1_map_sweep.launch.py."),
+        DeclareLaunchArgument(
+            "forward_detector", default_value="true",
+            description="Run the forward ZED pad detector. False leaves the "
+                        "ZED doing odometry and mapping only, which is what "
+                        "map_sweep wants: there the belly camera is the sole "
+                        "detector."),
+        DeclareLaunchArgument(
+            "down_project_position", default_value="false",
+            description="Let the belly camera report WHERE, not just whether. "
+                        "Off by default because its only route used to be a "
+                        "cast onto a flat floor, which a raised base breaks. "
+                        "With down_map_topic set it casts into the occupancy "
+                        "map instead, which has the base's top in it."),
+        DeclareLaunchArgument(
+            "down_map_topic", default_value="",
+            description="Occupancy map the belly camera projects into. Empty "
+                        "disables the route. '/octomap/octomap_binary' is "
+                        "where this launch's octomap_server publishes."),
+        DeclareLaunchArgument(
+            "down_range_as_depth", default_value="false",
+            description="Fall back to the rangefinder when the map has no "
+                        "answer for a pixel — an unmapped cell, or a ray that "
+                        "leaves the tree. Measures under the VEHICLE, so it is "
+                        "right while the pad is near the frame centre."),
+        DeclareLaunchArgument(
+            "map_down_detections", default_value="",
+            description="Belly-camera topic pad_map should FUSE, as opposed to "
+                        "the mission's confirmation feed. Empty keeps the map "
+                        "blind to it. Set it and the same topic serves both: "
+                        "pad_map fuses positions, the mission counts looks."),
+        DeclareLaunchArgument(
+            "max_map_speed", default_value="0.15",
+            description="Fastest the vehicle may be moving for pad_map to "
+                        "accept a detection, m/s. The default exists because a "
+                        "projection is only as good as the pose it is composed "
+                        "with, and its own justification is that 'the search is "
+                        "already rotate, settle, look' — which map_sweep is "
+                        "not: a lawnmower is continuous translation, and the "
+                        "belly camera only sees a base while passing over it. "
+                        "Raise it for that mode. The error it guards against "
+                        "scales with lag x speed x range, and the belly's ray "
+                        "is 2 m and near-vertical where the forward camera's "
+                        "was 8 m and shallow."),
+        DeclareLaunchArgument(
+            "max_map_yaw_rate_deg", default_value="10.0",
+            description="Fastest the vehicle may be SLEWING for pad_map to "
+                        "accept a detection, deg/s. Same story as "
+                        "max_map_speed, and MEASURED to be worse than "
+                        "neutral in map_sweep: over a lawnmower the belly "
+                        "camera is nearest NADIR while the vehicle turns at "
+                        "the end of a lane, so this gate throws out precisely "
+                        "the short, near-vertical rays and keeps the long "
+                        "shallow ones taken mid-lane."),
+        DeclareLaunchArgument(
+            "sweep_overlap", default_value="0.25",
+            description="Fraction of each belly swath the next lane repeats, "
+                        "in map_sweep. Covers the drift accumulated between "
+                        "two lanes flown minutes apart."),
         DeclareLaunchArgument(
             "target_bases", default_value="6",
             description="How many landing sites to visit before returning to "
@@ -304,6 +374,7 @@ def generate_launch_description():
         executable="pad_detector_node",
         name="pad_detector_forward",
         output="screen",
+        condition=IfCondition(LaunchConfiguration("forward_detector")),
         parameters=[{
             "camera": "forward",
             "image_topic": "/zed/zed_node/rgb/image_rect_color",
@@ -396,8 +467,15 @@ def generate_launch_description():
             # entries, and a bad one there becomes a landing. While the basics
             # are being settled, the ZED is the only thing that says WHERE a
             # base is, and this camera only says whether one is underneath.
-            "project_position": False,
-            "range_as_depth": False,
+            "project_position": ParameterValue(
+                LaunchConfiguration("down_project_position"), value_type=bool),
+            # The route that makes the belly camera worth trusting with a
+            # position: its pixel's ray cast into the occupancy map, which
+            # lands on the TOP of a raised base instead of on an assumed floor.
+            # Empty by default, so nothing changes unless a launch asks.
+            "map_topic": LaunchConfiguration("down_map_topic"),
+            "range_as_depth": ParameterValue(
+                LaunchConfiguration("down_range_as_depth"), value_type=bool),
             "range_topic": LaunchConfiguration("range_topic"),
             "ground_z": ParameterValue(ground_z, value_type=float),
             "out_topic": DOWN_DETECTIONS,
@@ -444,9 +522,16 @@ def generate_launch_description():
         output="screen",
         parameters=[{
             "range_topic": LaunchConfiguration("range_topic"),
-            # Empty: the belly camera is confirmation-only for now, so it
-            # publishes no position for the map to fuse.
-            "down_detections_topic": "",
+            # Empty by default: the belly camera is confirmation-only, so it
+            # publishes no position for the map to fuse. map_sweep sets it to
+            # the belly's own topic — the SAME topic the mission confirms on,
+            # because pad_map and the mission want different things from the
+            # same message (a position, and a count of looks).
+            "down_detections_topic": LaunchConfiguration("map_down_detections"),
+            "max_map_speed": ParameterValue(
+                LaunchConfiguration("max_map_speed"), value_type=float),
+            "max_map_yaw_rate_deg": ParameterValue(
+                LaunchConfiguration("max_map_yaw_rate_deg"), value_type=float),
             "require_armed": ParameterValue(
                 LaunchConfiguration("require_armed"), value_type=bool),
             # The default 20 s is wall-clock, and BiguaSim runs ~5-8x below
@@ -626,6 +711,9 @@ def generate_launch_description():
                 LaunchConfiguration("u_side_y_m"), value_type=float),
             "survey_inset_m": ParameterValue(
                 LaunchConfiguration("survey_inset_m"), value_type=float),
+            "search_mode": LaunchConfiguration("search_mode"),
+            "sweep_overlap": ParameterValue(
+                LaunchConfiguration("sweep_overlap"), value_type=float),
             "ground_z": ParameterValue(ground_z, value_type=float),
             "confirm_detections": ParameterValue(
                 LaunchConfiguration("confirm_detections"), value_type=int),

@@ -17,6 +17,12 @@
 #                     sim bring-up. See docs/PHASE1-MISSION.md.
 #   --landing-sites   run the earlier landing-site mission (fly forward and land
 #                     on whatever the belly camera sees). See docs/LANDING-SITES.md.
+#   --map-sweep       run the map-sweep EXPERIMENT: the ZED does odometry and
+#                     mapping only, the drone flies a closed perimeter to build
+#                     the occupancy map, then lanes spaced by the belly camera's
+#                     own footprint — and the belly camera places each pad by
+#                     casting its pixel into that map. See
+#                     src/hydrone_bringup/launch/phase1_map_sweep.launch.py.
 #   --ground-truth    fly the EKF on BiguaSim ground truth instead of the real
 #                     visual odometry (odom_source:=ground_truth). A DEBUGGING
 #                     AID for separating autonomy bugs from localization bugs —
@@ -31,7 +37,8 @@
 #
 #   scripts/docker_up.sh --phase1 target_bases:=2 takeoff_alt:=1.5
 #
-# --phase1 and --landing-sites are mutually exclusive; the last one given wins.
+# --phase1, --landing-sites and --map-sweep are mutually exclusive; the last one
+# given wins.
 # Anything else is forwarded untouched to `docker compose up` (-d, --force-recreate, ...).
 set -e
 cd "$(dirname "$0")/.."
@@ -50,6 +57,7 @@ for arg in "$@"; do
         --no-odom-print) ODOM_ERROR_PRINT=false ;;
         --phase1)        HYDRONE_LAUNCH=phase1_sim.launch.py ;;
         --landing-sites) HYDRONE_LAUNCH=landing_sites_sim.launch.py ;;
+        --map-sweep)     HYDRONE_LAUNCH=phase1_map_sweep_sim.launch.py ;;
         --ground-truth)  ODOM_SOURCE=ground_truth ;;
         --dev)           DEV_MODE=true; DO_BUILD=false ;;
         --no-build)      DO_BUILD=false ;;

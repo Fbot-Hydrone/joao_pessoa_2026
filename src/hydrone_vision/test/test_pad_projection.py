@@ -322,3 +322,133 @@ def test_sparse_depth_patch_falls_back_rather_than_guessing():
     assert result is not None
     assert result[1] == PadDetection.SOURCE_GROUND_PLANE
     node.destroy_node()
+
+
+# ── Projecting through the OCCUPANCY MAP ────────────────────────────────────
+# The route that lets the belly camera say WHERE, not just whether. A pixel is
+# a direction; the map is the only thing on the vehicle that knows which
+# surface lies along it, including the top of a raised base.
+#
+# The frame is the whole risk here. The ray is built in `map` (the FCU's local
+# ENU, which is what the pose and every setpoint speak) and octomap_server
+# publishes its tree in `odom`, and in this stack those differ by a right angle
+# and 0.78 m — measured, logged as `map->odom: yaw=+90.5 deg`. Getting it wrong
+# does not raise: the wrong ray crosses only unknown voxels, castRay passes
+# through unknown, and the miss is indistinguishable from an unmapped arena.
+
+import octomap                                                     # noqa: E402
+from geometry_msgs.msg import TransformStamped                     # noqa: E402
+from octomap_msgs.msg import Octomap                               # noqa: E402
+
+
+def a_floor_with_a_box_on_it(floor_z=-0.7, box_top=0.6, half=0.5,
+                             centre=(1.0, 0.0)):
+    """A tree holding an arena floor and one raised base standing on it."""
+    tree = octomap.OcTree(0.1)
+    for x in np.arange(-3.0, 3.0, 0.05):
+        for y in np.arange(-3.0, 3.0, 0.05):
+            tree.updateNode(np.array([x, y, floor_z]), True)
+    cx, cy = centre
+    for x in np.arange(cx - half, cx + half, 0.05):
+        for y in np.arange(cy - half, cy + half, 0.05):
+            tree.updateNode(np.array([x, y, box_top]), True)
+    return tree
+
+
+def give_map(node, tree, frame="map"):
+    """Install a decoded tree, bypassing the temp-file decode."""
+    msg = Octomap()
+    msg.header.frame_id = frame
+    node._map_msg = msg
+    node._map_tree = tree
+    node._map_decoded_stamp = (msg.header.stamp.sec, msg.header.stamp.nanosec)
+
+
+def test_the_map_finds_the_top_of_a_raised_base():
+    """The point of the whole route: a ray down onto a base stops on its TOP,
+    not on the floor the ground-plane cast would have assumed."""
+    node = make_node(map_topic="/octomap/octomap_binary", camera="down")
+    mount_down(node)
+    set_pose(node, 1.0, 0.0, 2.5)
+    give_map(node, a_floor_with_a_box_on_it())
+
+    out = node._project(CX, CY)          # straight down, dead centre
+    assert out is not None
+    point, source, _, _ = out
+    assert source == PadDetection.SOURCE_MAP
+    assert point[2] == pytest.approx(0.6, abs=0.1), (
+        "landed on the floor instead of the base — the assumed-plane error "
+        "this route exists to remove")
+    assert math.hypot(point[0] - 1.0, point[1]) < 0.2
+    node.destroy_node()
+
+
+def test_a_pixel_beside_the_base_lands_on_the_floor():
+    node = make_node(map_topic="/octomap/octomap_binary", camera="down")
+    mount_down(node)
+    set_pose(node, -1.5, 0.0, 2.5)
+    give_map(node, a_floor_with_a_box_on_it())
+
+    point, source, _, _ = node._project(CX, CY)
+    assert source == PadDetection.SOURCE_MAP
+    assert point[2] == pytest.approx(-0.7, abs=0.1)
+    node.destroy_node()
+
+
+def test_a_tree_in_another_frame_gives_the_SAME_world_point():
+    """octomap_server publishes in `odom`; the pose is in `map`. The answer
+    must not move when the tree is expressed in a rotated, offset frame."""
+    node = make_node(map_topic="/octomap/octomap_binary", camera="down")
+    mount_down(node)
+    set_pose(node, 1.0, 0.0, 2.5, frame="map")
+
+    # Same world, written in a frame turned +90 deg about Z and dropped 0.78 m
+    # — the transform this stack actually measures.
+    yaw, dz = math.pi / 2.0, -0.78
+    c, s = math.cos(yaw), math.sin(yaw)
+    rotated = octomap.OcTree(0.1)
+    for x in np.arange(-3.0, 3.0, 0.05):
+        for y in np.arange(-3.0, 3.0, 0.05):
+            rotated.updateNode(np.array([c * x - s * y, s * x + c * y,
+                                         -0.7 + dz]), True)
+    for x in np.arange(0.5, 1.5, 0.05):
+        for y in np.arange(-0.5, 0.5, 0.05):
+            rotated.updateNode(np.array([c * x - s * y, s * x + c * y,
+                                         0.6 + dz]), True)
+    give_map(node, rotated, frame="odom")
+
+    tf = TransformStamped()
+    tf.header.frame_id = "odom"
+    tf.child_frame_id = "map"
+    tf.transform.translation.z = dz
+    tf.transform.rotation.z = math.sin(yaw / 2.0)
+    tf.transform.rotation.w = math.cos(yaw / 2.0)
+    node.tf_buffer.set_transform_static(tf, "test")
+
+    point, source, _, _ = node._project(CX, CY)
+    assert source == PadDetection.SOURCE_MAP
+    assert point[2] == pytest.approx(0.6, abs=0.12), (
+        "the tree's frame leaked into the answer")
+    assert math.hypot(point[0] - 1.0, point[1]) < 0.25
+    node.destroy_node()
+
+
+def test_without_the_transform_the_map_declines_rather_than_guessing():
+    node = make_node(map_topic="/octomap/octomap_binary", camera="down")
+    mount_down(node)
+    set_pose(node, 1.0, 0.0, 2.5, frame="map")
+    give_map(node, a_floor_with_a_box_on_it(), frame="odom")   # no TF supplied
+    assert node._map_hit(np.array([1.0, 0.0, 2.4]), np.array([0, 0, -1.0])) is None
+    node.destroy_node()
+
+
+def test_an_unmapped_ray_falls_through_to_the_next_route():
+    """A cell no ray ever crossed is not an answer, and the caller's cue to
+    use the rangefinder instead."""
+    node = make_node(map_topic="/octomap/octomap_binary", camera="down")
+    mount_down(node)
+    set_pose(node, 1.0, 0.0, 2.5)
+    give_map(node, octomap.OcTree(0.1))          # empty: nothing was ever seen
+    assert node._map_hit(np.array([1.0, 0.0, 2.4]),
+                         np.array([0.0, 0.0, -1.0])) is None
+    node.destroy_node()

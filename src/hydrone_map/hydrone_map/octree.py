@@ -114,6 +114,40 @@ def query(tree, point) -> str:
         return State.UNKNOWN
 
 
+def raycast(tree, origin, direction, max_range=20.0):
+    """First OCCUPIED voxel along a ray, as (x, y, z), or None.
+
+    WHAT THIS IS FOR. A camera pixel is a ray, not a point: the image says
+    which DIRECTION a pad lies in and nothing about how far. Turning that into
+    a world position needs a surface, and every cheap answer picks the wrong
+    one — a plane at `ground_z` is wrong for a base raised 0 to 1.5 m (MEASURED
+    2026-09-01: a base 1.29 m tall seen from 7.7 m placed 1.06 m out), and the
+    rangefinder measures what is under the VEHICLE rather than under the pixel.
+
+    The occupancy map is the one thing that already knows where the surfaces
+    are, including the tops of the bases, because the depth camera swept them
+    into it on the way past. Casting the pixel's ray into it lands on the
+    surface that pixel actually sees.
+
+    Unknown cells are passed THROUGH rather than stopping the ray: an arena is
+    mostly voxels no ray happened to cross, and stopping at the first of them
+    would return the empty air just below the camera. The cost is that a ray
+    crossing genuinely unmapped floor reports no hit at all — which is the
+    honest answer, and the caller's cue to fall back to the rangefinder.
+
+    `direction` need not be normalised. `max_range` bounds the search so a ray
+    aimed at the horizon does not walk the whole tree.
+    """
+    o = np.asarray(origin, dtype=float)
+    d = np.asarray(direction, dtype=float)
+    norm = float(np.linalg.norm(d))
+    if norm < 1e-9:
+        return None
+    end = np.zeros(3, dtype=float)
+    hit = tree.castRay(o, d / norm, end, True, float(max_range))
+    return tuple(float(v) for v in end) if hit else None
+
+
 def is_free(tree, point) -> bool:
     """True only for space measured as empty. Unknown is NOT free.
 

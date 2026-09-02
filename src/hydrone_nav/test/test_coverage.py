@@ -459,3 +459,90 @@ def test_a_side_longer_than_the_arena_is_clamped_to_it():
     for x, y, _, _ in pts:
         assert -4.0 - 1e-9 <= x <= 4.0 + 1e-9
         assert -4.0 - 1e-9 <= y <= 4.0 + 1e-9
+
+
+# ── The map-sweep shapes ────────────────────────────────────────────────────
+# A different strategy: the forward camera maps and the BELLY camera detects.
+# What has to hold is that the perimeter closes (its product is the map, so the
+# fourth side is not spare) and that the lane pitch comes from the camera
+# rather than from a constant.
+
+
+def test_the_perimeter_closes_where_it_started():
+    """The U's fourth side is spare because the third looks back across it.
+    This pass builds a map out of a depth camera's own band, so it is not —
+    and closing the loop puts the vehicle back over the takeoff base."""
+    from hydrone_nav.coverage import perimeter_sweep
+    pts = perimeter_sweep(B8, inset_m=1.0, z=2.5, start_corner=0)
+    assert pts[0][:2] == pytest.approx(pts[-1][:2])
+    corners = {(round(x, 6), round(y, 6)) for x, y, _, _ in pts}
+    assert len(corners) == 4, "four corners, each visited once"
+
+
+def test_the_perimeter_flies_one_setpoint_per_leg():
+    """A mid-leg setpoint only tells GUIDED to stop and start again."""
+    from hydrone_nav.coverage import perimeter_sweep
+    pts = perimeter_sweep(B8, inset_m=1.0, z=2.5)
+    assert len(pts) == 8, "four legs, each a turn then the leg"
+    for i in range(0, len(pts), 2):
+        assert pts[i][3] == pytest.approx(pts[i + 1][3]), (
+            "a leg is flown on ONE heading; the turn happens standing still")
+
+
+def test_the_swath_is_the_camera_not_a_constant():
+    """The number differs by 2.5x between the simulator and the drone, which
+    is the whole reason it may not be hard-coded."""
+    from hydrone_nav.coverage import ground_swath
+    sim = ground_swath(320.0, 320.0, 640, 480, 2.5)      # 90 deg
+    real = ground_swath(814.6, 814.6, 640, 480, 2.5)     # measured, ~43 deg
+    assert sim[0] == pytest.approx(5.0)
+    assert real[0] == pytest.approx(1.96, abs=0.01)
+    assert ground_swath(0.0, 0.0, 640, 480, 2.5) == (0.0, 0.0)
+    assert ground_swath(320.0, 320.0, 640, 480, 0.0) == (0.0, 0.0)
+
+
+def test_lanes_are_spaced_by_the_swath_so_nothing_is_missed():
+    """Adjacent swaths must overlap, or the gap between two lanes flown
+    minutes apart is the drift accumulated in between."""
+    from hydrone_nav.coverage import camera_lawnmower
+    swath = 2.0
+    pts = camera_lawnmower(B8, swath_m=swath, z=2.5, overlap=0.25,
+                           margin_m=0.5)
+    lanes = sorted({round(p[1], 6) for p in pts})
+    assert len(lanes) > 1
+    for a, b in zip(lanes, lanes[1:]):
+        assert b - a < swath, "a gap wider than the swath is unseen floor"
+
+
+def test_a_narrower_camera_is_given_more_lanes():
+    """The real belly camera sees a third of what the simulated one does."""
+    from hydrone_nav.coverage import camera_lawnmower
+    wide = camera_lawnmower(B8, swath_m=3.75, z=2.5)
+    narrow = camera_lawnmower(B8, swath_m=1.47, z=2.5)
+    assert len(narrow) > len(wide)
+
+
+def test_the_swept_band_reaches_both_walls():
+    """The first lane centre sits half a swath in, not `inset_m` in: what has
+    to stay inside the arena is the STRIP the camera sees, and its centre is
+    the vehicle."""
+    from hydrone_nav.coverage import camera_lawnmower
+    swath = 2.0
+    pts = camera_lawnmower(B8, swath_m=swath, z=2.5, margin_m=0.5)
+    lanes = sorted({round(p[1], 6) for p in pts})
+    assert lanes[0] - swath / 2.0 <= -4.0 + 1e-6
+    assert lanes[-1] + swath / 2.0 >= 4.0 - 1e-6
+
+
+def test_a_camera_wider_than_the_arena_flies_one_lane():
+    from hydrone_nav.coverage import camera_lawnmower
+    pts = camera_lawnmower(B8, swath_m=20.0, z=2.5)
+    assert len({round(p[1], 6) for p in pts}) == 1
+
+
+def test_lanes_stay_inside_the_arena():
+    from hydrone_nav.coverage import camera_lawnmower
+    for swath in (0.5, 2.0, 3.75, 9.0):
+        for x, y, _, _ in camera_lawnmower(B8, swath_m=swath, z=2.5):
+            assert -4.0 - 1e-9 <= x <= 4.0 + 1e-9
+            assert -4.0 - 1e-9 <= y <= 4.0 + 1e-9

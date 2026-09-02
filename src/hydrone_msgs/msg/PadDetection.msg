@@ -38,4 +38,7 @@ float32 range_m
 uint8 SOURCE_NONE=0
 uint8 SOURCE_DEPTH=1          # back-projected with the registered depth image
 uint8 SOURCE_GROUND_PLANE=2   # ray intersected with the assumed ground plane
+uint8 SOURCE_MAP=3            # ray cast into the occupancy map, first occupied
+                              # voxel. The only route that finds the TOP of a
+                              # raised base without assuming its height.
 uint8 source

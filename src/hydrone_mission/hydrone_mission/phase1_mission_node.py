@@ -130,6 +130,8 @@ from mavros_msgs.srv import CommandBool, CommandTOL, SetMode
 
 from octomap_msgs.msg import Octomap
 
+from sensor_msgs.msg import CameraInfo
+
 from hydrone_map import octree
 from hydrone_nav import coverage, planner, route, servo
 from hydrone_msgs.msg import PadDetection, PadMap
@@ -297,6 +299,32 @@ class Phase1MissionNode(Node):
         # Point the camera where the map is still unobserved, instead of
         # turning a blind full circle. False restores the old sweep.
         # Sweep the arena by flying a rectangle rather than by spinning.
+        # WHICH SHAPE THE SEARCH FLIES, and which camera it is flown for.
+        #
+        #   "u"          the ladder in _begin_level: three sides of a rectangle
+        #                at cruise, twice. Built around the FORWARD camera,
+        #                which sees across the arena and places what it finds.
+        #
+        #   "map_sweep"  a closed perimeter that MAPS the arena, then lanes
+        #                spaced by what the BELLY camera actually covers. The
+        #                forward camera flies the odometry and fills the
+        #                occupancy map and reports no pads at all; the belly
+        #                camera is the only detector, and it places a pad by
+        #                casting its pixel's ray into that map.
+        #
+        # The second is an EXPERIMENT and is opt-in for that reason: the first
+        # is the one that has landed on four bases in a measured run.
+        self.declare_parameter("search_mode", "u")
+        # Where the belly camera's intrinsics come from, for map_sweep. The
+        # lane pitch is derived from them at run time and cannot be a constant:
+        # the simulated belly camera covers 5.0 m across at 2.5 m and the real
+        # one covers 1.96 m, so lanes spaced for one leave 3 m unseen on the
+        # other.
+        self.declare_parameter("sweep_cam_info_topic", "/down_cam/camera_info")
+        # How much of each swath the next lane repeats. Not politeness: two
+        # adjacent lanes are flown minutes apart on an estimate that drifts,
+        # and the gap between them is that drift.
+        self.declare_parameter("sweep_overlap", 0.25)
         self.declare_parameter("survey_circuit", True)
         # How far the circuit is inset from the arena bounds. Far enough that
         # the drone is not skimming the wall, close enough that the camera
@@ -514,6 +542,15 @@ class Phase1MissionNode(Node):
         self.coverage_range_m = float(p("coverage_range_m"))
         self.coverage_min_gain = int(p("coverage_min_gain"))
         self.survey_circuit = bool(p("survey_circuit"))
+        self.search_mode = str(p("search_mode"))
+        if self.search_mode not in ("u", "map_sweep"):
+            raise ValueError(
+                f"search_mode must be 'u' or 'map_sweep', got "
+                f"{self.search_mode!r}")
+        self.sweep_overlap = float(p("sweep_overlap"))
+        # Belly-camera intrinsics, filled by a subscription when map_sweep is
+        # flying. None until the camera has published once.
+        self._sweep_cam_info = None
         self.survey_inset_m = float(p("survey_inset_m"))
         self.u_side_x_m = float(p("u_side_x_m"))
         self.u_side_y_m = float(p("u_side_y_m"))
@@ -639,6 +676,12 @@ class Phase1MissionNode(Node):
         self.create_subscription(PoseStamped, "/mavros/local_position/pose",
                                  self._cb_pose, sensor_qos)
         self.create_subscription(PadMap, "/hydrone/pads/map", self._cb_map, 10)
+        if self.search_mode == "map_sweep":
+            self.create_subscription(
+                CameraInfo, self.get_parameter("sweep_cam_info_topic").value,
+                self._cb_sweep_cam_info,
+                QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
+                           history=HistoryPolicy.KEEP_LAST, depth=1))
         # The occupancy map, latched: octomap_server publishes TRANSIENT_LOCAL
         # so a subscriber that connects late is handed the current tree at
         # once. With the default volatile QoS this subscription would match
@@ -756,6 +799,31 @@ class Phase1MissionNode(Node):
             self.get_logger().warn(f"octomap: {exc}",
                                    throttle_duration_sec=20.0)
             return None
+
+    def _cb_sweep_cam_info(self, msg: CameraInfo):
+        self._sweep_cam_info = msg
+
+    def _sweep_swath_m(self):
+        """The belly camera's ground footprint at cruise, or None.
+
+        The SHORTER of the two dimensions, deliberately. Heading follows each
+        lane, so the footprint rotates with the vehicle, and which of the
+        camera's axes ends up across-track depends on how it is bolted on. The
+        short side is the conservative read: at worst it flies 4:3 more lanes
+        than it had to, where guessing the other way leaves a strip of arena
+        that no pass ever looks at — and this sweep passes once.
+
+        Height is measured to the FLOOR, not to the takeoff base: `ground_z` is
+        where the floor sits in this frame, and the takeoff base's top is zero.
+        """
+        info = self._sweep_cam_info
+        if info is None:
+            return None
+        fx, fy = float(info.k[0]), float(info.k[4])
+        agl = self.takeoff_alt - self.ground_z
+        across, along = coverage.ground_swath(fx, fy, info.width, info.height,
+                                              agl)
+        return min(across, along) if across > 0.0 and along > 0.0 else None
 
     def _cb_map(self, msg: PadMap):
         self.pad_map = msg
@@ -1523,6 +1591,64 @@ class Phase1MissionNode(Node):
         pads = self.pad_map.pads if self.pad_map else []
         return sum(1 for p in pads if self._is_candidate(p))
 
+    def _begin_map_sweep_level(self) -> bool:
+        """The experimental shape: map the arena, then mow it for the belly.
+
+        TWO LEVELS, and they do different jobs rather than the same job twice.
+
+          1  the closed PERIMETER at cruise. Its product is not detections —
+             the forward camera reports none in this mode — it is the
+             occupancy map, swept in by the depth camera along all four sides.
+             Everything after it projects into that map, so it has to come
+             first and it has to close: the fourth side carries the only view
+             of the strip beside it, and ending where it started puts the
+             vehicle back over the takeoff base with no transit leg.
+
+          2  LANES spaced by the belly camera's own footprint. This is the pass
+             that finds bases, and it is the first shape in this stack whose
+             spacing is derived from the sensor instead of chosen: see
+             _sweep_swath_m.
+
+        Level 2 cannot be built until the camera has published its intrinsics.
+        Rather than guess a swath, the level is refused and the ladder ends —
+        a sweep flown on a made-up footprint would look like coverage and not
+        be any.
+        """
+        if self._level == 1:
+            self._survey_path = coverage.perimeter_sweep(
+                self.plan_bounds, inset_m=self.survey_inset_m,
+                z=self.takeoff_alt, start_corner=self._nearest_corner(),
+                side_x_m=self.u_side_x_m, side_y_m=self.u_side_y_m)
+            self.get_logger().info(
+                f"MAP SWEEP 1/2: closed perimeter at {self.takeoff_alt:.1f} m "
+                f"— {len(self._survey_path)} setpoints, four sides, back where "
+                f"it started. Building the map the belly camera will project "
+                f"into; the forward camera reports no pads in this mode.")
+            return True
+
+        if self._level == 2:
+            swath = self._sweep_swath_m()
+            if swath is None:
+                self.get_logger().warn(
+                    "MAP SWEEP 2/2 refused: no CameraInfo from the belly "
+                    "camera yet, so its footprint is unknown and any lane "
+                    "spacing would be invented. Landing on what the perimeter "
+                    "already found.")
+                return False
+            self._survey_path = coverage.camera_lawnmower(
+                self.plan_bounds, swath_m=swath, z=self.takeoff_alt,
+                overlap=self.sweep_overlap, margin_m=self.survey_inset_m)
+            lanes = len(self._survey_path) // 2
+            self.get_logger().info(
+                f"MAP SWEEP 2/2: {lanes} lane(s) at {self.takeoff_alt:.1f} m — "
+                f"the belly camera covers {swath:.2f} m across from "
+                f"{self.takeoff_alt - self.ground_z:.1f} m up, so lanes sit "
+                f"{coverage.lane_spacing(swath, overlap=self.sweep_overlap):.2f} m "
+                f"apart at {self.sweep_overlap * 100:.0f}% overlap.")
+            return True
+
+        return False
+
     def _begin_level(self) -> bool:
         """Build the path for the current search level. False when none is left.
 
@@ -1548,6 +1674,9 @@ class Phase1MissionNode(Node):
         the rest of _do_settle already implements, so this returns an empty
         list for it and lets the sweep fall through.
         """
+        if self.search_mode == "map_sweep":
+            return self._begin_map_sweep_level()
+
         if self._level == 1:
             self._survey_path = coverage.u_sweep(
                 self.plan_bounds, inset_m=self.survey_inset_m,
