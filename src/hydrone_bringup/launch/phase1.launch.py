@@ -178,13 +178,15 @@ def generate_launch_description():
             "target_bases", default_value="6",
             description="How many landing sites to visit before returning to "
                         "the takeoff base. The takeoff base is not one of "
-                        "them. ONE while the mission has never been flown: the "
-                        "first thing worth knowing is whether a single "
-                        "find-confirm-land-return cycle closes, and a second "
-                        "base only adds a leg on a position estimate that has "
-                        "already been through a landing and a takeoff. Raise "
-                        "it to 2 (the competition number) once one cycle has "
-                        "been watched end to end."),
+                        "them. SIX is the competition number and the default. "
+                        "(This text used to say two; it was wrong.) Lower it "
+                        "only to shorten a debugging run — one is enough to "
+                        "see whether a single find-confirm-land-return cycle "
+                        "closes, and each base after the first adds a leg on "
+                        "a position estimate that has already been through a "
+                        "landing and a takeoff. MEASURED 2026-09-02: the U "
+                        "mission lands on four of six, map_sweep detects six "
+                        "and lands on five."),
         DeclareLaunchArgument(
             "u_side_x_m", default_value="6.0",
             description="Length of the U's legs along x, in metres, stated "
