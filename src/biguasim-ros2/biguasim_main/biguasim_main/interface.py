@@ -1,5 +1,6 @@
 import biguasim
 import json
+import os
 import yaml
 
 import numpy as np
@@ -75,9 +76,25 @@ class BiguaSimInterface():
         if not cfg:
             return
 
+        # BASES_SEED overrides config.yaml, and exists so a seed SWEEP costs
+        # nothing: the same arena layout question — "does this algorithm work
+        # on more than the one arena it was tuned on" — needs a different
+        # layout per run, and editing the tracked config.yaml between runs
+        # would either dirty the tree or require a rebuild to take effect. An
+        # environment variable reaches the container at RUN time, so a sweep is
+        # a loop over `BASES_SEED=n docker_up.sh` with no build in between.
+        seed = cfg['seed']
+        override = os.environ.get('BASES_SEED', '').strip()
+        if override:
+            try:
+                seed = int(override)
+            except ValueError:
+                print(f"[bases] BASES_SEED={override!r} is not an integer; "
+                      f"keeping config.yaml's {seed}")
+
         positions = sample_bases(
             count=cfg['count'],
-            seed=cfg['seed'],
+            seed=seed,
             z_min=cfg.get('z_min', 0.0),
             z_max=cfg.get('z_max', 1.5),
             min_spacing=cfg.get('min_spacing', 1.5),
@@ -104,7 +121,7 @@ class BiguaSimInterface():
 
         if self.node is not None:
             self.node.get_logger().info(
-                f"{len(positions)} bases spawnadas (seed {cfg['seed']}): "
+                f"{len(positions)} bases spawnadas (seed {seed}): "
                 + ", ".join(f"[{x:.2f}, {y:.2f}, {z:.2f}]" for x, y, z in positions)
             )
 

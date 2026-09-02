@@ -24,6 +24,10 @@ services:
       - FASTRTPS_DEFAULT_PROFILES_FILE=/ws/docker/fastdds_udp_only.xml
       # Asset backend used by `biguasim.install(...)`; set on the host if used.
       - BS_WORLDS_URL=${BS_WORLDS_URL:-}
+      # Overrides the base layout seed in biguasim's config.yaml, so a SEED
+      # SWEEP needs no rebuild between runs. Empty = whatever config.yaml says.
+      # scripts/seed_sweep.sh is what sets it.
+      - BASES_SEED=${BASES_SEED:-}
     volumes:
       # Where runs write their logs. odom_error_node's drift CSV lands here,
       # and it is the ONLY record of how far the VO wanders — without this
