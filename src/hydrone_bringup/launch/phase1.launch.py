@@ -76,7 +76,7 @@ DOWN_DETECTIONS = "/hydrone/pads/down/detections"
 def generate_launch_description():
     args = [
         DeclareLaunchArgument(
-            "takeoff_alt", default_value="3",
+            "takeoff_alt", default_value="2.5",
             description="Altitude for everything: takeoff, turning, travelling "
                         "and the confirmation hover, m above the top of the "
                         "base the drone starts on. Low on purpose — this is "
@@ -116,16 +116,7 @@ def generate_launch_description():
                         "it to 2 (the competition number) once one cycle has "
                         "been watched end to end."),
         DeclareLaunchArgument(
-            "rotation_step_deg", default_value="45.0",
-            description="Size of each search turn, degrees clockwise."),
-        DeclareLaunchArgument(
-            "max_rotations", default_value="8",
-            description="Turns to make before giving up and running the "
-                        "fallback. 8 x 45 deg is one full circle; past that "
-                        "the drone is re-examining scenery it already "
-                        "rejected."),
-        DeclareLaunchArgument(
-            "u_side_x_m", default_value="0.0",
+            "u_side_x_m", default_value="6.0",
             description="Length of the U's legs along x, in metres, stated "
                         "outright. 0 derives it from the arena instead: "
                         "leg = arena_size - 2 * survey_inset_m. Set it when "
@@ -135,7 +126,7 @@ def generate_launch_description():
                         "the camera actually reaches. The rectangle is "
                         "centred in the arena either way."),
         DeclareLaunchArgument(
-            "u_side_y_m", default_value="0.0",
+            "u_side_y_m", default_value="6.0",
             description="Length of the U's legs along y. See u_side_x_m. Two "
                         "numbers and not one because the competition arena is "
                         "8 x 8 and the team's own is 5 x 6."),
@@ -145,11 +136,6 @@ def generate_launch_description():
                         "u_side_* is 0. Far enough not to skim a wall, close "
                         "enough that the camera still reaches the far side."),
         DeclareLaunchArgument(
-            "survey_alt_m", default_value="2.0",
-            description="Height of the survey sweep. ABOVE THE HOUSE — its "
-                        "roof is 1.5 m in the competition arena — and below "
-                        "the net."),
-        DeclareLaunchArgument(
             "settle_s", default_value="5.0",
             description="Time held stationary after each turn before the map "
                         "is believed, s. Detections taken while yaw is slewing "
@@ -157,12 +143,12 @@ def generate_launch_description():
                         "the map metres out. Keep this short — it is there to "
                         "let the estimate stop, not to loiter."),
         DeclareLaunchArgument(
-            "confirm_detections", default_value="3",
+            "confirm_detections", default_value="6",
             description="Belly-camera looks above confirm_confidence needed "
                         "before committing to a landing. One frame can be a "
                         "glint on something blue."),
         DeclareLaunchArgument(
-            "confirm_confidence", default_value="0.40",
+            "confirm_confidence", default_value="0.30",
             description="Confidence that counts as a look. Raise it if the "
                         "drone lands on things that are merely blue."),
         DeclareLaunchArgument(
@@ -273,8 +259,38 @@ def generate_launch_description():
     # runs field_mode:="dark_blue", which uses no HSV band at all — retuning
     # these would not move it. Its knobs are mark_delta / mark_window_frac /
     # real_min_radius_px on pad_detector_node; docs/LANDING-SITES.md 3.
-    blue_hsv_low = [95, 30, 50]
-    yellow_hsv_low = [18, 30, 90]
+    # MEDIDO 2026-09-01, no simulador, com o drone parado na base de decolagem
+    # e depois em voo: a auto-exposicao do mapa move a imagem inteira entre os
+    # dois extremos da faixa dinamica.
+    #
+    #                       V mediana   S do azul   S do amarelo
+    #   frames iniciais           3         255          235
+    #   em voo                  244          51           28
+    #
+    # V por um fator de 80, S por 5x. A banda anterior ([95,30,50]/[18,30,90])
+    # reprovava nas DUAS pontas: no escuro por V (3 < 50), no estourado por S
+    # (28 < 30). Nao existe par (S,V) fixo que cubra os dois regimes — o alvo
+    # se move mais que a largura de qualquer banda. E a causa nao e ajustavel
+    # daqui: RGBCamera.cpp parseia so TicksPerCapture, e captura com
+    # SCS_FinalColorLDR, ou seja herda o tonemap/auto-exposicao do MAPA.
+    #
+    # O que sobrevive aos dois regimes e o HUE. Entao a cor passa a ser apenas
+    # a PROPOSTA, com S e V quase abertos, e quem discrimina sao os testes
+    # estruturais de _evaluate — area, solidez, aspecto, fracao de amarelo,
+    # concentricidade e a varredura polar — que nao dependem de cor absoluta.
+    # MEDIDO 2026-09-01, DEPOIS de consertar a exposicao no RGBCamera.cpp
+    # (ManualExposure/ExposureBias no config.yaml). Com a imagem lavada, o pad
+    # azul caia para S~50 e estes valores tinham sido baixados para 30 so para
+    # continuar admitindo alguma coisa. Com a exposicao correta o pad mede
+    # S p50 146-196 -- mas o CHAO da arena tambem e azul saturado, e a 30 a
+    # mascara deixou de separar os dois: 47% do quadro virava "azul", os
+    # contornos fundiam pad com piso e a cascata reprovava tudo em solidity e
+    # aspect (MEDIDO: contours=2, solidity=1, aspect=1).
+    #
+    # Voltando para perto do default do proprio pad_detector.py, que foi
+    # medido numa imagem bem exposta.
+    blue_hsv_low = [95, 110, 50]
+    yellow_hsv_low = [18, 80, 90]
     field_mode = LaunchConfiguration("field_mode")
 
     # ── Detectors: one per camera, same algorithm, different geometry ───────
@@ -297,6 +313,7 @@ def generate_launch_description():
             "publish_debug": ParameterValue(debug_images, value_type=bool),
             "blue_hsv_low": blue_hsv_low,
             "yellow_hsv_low": yellow_hsv_low,
+            "min_confidence": 0.35,
             "field_mode": field_mode,
             # dark_blue: this camera's answer becomes a WORLD POSITION, so it
             # must not read a pad hanging off the edge of the frame. There are
@@ -332,11 +349,33 @@ def generate_launch_description():
             "camera_info_topic": "/down_cam/camera_info",
             "depth_topic": "",
             "optical_frame": "down_cam_optical_frame",
+            # CONFIRMATION ONLY, for now. The rangefinder projection works
+            # (measured 0.04-0.20 m against 1 m for the forward camera on an
+            # elevated base) but it also let the belly camera CREATE map
+            # entries, and a bad one there becomes a landing. While the basics
+            # are being settled, the ZED is the only thing that says WHERE a
+            # base is, and this camera only says whether one is underneath.
             "project_position": False,
+            "range_as_depth": False,
+            "range_topic": LaunchConfiguration("range_topic"),
+            "ground_z": ParameterValue(ground_z, value_type=float),
             "out_topic": DOWN_DETECTIONS,
             "publish_debug": ParameterValue(debug_images, value_type=bool),
             "blue_hsv_low": blue_hsv_low,
             "yellow_hsv_low": yellow_hsv_low,
+            # O detector filtra com min_confidence ANTES de publicar, e a missao
+            # testa confirm_confidence depois. Com 0.50 contra 0.40 o gate da
+            # missao era letra morta: quem cortava era o detector.
+            #
+            # MEDIDO 2026-09-01: sobre uma base real, a 0.07 m do centro, a
+            # barriga entregou 2 frames em 25 s quando a missao pedia 6 — os
+            # demais pontuavam logo abaixo de 0.50 e nunca eram publicados.
+            # Alinhado com confirm_confidence; a barreira de seguranca continua
+            # sendo confirm_detections frames SEPARADOS acima dela.
+            "min_confidence": 0.30,
+            # A 1 m pad at the 1.5 m confirmation hover is ~213 px across and
+            # its markings 10-20 px wide; 5 px cannot bridge them.
+            "close_px": 25,
             "field_mode": field_mode,
             # dark_blue, and the mirror image of the forward camera's setting.
             # At landing height the pad no longer fits in this camera's view --
@@ -364,6 +403,9 @@ def generate_launch_description():
         output="screen",
         parameters=[{
             "range_topic": LaunchConfiguration("range_topic"),
+            # Empty: the belly camera is confirmation-only for now, so it
+            # publishes no position for the map to fuse.
+            "down_detections_topic": "",
             "require_armed": ParameterValue(
                 LaunchConfiguration("require_armed"), value_type=bool),
             # The default 20 s is wall-clock, and BiguaSim runs ~5-8x below
@@ -534,10 +576,6 @@ def generate_launch_description():
             "takeoff_alt": ParameterValue(takeoff_alt, value_type=float),
             "target_bases": ParameterValue(
                 LaunchConfiguration("target_bases"), value_type=int),
-            "rotation_step_deg": ParameterValue(
-                LaunchConfiguration("rotation_step_deg"), value_type=float),
-            "max_rotations": ParameterValue(
-                LaunchConfiguration("max_rotations"), value_type=int),
             "settle_s": ParameterValue(
                 LaunchConfiguration("settle_s"), value_type=float),
             # The U's geometry. See the arguments for what 0 means.
@@ -547,8 +585,7 @@ def generate_launch_description():
                 LaunchConfiguration("u_side_y_m"), value_type=float),
             "survey_inset_m": ParameterValue(
                 LaunchConfiguration("survey_inset_m"), value_type=float),
-            "survey_alt_m": ParameterValue(
-                LaunchConfiguration("survey_alt_m"), value_type=float),
+            "ground_z": ParameterValue(ground_z, value_type=float),
             "confirm_detections": ParameterValue(
                 LaunchConfiguration("confirm_detections"), value_type=int),
             "confirm_confidence": ParameterValue(

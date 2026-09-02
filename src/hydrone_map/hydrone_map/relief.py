@@ -39,6 +39,14 @@ MAX_FOOTPRINT_M = 2.0
 # How far from the arena edge a cluster has to be to not simply be the wall.
 WALL_MARGIN_M = 0.6
 
+# How finely the column is sampled in Z. This is NOT the horizontal cell size,
+# and using that one is how this returned nothing at all: `resolution` is the
+# coverage grain (0.5 m), while a competition base is a PLATE ~0.15 m thick.
+# Stepping the column in half-metres walks straight past it — a base whose top
+# lands between two samples is invisible however well the map saw it. This is
+# the octree's own resolution, which is the finest answer the map can give.
+Z_STEP_M = 0.15
+
 
 def _neighbours(cell):
     x, y = cell
@@ -49,7 +57,7 @@ def _neighbours(cell):
 
 
 def occupied_cells(occupancy, bounds, resolution, *, floor_z=FLOOR_Z,
-                   ceiling_z=CEILING_Z, exclude=()):
+                   ceiling_z=CEILING_Z, exclude=(), z_step=Z_STEP_M):
     """Grid cells with something standing in the base band.
 
     `exclude` is a list of (min_x, min_y, max_x, max_y) regions to ignore —
@@ -65,7 +73,7 @@ def occupied_cells(occupancy, bounds, resolution, *, floor_z=FLOOR_Z,
     z = floor_z
     while z <= ceiling_z + 1e-9:
         zs.append(z)
-        z += resolution
+        z += z_step
     cells = set()
     n_x = int(math.floor((max_x - min_x) / resolution)) + 1
     n_y = int(math.floor((max_y - min_y) / resolution)) + 1
@@ -104,15 +112,17 @@ def relief_candidates(occupancy, bounds, resolution, *, floor_z=FLOOR_Z,
                       ceiling_z=CEILING_Z, exclude=(),
                       min_cells=MIN_FOOTPRINT_CELLS,
                       max_footprint_m=MAX_FOOTPRINT_M,
-                      wall_margin_m=WALL_MARGIN_M):
+                      wall_margin_m=WALL_MARGIN_M, z_step=Z_STEP_M,
+                      stats=None):
     """Isolated base-sized relief, as a list of (x, y) centres.
 
     Rejected, in order and for different reasons:
 
     * too few cells — noise, or the corner of something the map barely saw
     * too wide — the house, a wall, or two things the flood fill joined
-    * touching the arena edge — that is the wall itself, and the margin is
-      what separates "a base near the wall" from "the wall"
+    Cells inside `wall_margin_m` of the edge are removed BEFORE the flood
+    fill, because the wall is a ring and clustering it first joins it to
+    everything it touches.
 
     The output is deliberately a POSITION and nothing else. What it means is
     "something is standing here"; whether it is a base is for the belly camera
@@ -120,19 +130,49 @@ def relief_candidates(occupancy, bounds, resolution, *, floor_z=FLOOR_Z,
     """
     (min_x, min_y, _), (max_x, max_y, _) = bounds
     cells = occupied_cells(occupancy, bounds, resolution, floor_z=floor_z,
-                           ceiling_z=ceiling_z, exclude=exclude)
+                           ceiling_z=ceiling_z, exclude=exclude, z_step=z_step)
+    # DROP THE WALL BEFORE CLUSTERING, not after. The margin used to be checked
+    # on the finished cluster's CENTROID, and that cannot work: the arena wall
+    # is a RING through the whole height band, and a ring's centroid is the
+    # middle of the arena. It passed the margin test every time, and because the
+    # flood fill is 8-connected it had already swallowed every base that touched
+    # it. MEASURED: 284 occupied cells collapsing into ONE cluster of 284, which
+    # `max_footprint_m` then rejected — the scan returned an empty arena while
+    # the map held six bases.
+    def _margin(i, j):
+        x, y = min_x + i * resolution, min_y + j * resolution
+        return min(x - min_x, max_x - x, y - min_y, max_y - y)
+
+    edge = {c for c in cells if _margin(*c) < wall_margin_m}
+    groups = cluster(cells - edge)
+    # An empty result has many possible causes and they need different fixes.
+    # `stats` is how a caller finds out WHICH, instead of guessing.
+    if stats is not None:
+        stats.update(cells=len(cells), edge=len(edge), groups=len(groups),
+                     sizes=sorted((len(g) for g in groups), reverse=True)[:8],
+                     rejected_touching_wall=0, rejected_too_small=0,
+                     rejected_too_wide=0)
     out = []
-    for group in cluster(cells):
+    for group in groups:
+        # Touching the edge band means this is PART OF the wall or of whatever
+        # runs into it, and the piece left after the trim is not its real size.
+        # Without this a slab spanning the arena gets its ends shaved off and
+        # the remainder measures base-sized.
+        if any(nb in edge for c in group for nb in _neighbours(c)):
+            if stats is not None:
+                stats["rejected_touching_wall"] += 1
+            continue
         if len(group) < min_cells:
+            if stats is not None:
+                stats["rejected_too_small"] += 1
             continue
         xs = [min_x + i * resolution for i, _ in group]
         ys = [min_y + j * resolution for _, j in group]
         if (max(xs) - min(xs) > max_footprint_m
                 or max(ys) - min(ys) > max_footprint_m):
+            if stats is not None:
+                stats["rejected_too_wide"] += 1
             continue
         cx, cy = sum(xs) / len(xs), sum(ys) / len(ys)
-        if (cx - min_x < wall_margin_m or max_x - cx < wall_margin_m
-                or cy - min_y < wall_margin_m or max_y - cy < wall_margin_m):
-            continue
         out.append((cx, cy))
     return out

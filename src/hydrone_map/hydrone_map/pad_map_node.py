@@ -163,6 +163,14 @@ class PadMapNode(Node):
         self.declare_parameter("merge_radius", 1.2)
         self.declare_parameter("min_confidence", 0.50)
         # Beyond this range a projection is too uncertain to seed the map with.
+        # Empty disables it. Set to the belly detector's out_topic once that
+        # camera is projecting positions.
+        self.declare_parameter("down_detections_topic", "")
+        # Beyond this range a detection may only UPDATE an existing pad, never
+        # start a new one. MEASURED 2026-09-02: position error runs 0.04-0.20 m
+        # inside 5 m and 0.8-1.2 m beyond 7 m, so a far look is evidence that
+        # something is there and poor evidence of WHERE.
+        self.declare_parameter("max_new_candidate_range_m", 6.0)
         self.declare_parameter("max_range_m", 30.0)
         # The arena, as [min_x, min_y, max_x, max_y] in the world frame. A
         # detection projected OUTSIDE it is refused.
@@ -207,6 +215,10 @@ class PadMapNode(Node):
         # of pose noise differentiates to 0.3 m/s and would gate out everything.
         self.declare_parameter("velocity_topic",
                                "/mavros/local_position/velocity_local")
+        # A one-off sighting is dropped only BELOW this confidence. Aligned
+        # with the mission's confirm_confidence: anything the mission would act
+        # on is worth the ~25 s hover that settles it for good.
+        self.declare_parameter("prune_confidence", 0.40)
         self.declare_parameter("max_map_speed", 0.15)
         self.declare_parameter("max_map_yaw_rate_deg", 10.0)
         # How far from the registered takeoff base a detection is still THAT
@@ -223,6 +235,7 @@ class PadMapNode(Node):
         p = lambda name: self.get_parameter(name).value
         self.merge_radius = float(p("merge_radius"))
         self.min_conf = float(p("min_confidence"))
+        self.max_new_candidate_range = float(p("max_new_candidate_range_m"))
         self.max_range = float(p("max_range_m"))
         self.min_obs = int(p("min_observations"))
         b = [float(v) for v in p("arena_bounds")]
@@ -232,6 +245,7 @@ class PadMapNode(Node):
         self.world_frame = p("world_frame")
         self.require_armed = bool(p("require_armed"))
         self.takeoff_base_radius = float(p("takeoff_base_radius"))
+        self.prune_confidence = float(p("prune_confidence"))
         self.max_map_speed = float(p("max_map_speed"))
         self.max_map_yaw_rate = math.radians(float(p("max_map_yaw_rate_deg")))
         self.reject_log_period = float(p("reject_log_period_s"))
@@ -263,6 +277,16 @@ class PadMapNode(Node):
         self.pub_map = self.create_publisher(PadMap, p("map_topic"), 10)
         self.pub_markers = self.create_publisher(MarkerArray,
                                                  p("marker_topic"), 10)
+        # The belly camera's detections are fused too, when it publishes
+        # positions. They are the most accurate source there is: a nadir camera
+        # with a rangefinder MEASURES the distance to the surface, where the
+        # forward camera's ground-plane cast has to ASSUME the pad lies on the
+        # floor — and a base 1.43 m tall placed by that assumption from 7.7 m
+        # landed 1.06 m from where it is (MEASURED 2026-09-01).
+        down = p("down_detections_topic")
+        if down:
+            self.create_subscription(PadDetection, down,
+                                     self._cb_detection, 10)
         self.create_subscription(PadDetection, p("detections_topic"),
                                  self._cb_detection, 20)
         self.create_subscription(PoseStamped, p("pose_topic"),
@@ -393,10 +417,43 @@ class PadMapNode(Node):
             return
         # Weight close, confident looks far above distant ones — projection
         # error grows with range on both projection routes.
-        weight = float(msg.confidence) / max(float(msg.range_m), 1.0)
+        #
+        # INVERSE SQUARE, not inverse. MEASURED 2026-09-01, seed 10, the same
+        # pad seen from two ranges:
+        #
+        #     from forward @ 3.4 m  ->  position error 0.07 m  ->  landed
+        #     from forward @ 5.4 m  ->  position error 0.44 m  ->  blacklisted
+        #
+        # The error grows about LINEARLY with range, so the variance grows with
+        # its square, and inverse-variance is the weighting that actually
+        # minimises the fused error. Under the old 1/r a 5.4 m look kept 63% of
+        # a 3.4 m look's say; under 1/r^2 it keeps 40%. That run put the pad
+        # 0.44 m out, against a wall — the vehicle then hovered over bare floor,
+        # the belly camera saw nothing, and a REAL base was blacklisted.
+        weight = float(msg.confidence) / max(float(msg.range_m), 1.0) ** 2
         stamp = self.get_clock().now().nanoseconds * 1e-9
 
         entry = self._nearest(msg.position.x, msg.position.y)
+        if entry is None and msg.range_m > self.max_new_candidate_range:
+            # FAR LOOKS MAY REFINE, NOT INVENT. A distant detection still helps
+            # a pad the map already holds — the 1/range^2 weight makes sure it
+            # helps only a little — but it must not be allowed to conjure a new
+            # one, because at range the position is the least trustworthy thing
+            # about it.
+            #
+            # MEASURED 2026-09-02: a detection at 9.5 m and confidence 0.50 —
+            # the longest range and the lowest confidence of the whole run —
+            # created pad 7. Everything downstream then worked perfectly on it:
+            # the leg re-aimed, the servo centred, six belly looks confirmed it,
+            # and the vehicle landed on BARE FLOOR and counted it as a base.
+            # An off-base landing is eliminatory; this is where it started.
+            self.get_logger().info(
+                f"detection at ({msg.position.x:.2f}, {msg.position.y:.2f}) "
+                f"from {msg.range_m:.1f} m is beyond "
+                f"{self.max_new_candidate_range:.1f} m and matches no known "
+                f"pad — not creating a candidate from it",
+                throttle_duration_sec=10.0)
+            return
         if entry is None:
             entry = _Entry(self._next_id, msg.position.x, msg.position.y,
                            msg.position.z, weight, msg.confidence, stamp)
@@ -618,10 +675,21 @@ class PadMapNode(Node):
         dropping a real base costs the base.
         """
         now = self.get_clock().now().nanoseconds * 1e-9
+        # ...and the same argument applies to a SINGLE sighting that was a good
+        # one. MEASURED 2026-09-01: pad 9, seen once from 3.4 m at confidence
+        # 0.59, landed 0.09 m from a real base — the most accurate detection of
+        # the whole run — and this dropped it. It was seen once because the
+        # LAWNMOWER flies past and `max_map_speed` refuses detections while the
+        # vehicle translates, not because it was noise.
+        #
+        # So the timer keeps only its original job: clearing weak one-off
+        # blips. Anything a camera called a pad with real confidence stays, and
+        # the confirmation hover — which is a far better judge — decides.
         doomed = [pid for pid, e in self.pads.items()
                   if not e.visited
                   and not e.is_takeoff_base
                   and e.observations < 2
+                  and e.confidence < self.prune_confidence
                   and now - e.last_seen > self.ttl]
         for pid in doomed:
             entry = self.pads.pop(pid)

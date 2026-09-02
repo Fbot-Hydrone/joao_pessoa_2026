@@ -130,3 +130,30 @@ def test_the_house_is_excluded_and_a_base_beside_it_is_not():
 
 def test_an_empty_arena_yields_nothing():
     assert relief_candidates(arena(["......"] * 6), BOUNDS, RES) == []
+
+
+def test_a_thin_plate_between_coarse_samples_is_still_found():
+    """The bug that made relief_candidates return nothing on a real arena.
+
+    A competition base is a PLATE, not a column. Sampling the vertical band at
+    the horizontal cell size (0.5 m) steps clean over one whose top happens to
+    land between two samples — the map had measured it perfectly and the scan
+    still reported an empty arena.
+    """
+    from hydrone_map.relief import relief_candidates
+
+    plate_z = 0.73                      # between the 0.55 and 1.05 samples
+    def occ(p):
+        x, y, z = p
+        near = 1.4 <= x <= 2.2 and -1.6 <= y <= -0.8
+        return "occupied" if near and abs(z - plate_z) < 0.08 else "free"
+
+    bounds = ((-5.0, -5.0, 0.0), (5.0, 5.0, 3.0))
+    coarse = relief_candidates(occ, bounds, 0.5, floor_z=-0.45, ceiling_z=1.1,
+                               z_step=0.5)
+    fine = relief_candidates(occ, bounds, 0.5, floor_z=-0.45, ceiling_z=1.1)
+
+    assert coarse == []                 # what the old half-metre step did
+    assert len(fine) == 1               # the default 0.15 m step finds it
+    cx, cy = fine[0]
+    assert 1.3 <= cx <= 2.3 and -1.7 <= cy <= -0.7

@@ -130,7 +130,7 @@ from mavros_msgs.srv import CommandBool, CommandTOL, SetMode
 
 from octomap_msgs.msg import Octomap
 
-from hydrone_map import octree, relief
+from hydrone_map import octree
 from hydrone_nav import coverage, planner, route, servo
 from hydrone_msgs.msg import PadDetection, PadMap
 from hydrone_msgs.srv import MarkPadVisited, RegisterTakeoffBase
@@ -191,7 +191,6 @@ class Phase1MissionNode(Node):
     TAKEOFF = "TAKEOFF"
     SELECT = "SELECT"
     SETTLE = "SETTLE"
-    ROTATE = "ROTATE"
     TRAVEL = "TRAVEL"
     CONFIRM = "CONFIRM"
     LAND = "LAND"
@@ -234,10 +233,8 @@ class Phase1MissionNode(Node):
         self.declare_parameter("target_bases", 1)
 
         # ── The search ──────────────────────────────────────────────────────
-        self.declare_parameter("rotation_step_deg", 45.0)
         # 8 x 45 deg = one full turn. Past that the drone is looking at scenery
         # it has already rejected.
-        self.declare_parameter("max_rotations", 8)
         # Held stationary before the map is believed. Short on purpose: long
         # enough for the yaw estimate to stop moving, short enough not to spend
         # the flight hovering. Your ceiling was 2 s.
@@ -283,7 +280,6 @@ class Phase1MissionNode(Node):
         # are TRIED. Two grids on purpose: making the second as fine as the
         # first squares the work for viewpoints that differ by less than the
         # vehicle's own position error.
-        self.declare_parameter("coverage_cell_m", 0.5)
         self.declare_parameter("coverage_viewpoint_m", 1.0)
         # How far a viewpoint is credited with seeing. SHORTER than the
         # detector's true reach on purpose: a base at the far edge of the frame
@@ -294,7 +290,6 @@ class Phase1MissionNode(Node):
         # trip costs.
         self.declare_parameter("coverage_min_gain", 4)
         # Turn isolated relief in the occupancy map into weak candidates to
-        # investigate. See _harvest_relief.
         # The survey cannot run for ever. Phase 1 allows 3 attempts in 30
         # minutes, so a sweep that eats the attempt has cost the run whatever
         # it learned. These are the two ways it ends other than running out of
@@ -311,7 +306,6 @@ class Phase1MissionNode(Node):
         # has no intermediate points: a leg is a straight line on one heading,
         # so a point in the middle of it does nothing but tell the vehicle to
         # stop, and GUIDED stops dead at every position target.
-        self.declare_parameter("survey_step_m", 1.5)
         # THE LENGTH OF THE U'S LEGS, in metres, stated outright. Zero means
         # derive it from the arena: leg = arena_size - 2 * survey_inset_m.
         # Set it when the sweep should be a particular size for a reason the
@@ -323,16 +317,45 @@ class Phase1MissionNode(Node):
         # arena) and below the net at 2.5 m — the passes fly over it, and at
         # the 1 m cruise height they would fly INTO it. Higher also widens what
         # each pass sees.
-        self.declare_parameter("survey_alt_m", 2.0)
+        # Altura da hover de CONFIRMACAO, separada do takeoff_alt.
+        #
+        # _do_confirm foi desenhado para "directly above at 1 m", onde o anel e
+        # a cruz ocupam centenas de pixels. Com takeoff_alt = 2.5 m a confirmacao
+        # herdava 2.5 m e o pad caia para ~128 px. MEDIDO 2026-09-01: um pad real
+        # a 0.44 m do ponto sobrevoado nao produziu UM frame de barriga em 25 s e
+        # foi para a blacklist.
+        #
+        # 1.5 m dobra o pad em pixels e a pegada da camera (FOV 90) ainda e ~3 m,
+        # entao um erro de meio metro continua dentro do quadro. Descer mais
+        # aumentaria o pad mas encolheria a pegada abaixo do erro que a projecao
+        # comete — e ai o pad sai de cena.
+        # How far the map has to move a pad before the leg re-aims at it.
+        # Below this it is fusion noise and chasing it would re-issue a setpoint
+        # every tick; above it the vehicle is flying to the wrong place.
+        # How many times a pad may be refused by the planner before it is
+        # written off. One refusal is about the MAP, not about the pad.
+        # Interrupt a search level to land on a pad that is already confirmed,
+        # instead of flying the level to its end first. Level 1 is always flown
+        # whole — that sweep is what stops the mission chasing its first
+        # sighting.
+        self.declare_parameter("land_during_survey", True)
+        self.declare_parameter("unreachable_tries", 3)
+        # Seconds a refused pad must wait before another refusal counts against
+        # it. Long enough for the search to fly somewhere else and put new rays
+        # into the octomap.
+        self.declare_parameter("retarget_tol_m", 0.25)
+        # How far ABOVE THE PAD'S TOP the confirmation hover sits. This is the
+        # number that decides how big the pad is in the belly frame, and it is
+        # the same for every pad regardless of how tall the base is.
+        # Floor and ceiling for that hover, as absolute altitudes. The ceiling
+        # keeps a tall base from pushing the vehicle into the arena net.
         # LEVEL 2 is the same U this much higher. Half a metre changes what the
         # camera can see over and past without changing the flight.
-        self.declare_parameter("level2_climb_m", 0.5)
         # LEVEL 4's lane spacing. Tighter is more thorough and costs
         # proportionally more flight.
-        self.declare_parameter("lawnmower_lane_m", 1.5)
         # How far the ladder is allowed to climb. 4 spends everything; lower it
         # to cap what an attempt may cost.
-        self.declare_parameter("max_search_level", 4)
+        self.declare_parameter("max_search_level", 2)
         # Centre the vehicle over the pad during the confirmation hover, using
         # the belly camera. The pixel-to-metre mapping is learned in flight;
         # see hydrone_nav.servo for why it cannot be a constant.
@@ -342,27 +365,41 @@ class Phase1MissionNode(Node):
         # learn, because it is what "centred" means. Measure it once by
         # hovering over a known pad and reading where it lands in frame.
         self.declare_parameter("pad_target_uv", [320.0, 240.0])
-        self.declare_parameter("survey_max_viewpoints", 8)
         self.declare_parameter("survey_max_stalls", 2)
         # How much the predicted gain must fall for a trip to count as
         # learning something.
         self.declare_parameter("survey_progress_cells", 5)
-        self.declare_parameter("relief_leads", True)
         # Deliberately BELOW the detector's own floor: relief is a reason to go
         # look, not a sighting of a pad, and it must not outvote the camera in
         # the map's fusion.
-        self.declare_parameter("relief_confidence", 0.35)
+        # Where the arena FLOOR is in this frame. The map's origin is the top
+        # of the base the drone armed on, not the ground, so the floor sits
+        # BELOW zero. relief's band is measured from here.
+        self.declare_parameter("ground_z", -0.7)
+        # Half-width of the ARENA, m. NOT `plan_bounds`, which is deliberately
+        # a metre slacker on every side so the planner has room to round a
+        # corner. Relief needs the real thing: its wall margin is measured from
+        # the boundary it is given, and measured from +-5 the band it trims
+        # lands OUTSIDE the arena while the actual wall at +-4 stays in and
+        # fuses every base to it. MEASURED: 285 cells, 181 of them one cluster,
+        # every group then rejected for touching the wall, 0 candidates.
+        # Measured from the arena edge. 0.4 m clears the wall voxels at +-4.0
+        # without eating a base: bases spawn at most ~3.5 m out, because the
+        # spawner keeps half a base clear of the wall.
         # Two relief hits this close are the same lump seen twice.
-        self.declare_parameter("relief_merge_m", 0.8)
         # Regions the relief scan ignores, flattened [min_x, min_y, max_x,
         # max_y, ...]. The house by default: it is known, it is big, and it
         # would otherwise dominate every cluster. From config.yaml's `house`.
-        self.declare_parameter("relief_exclude",
-                               [-4.0, 2.0, 2.0, 4.0])
+        # The house, as (min_x, min_y, max_x, max_y) IN THE MAP FRAME. It was
+        # written in the simulator's world coordinates, and the map is that
+        # world turned 90 deg — `map = (-y_world, x_world)`, confirmed against
+        # the takeoff base and every spawned base. So the box excluded a patch
+        # of open arena while the house itself, 1.5 m tall and squarely inside
+        # the height band, stayed in and helped fuse every cluster into one.
+        # World x in [-4, 2], y in [2, 4]  ->  map x in [-4, -2], y in [-4, 2].
         # Where the planned route is published for RViz. Informational only —
         # nothing in the mission reads it back.
         self.declare_parameter("out_plan", "/hydrone/nav/plan")
-        self.declare_parameter("out_relief", "/hydrone/pads/detections")
         self.declare_parameter("fresh_detection_s", 1.0)
 
         # ── Landing, and the plumbing ───────────────────────────────────────
@@ -413,7 +450,25 @@ class Phase1MissionNode(Node):
         # part of the arena nothing has mapped — which is where the walls the
         # drone has not seen yet are. Permission to plan through the unmapped
         # is not the same risk as flying a short straight line through it.
-        self.declare_parameter("plan_allow_unknown", False)
+        # TRUE for Phase 1, which is what the comment in _goto_via_map has
+        # always said this mission does — and it was never actually set.
+        #
+        # With False, `unknown` is impassable, and the planner refuses a goal
+        # whose own cell has never been hit by a ray. In an open arena most
+        # voxels are exactly that: never measured, because nothing ever looked
+        # there. MEASURED 2026-09-02: a real base, CONFIRMED at 0.75, reported
+        # "no way round it exists in the map" three times in an EMPTY 8x8 m
+        # arena and was blacklisted. Nothing was in the way. The space over it
+        # had simply never been rayed.
+        #
+        # The fallback when planning fails is the straight line, which crosses
+        # unknown space without asking anything — so refusing to plan through
+        # unknown does not make the flight safer, it just replaces a path that
+        # avoids KNOWN obstacles with one that ignores them.
+        #
+        # Phase 4's confined space is where this should be False, and where the
+        # map is dense enough to afford it.
+        self.declare_parameter("plan_allow_unknown", True)
         self.declare_parameter("auto_start", True)
 
         # ── DRY RUN: the vehicle never arms, a human is the actuator ────────
@@ -445,8 +500,6 @@ class Phase1MissionNode(Node):
         p = lambda n: self.get_parameter(n).value
         self.takeoff_alt = float(p("takeoff_alt"))
         self.target_bases = int(p("target_bases"))
-        self.rotation_step = math.radians(float(p("rotation_step_deg")))
-        self.max_rotations = int(p("max_rotations"))
         self.settle_s = float(p("settle_s"))
         self.yaw_tol = math.radians(float(p("yaw_tol_deg")))
         self.rotate_timeout = float(p("rotate_timeout_s"))
@@ -457,38 +510,28 @@ class Phase1MissionNode(Node):
         self.travel_stall_s = float(p("travel_stall_s"))
         self.travel_progress_m = float(p("travel_progress_m"))
         self.coverage_search = bool(p("coverage_search"))
-        self.coverage_cell_m = float(p("coverage_cell_m"))
         self.coverage_viewpoint_m = float(p("coverage_viewpoint_m"))
         self.coverage_range_m = float(p("coverage_range_m"))
         self.coverage_min_gain = int(p("coverage_min_gain"))
         self.survey_circuit = bool(p("survey_circuit"))
         self.survey_inset_m = float(p("survey_inset_m"))
-        self.survey_step_m = float(p("survey_step_m"))
         self.u_side_x_m = float(p("u_side_x_m"))
         self.u_side_y_m = float(p("u_side_y_m"))
-        self.survey_alt = float(p("survey_alt_m"))
-        self.level2_climb_m = float(p("level2_climb_m"))
-        self.lawnmower_lane_m = float(p("lawnmower_lane_m"))
+        self.land_during_survey = bool(p("land_during_survey"))
+        self.retarget_tol_m = float(p("retarget_tol_m"))
         self.max_search_level = int(p("max_search_level"))
         self.centre_on_pad = bool(p("centre_on_pad"))
         t = [float(v) for v in p("pad_target_uv")]
         self._servo = servo.VisualServo(target_uv=(t[0], t[1]))
         self._level = 1
         self._survey_path = None
-        self.survey_max_viewpoints = int(p("survey_max_viewpoints"))
         self.survey_max_stalls = int(p("survey_max_stalls"))
         self.survey_progress_cells = int(p("survey_progress_cells"))
         self._survey_visits = 0
         self._survey_stalls = 0
         self._survey_last_gain = None
         self._survey_path = None
-        self.relief_leads = bool(p("relief_leads"))
-        self.relief_confidence = float(p("relief_confidence"))
-        self.relief_merge_m = float(p("relief_merge_m"))
-        e = [float(v) for v in p("relief_exclude")]
-        self.relief_exclude = [tuple(e[i:i + 4]) for i in range(0, len(e), 4)]
-        self._relief_seen: list[tuple[float, float]] = []
-        # False until the arena has been swept. See _do_settle: a candidate
+        self.ground_z = float(p("ground_z"))
         # found during the sweep is remembered, not flown to.
         self.survey_done = False
         # True while working through leads the search could not confirm.
@@ -524,7 +567,6 @@ class Phase1MissionNode(Node):
         # mission's judgement, so this mission keeps it.
         self.blacklist: set[int] = set()
         self.target_id: int | None = None
-        self.rotations_done = 0
         self.landing_for = self.LAND_PAD
         # Set only by the fallback: the next takeoff exists to be followed by a
         # landing, not by a search.
@@ -549,19 +591,21 @@ class Phase1MissionNode(Node):
         self._blocked_target = False
         # Viewpoints the vehicle could not reach. Not retried: the search would
         # otherwise loop between turning eight times and failing the same trip.
-        self._failed_viewpoints: list[tuple[float, float]] = []
         self._octomap_msg = None        # raw and latched; see _cb_octomap
         self.octree_tree = None         # decoded per leg, in _goto_via_map
         b = [float(v) for v in self.get_parameter("plan_bounds").value]
         self.plan_bounds = (tuple(b[:3]), tuple(b[3:]))
         self.plan_allow_unknown = bool(
             self.get_parameter("plan_allow_unknown").value)
+        # pad id -> (refusals that counted, when the last one counted).
         self._call: _Call | None = None
         self._pending: str | None = None    # what _call is for
         self._last_cmd_t = 0.0              # when the last command went out
         self._takeoff_tries = 0
         # Down-camera looks accepted during the current CONFIRM.
         self._confirm_hits = 0
+        self._confirm_seen = 0          # belly frames that arrived at all
+        self._confirm_best = 0.0        # best confidence any of them reached
         self._z_hist: list[tuple[float, float]] = []
         self._land_entry_z: float | None = None
         self._takeoff_start_z = 0.0
@@ -586,8 +630,6 @@ class Phase1MissionNode(Node):
         # _stream, _set_mode and _start_call all refuse on None, so the failure
         # mode of forgetting a guard is a log line, not a spinning motor.
         self.pub_plan = self.create_publisher(Path, p("out_plan"), 10)
-        self.pub_relief = (self.create_publisher(
-            PadDetection, p("out_relief"), 10) if self.relief_leads else None)
         self.pub_sp = None if self.dry_run else self.create_publisher(
             PoseStamped, "/mavros/setpoint_position/local", 10)
         self.pub_status = self.create_publisher(
@@ -669,8 +711,7 @@ class Phase1MissionNode(Node):
 
         self.get_logger().info(
             f"phase1_mission ready — takeoff to {self.takeoff_alt:.1f} m, "
-            f"search by {math.degrees(self.rotation_step):.0f} deg turns "
-            f"(max {self.max_rotations}), land on {self.target_bases} base(s), "
+            f"land on {self.target_bases} base(s), "
             "then home. "
             f"{'Auto-starting.' if self.auto_start else 'Call /hydrone/mission/start.'}")
 
@@ -780,17 +821,14 @@ class Phase1MissionNode(Node):
         self.landed_count = 0
         self.blacklist.clear()
         self.target_id = None
-        self.rotations_done = 0
         self.landing_for = self.LAND_PAD
         self._land_after_takeoff = False
         # An abort mid-leg must not leave waypoints behind for the next one.
         self._leg = []
         self._travel_best = None
         self._viewpoint_leg = False
-        self._failed_viewpoints.clear()
         self.survey_done = False
         self.investigating = False
-        self._relief_seen.clear()
         self._survey_visits = 0
         self._survey_stalls = 0
         self._survey_last_gain = None
@@ -898,9 +936,18 @@ class Phase1MissionNode(Node):
             #
             # Refusing costs one target. Flying it costs the aircraft, and in
             # the competition it costs the attempt.
+            # SAY WHAT IS THERE. "No way round" is a conclusion, not evidence,
+            # and it has already sent one confirmed base to the blacklist in an
+            # empty arena. These are the states A* actually saw.
+            raw = octree.query(self.octree_tree, (x, y, z))
+            infl = occ((x, y, z))
+            col = " ".join(
+                f"{zz:+.1f}:{octree.query(self.octree_tree, (x, y, zz))[:4]}"
+                for zz in (z - 0.6, z - 0.3, z, z + 0.3, z + 0.6))
             self.get_logger().error(
-                f"({x:.2f}, {y:.2f}) is blocked and no way round it exists in "
-                f"the map — REFUSING the leg. Holding position.")
+                f"({x:.2f}, {y:.2f}, {z:.2f}) is blocked and no way round it "
+                f"exists in the map — REFUSING the leg. Holding position. "
+                f"[goal raw={raw} inflated={infl} | column {col}]")
             self._leg = []
             self._hold()
             self._blocked_target = True
@@ -948,7 +995,6 @@ class Phase1MissionNode(Node):
             self.TAKEOFF: self._do_takeoff,
             self.SELECT: self._do_select,
             self.SETTLE: self._do_settle,
-            self.ROTATE: self._do_rotate,
             self.TRAVEL: self._do_travel,
             self.CONFIRM: self._do_confirm,
             self.LAND: self._do_land,
@@ -1121,7 +1167,6 @@ class Phase1MissionNode(Node):
                 f"{self.pose.pose.position.z:.2f} m, "
                 f"heading {math.degrees(yaw):.0f} deg.")
             self._goto(x, y, self.takeoff_alt, yaw)
-            self.rotations_done = 0
             if self._land_after_takeoff:
                 # The fallback's second hop: up, then straight back down.
                 self._land_after_takeoff = False
@@ -1198,6 +1243,24 @@ class Phase1MissionNode(Node):
                 f"is confirmed in the map ({pad.observations} looks, conf "
                 f"{pad.confidence:.2f}) — flying over it.")
             self._viewpoint_leg = False
+            # CLEARANCE OVER THE PAD, not an altitude. A competition base may be
+            # anywhere from 0 to 1.5 m tall, so a fixed confirmation altitude
+            # means the camera is a different distance from every pad it looks
+            # at — 2.2 m over one on the floor and 0.77 m over a 1.5 m one, from
+            # the same setpoint. That is the difference between a pad filling a
+            # third of the frame and filling most of it, and it moves the servo
+            # scale by the same factor.
+            #
+            # Held above the pad's own measured top instead, so every
+            # confirmation is flown from the same distance. Floored at
+            # the old behaviour, and clamped so a tall base cannot push the
+            # vehicle into the net.
+            # ONE ALTITUDE. The vehicle cruises, searches and confirms at
+            # `takeoff_alt` and only ever leaves it to land, returning to it
+            # afterwards. Three separate heights used to be computed here from
+            # the pad's own height; that bought nothing the belly camera could
+            # not do from a single fixed height, and every one of them was
+            # another number to get wrong.
             self._goto_via_map(pad.position.x, pad.position.y,
                                self.takeoff_alt, self.setpoint[3])
             self._enter(self.TRAVEL)
@@ -1233,6 +1296,14 @@ class Phase1MissionNode(Node):
         flying the whole U again. A hover settles it either way, and a failed
         one blacklists the pad.
         """
+        # A pad the planner just refused is DEFERRED, not merely uncounted.
+        # Leaving it selectable while the cooldown runs is a livelock: the
+        # mission picks the same pad, the same octomap refuses the same leg, and
+        # nothing else is ever tried. MEASURED 2026-09-01: four refusals of
+        # pad 2 in twenty seconds, all logged (1/3), no progress in between.
+        #
+        # Deferring it lets the search fly somewhere else — which is the only
+        # thing that can put new rays in the map and change the answer.
         n = 1 if self.investigating else route.MIN_OBSERVATIONS
         return route.is_candidate(pad, blacklist=self.blacklist,
                                   home=self.home, min_observations=n)
@@ -1291,7 +1362,6 @@ class Phase1MissionNode(Node):
         # into the occupancy map, and the odometry is never asked to do the one
         # thing this arena breaks it on.
         #
-        # It runs at `survey_alt`, NOT at takeoff_alt: the passes cross the
         # house, whose roof is at 1.5 m, and the cruise height is 1 m.
         if not self.survey_done and self.survey_circuit:
             if self._survey_path is None:
@@ -1307,6 +1377,34 @@ class Phase1MissionNode(Node):
                     # 2026-08-28, without this level 3 escalated 0.08 s after
                     # starting and never ran at all.
                     return
+            # LAND ON WHAT IS ALREADY CONFIRMED, mid-level.
+            #
+            # The rule used to be "fly the whole level, then commit", and the
+            # reason was real: chasing the first sighting spends the battery on
+            # whatever happened to be in front of the camera at take-off, and
+            # the bases nobody turned to look at are never found at all.
+            #
+            # That reason has expired. A confirmed pad now means three separate
+            # looks agreeing, and MEASURED 2026-09-02 those land 0.04-0.20 m
+            # from the real base. Meanwhile the levels got long: the lawnmower
+            # is 42 points, minutes of flight, and the vehicle was flying all of
+            # it with confirmed bases sitting untouched in the map.
+            #
+            # So the barrier stays where it earns its keep — level 1, which is
+            # the sweep that stops the mission being a slave to its first
+            # sighting — and from level 2 on, a confirmed pad is worth landing
+            # on NOW. The level resumes afterwards: `_survey_path` is not
+            # cleared, so the remaining points are still flown.
+            if (self.land_during_survey and self._level >= 2
+                    and self.landed_count < self.target_bases
+                    and self._best_candidate() is not None):
+                self.get_logger().info(
+                    f"a confirmed base is in the map and level {self._level} "
+                    f"still has {len(self._survey_path or [])} point(s) to fly "
+                    f"— landing on it first, then resuming the level.")
+                self._enter(self.SELECT)
+                return
+
             if self._survey_path:
                 x, y, z, yaw = self._survey_path.pop(0)
                 self._viewpoint_leg = True   # to LOOK: never confirms, never lands
@@ -1315,7 +1413,6 @@ class Phase1MissionNode(Node):
                 return
 
             # This level is flown. Did it find enough?
-            self._harvest_relief()
             found = self._candidate_count()
             if found + self.landed_count >= self.target_bases:
                 self.survey_done = True
@@ -1361,61 +1458,22 @@ class Phase1MissionNode(Node):
         # takeoff, and the ones never turned towards are never found at all.
         pad = self._best_candidate()
         if pad is not None and self.survey_done:
-            self.rotations_done = 0
             self._enter(self.SELECT)
             return
 
-        if self.rotations_done < self.max_rotations:
-            # A local look from wherever we are. Cheap, and it is what catches
-            # a base the circuit passed at a bad angle.
-            self._hold(yaw=wrap_pi(self.setpoint[3] - self.rotation_step))
-            self.get_logger().info(
-                f"turn {self.rotations_done + 1}/{self.max_rotations}: "
-                f"heading for {math.degrees(self.setpoint[3]):.0f} deg.")
-            self._enter(self.ROTATE)
-            return
-
-        # ── 3. the relief, as the reserve ───────────────────────────────────
-        #
-        # Deliberately after the circuit and the blue candidates, not mixed in
-        # with them. An elevated base is the one the ground-plane projection
-        # places wrongly however well it is seen — the ray is intersected with
-        # z = floor and the base is not on that plane — so it is exactly the
-        # base most likely to still be missing. The occupancy map measured
-        # where the matter is; what it cannot say is whether the matter is a
-        # base, which is why this costs a hover and not a landing.
-        if self.landed_count < self.target_bases and self._relief_leads_left():
-            self._harvest_relief()
+        if (not self.investigating and self.landed_count < self.target_bases
+                and self._uninvestigated()):
+            self.investigating = True
             if self._best_candidate() is not None:
                 self.get_logger().info(
-                    f"only {self.landed_count}/{self.target_bases} base(s) and "
-                    f"the blue candidates are exhausted — investigating the "
-                    f"relief the occupancy map found.")
+                    f"the search is spent at "
+                    f"{self.landed_count}/{self.target_bases} — investigating "
+                    f"the unconfirmed lead(s) still in the map before "
+                    f"escalating; a hover settles one, a level costs minutes.")
                 self._enter(self.SELECT)
                 return
+            self.investigating = False
 
-        # ── 4. look from somewhere new ──────────────────────────────────────
-        spot = (self._next_viewpoint()
-                if self._survey_visits < self.survey_max_viewpoints else None)
-        if spot is not None and self._survey_gain_is_real(spot[1]):
-            (vx, vy), gain = spot
-            self.get_logger().info(
-                f"nothing new here, but {gain} unseen cells open up from "
-                f"({vx:.2f}, {vy:.2f}) — repositioning to look from there.")
-            self.rotations_done = 0
-            # Every viewpoint VISITED is avoided afterwards, not only the ones
-            # that could not be reached. MEASURED 2026-08-28: without this the
-            # search went back to (-1.00, 3.00) three times in a row and never
-            # ended — arriving taught it almost nothing, so the same spot still
-            # scored best afterwards.
-            self._failed_viewpoints.append((vx, vy))
-            self._survey_visits += 1
-            self.target_id = None
-            self.landing_for = self.LAND_PAD
-            self._viewpoint_leg = True
-            self._goto_via_map(vx, vy, self.takeoff_alt, self.setpoint[3])
-            self._enter(self.TRAVEL)
-            return
 
         # ── 5. escalate, or go home ─────────────────────────────────────────
         #
@@ -1428,7 +1486,6 @@ class Phase1MissionNode(Node):
             self._survey_path = None
             self.survey_done = False
             self.investigating = False
-            self.rotations_done = 0
             self.get_logger().warn(
                 f"still {self.landed_count}/{self.target_bases} base(s) and "
                 f"level {self._level - 1} is spent — escalating to search "
@@ -1494,48 +1551,46 @@ class Phase1MissionNode(Node):
         if self._level == 1:
             self._survey_path = coverage.u_sweep(
                 self.plan_bounds, inset_m=self.survey_inset_m,
-                z=self.survey_alt, start_corner=self._nearest_corner(),
+                z=self.takeoff_alt, start_corner=self._nearest_corner(),
                 side_x_m=self.u_side_x_m, side_y_m=self.u_side_y_m)
             self.get_logger().info(
-                f"SEARCH LEVEL 1: the U at {self.survey_alt:.1f} m — "
+                f"SEARCH LEVEL 1: the U at {self.takeoff_alt:.1f} m — "
                 f"{len(self._survey_path)} setpoints, two corner turns, one "
                 f"per leg, camera facing into the arena.")
             return True
 
         if self._level == 2:
-            z = self.survey_alt + self.level2_climb_m
+            # THE SAME U AGAIN, at the same height. It used to climb
+            # `level2_climb_m`; that is gone with the second altitude. What
+            # makes a second pass worth flying now is not the height, it is the
+            # map: the belly camera has been projecting positions the whole
+            # first pass, so the arena the second one flies over is better
+            # known than the one the first saw.
             self._survey_path = coverage.u_sweep(
-                self.plan_bounds, inset_m=self.survey_inset_m, z=z,
-                start_corner=self._nearest_corner(),
+                self.plan_bounds, inset_m=self.survey_inset_m,
+                z=self.takeoff_alt, start_corner=self._nearest_corner(),
                 side_x_m=self.u_side_x_m, side_y_m=self.u_side_y_m)
             self.get_logger().info(
-                f"SEARCH LEVEL 2: the same U at {z:.1f} m — a base seen "
-                f"edge-on from below, or hidden by the house, opens up from "
-                f"higher.")
+                f"SEARCH LEVEL 2: the same U at {self.takeoff_alt:.1f} m — a "
+                f"second pass over an arena the first one mapped.")
             return True
 
-        if self._level == 3:
-            # No path: the rotate-and-investigate behaviour below is level 3.
-            self._survey_path = []
-            self.get_logger().info(
-                "SEARCH LEVEL 3: turning on the spot and investigating the "
-                "relief the occupancy map found — where an ELEVATED base "
-                "hides, because the ground-plane projection cannot place one.")
-            self.survey_done = True
-            return True
-
-        if self._level == 4:
-            self._survey_path = coverage.lawnmower(
-                self.plan_bounds, inset_m=self.survey_inset_m,
-                z=self.survey_alt, step_m=self.survey_step_m,
-                lane_m=self.lawnmower_lane_m)
-            self.get_logger().warn(
-                f"SEARCH LEVEL 4 (last resort): lawnmower, "
-                f"{len(self._survey_path)} points at {self.lawnmower_lane_m:.1f} m "
-                f"lanes. Several times the flight of the U, and it finds what "
-                f"every other level looked past.")
-            return True
-
+        # THE LADDER IS TWO LEVELS. There used to be four.
+        #
+        # Level 3 turned on the spot, scanned the octomap for relief and
+        # repositioned to computed viewpoints. MEASURED across every run on
+        # 2026-09-01/02 it produced ZERO candidates — the relief scan never
+        # returned a spot — so it was minutes of flight that could not
+        # contribute a base, and it is what made the vehicle look like it was
+        # wandering the arena.
+        #
+        # Level 4 was a 42-point lawnmower. It found bases, but it also planned
+        # points OUTSIDE the arena (plan_bounds is +-5 m, the arena is +-4) and
+        # cost several times the flight of the U for them.
+        #
+        # What replaced both is cheaper and already proven: the belly camera
+        # projects positions with the rangefinder, so the two U sweeps now find
+        # what only a slow pass overhead used to.
         return False
 
     def _nearest_corner(self) -> int:
@@ -1549,101 +1604,6 @@ class Phase1MissionNode(Node):
             return 0
         here = (self.pose.pose.position.x, self.pose.pose.position.y)
         return min(range(4), key=lambda k: math.dist(corners[k], here))
-
-    def _relief_leads_left(self) -> bool:
-        """Is there relief that has not already been turned into a lead?"""
-        return self.relief_leads and self.pub_relief is not None
-
-    def _survey_gain_is_real(self, gain: int) -> bool:
-        """Is the coverage search still learning, or predicting the same gain?
-
-        `gain` is what a viewpoint is PREDICTED to reveal, and the prediction
-        is optimistic: it credits everything in range with line of sight, while
-        the octomap only integrates what the depth camera actually swept.
-        MEASURED 2026-08-28: the predicted gain went 28, 27, 27 across three
-        trips and never approached zero, so a survey that waits for it to run
-        out never ends.
-
-        The honest signal is whether the predictions are still IMPROVING. When
-        a trip does not reduce what the next one expects to find, the map has
-        stopped growing where this can reach, and the sweep is over — however
-        many cells the model still claims are out there.
-        """
-        if self._survey_last_gain is None:
-            self._survey_last_gain = gain
-            return True
-        if gain < self._survey_last_gain - self.survey_progress_cells:
-            self._survey_last_gain = gain
-            self._survey_stalls = 0
-            return True
-        self._survey_stalls += 1
-        self._survey_last_gain = min(self._survey_last_gain, gain)
-        if self._survey_stalls >= self.survey_max_stalls:
-            self.get_logger().info(
-                f"the sweep has stopped learning — {gain} cells still "
-                f"predicted unseen after {self._survey_stalls} trips that did "
-                f"not reduce it. They are behind something the camera cannot "
-                f"reach from anywhere it can stand.")
-            return False
-        return True
-
-    def _harvest_relief(self):
-        """Turn isolated relief in the occupancy map into leads to investigate.
-
-        The blue detector answers "does this look like a pad", from a camera,
-        and inherits the camera's problems — including one it cannot fix: a
-        base that is NOT ON THE FLOOR is placed wrongly however well it is
-        seen, because the ground-plane projection intersects the ray with
-        z = floor and an elevated base is not on that plane. Turning on the
-        spot does not help; the projection model is simply wrong for it.
-
-        The occupancy map does not share the problem: it measures where matter
-        is, in three dimensions, by ray-casting. So anything isolated standing
-        in the 0-1.5 m band with roughly a base's footprint, away from the
-        walls and outside the house, is a REASON TO GO LOOK.
-
-        These are published as ordinary detections with a LOW confidence, on
-        purpose. They are not sightings of a pad — nothing has said this is
-        blue — so they must not outvote the camera in the map's fusion. What
-        they buy is a position the mission will fly over, at which point the
-        belly camera and the rangefinder settle it.
-        """
-        if not self.relief_leads or self.pub_relief is None:
-            return
-        self.octree_tree = self._tree()
-        occ = self._occupancy()
-        if occ is None:
-            return
-        try:
-            spots = relief.relief_candidates(
-                occ, self.plan_bounds, self.coverage_cell_m,
-                exclude=self.relief_exclude)
-        except Exception as exc:
-            self.get_logger().error(f"relief scan failed: {exc}")
-            return
-
-        fresh = 0
-        for (x, y) in spots:
-            if any(math.hypot(x - px, y - py) < self.relief_merge_m
-                   for px, py in self._relief_seen):
-                continue
-            self._relief_seen.append((x, y))
-            fresh += 1
-            det = PadDetection()
-            det.header.stamp = self.get_clock().now().to_msg()
-            det.header.frame_id = (self.pose.header.frame_id
-                                   if self.pose is not None else "map")
-            det.camera = "relief"
-            det.confidence = self.relief_confidence
-            det.position_valid = True
-            det.position.x, det.position.y = float(x), float(y)
-            det.range_m = 1.0
-            det.source = PadDetection.SOURCE_NONE
-            self.pub_relief.publish(det)
-        if fresh:
-            self.get_logger().info(
-                f"relief scan: {fresh} new lump(s) standing in the base band — "
-                f"published as weak candidates to investigate")
 
     def _publish_plan(self, points, yaw):
         """The route, for RViz and for a human to check. Purely informational."""
@@ -1662,69 +1622,6 @@ class Phase1MissionNode(Node):
             ps.pose.orientation.w = math.cos(yaw / 2.0)
             path.poses.append(ps)
         self.pub_plan.publish(path)
-
-    def _next_viewpoint(self):
-        """Where to fly to see arena this spot cannot, or None.
-
-        None means the search is FINISHED rather than merely out of turns —
-        either the map has no unobserved space left worth the trip, or there is
-        no map to ask. The distinction matters: "I have looked everywhere" and
-        "I ran out of turns" deserve different endings, and only the first one
-        justifies going home.
-        """
-        if not self.coverage_search or self.pose is None:
-            return None
-        self.octree_tree = self._tree()
-        occ = self._occupancy()
-        if occ is None:
-            return None
-        try:
-            return coverage.next_viewpoint(
-                occ,
-                frm=(self.pose.pose.position.x, self.pose.pose.position.y),
-                yaw=yaw_of(self.pose),
-                bounds=self.plan_bounds,
-                z=self.takeoff_alt,
-                cell_m=self.coverage_cell_m,
-                viewpoint_m=self.coverage_viewpoint_m,
-                sensor_range=self.coverage_range_m,
-                min_gain=self.coverage_min_gain,
-                avoid=self._failed_viewpoints)
-        except Exception as exc:
-            # A search that throws must not take the mission with it: the
-            # fallback below is the behaviour this had before coverage existed.
-            self.get_logger().error(f"coverage search failed: {exc}")
-            return None
-
-    # ── ROTATE ───────────────────────────────────────────────────────────────
-
-    def _do_rotate(self):
-        """Turn one step clockwise, on the spot.
-
-        Clockwise is NEGATIVE yaw: the map frame is ENU and yaw runs
-        counter-clockwise from east, so a clockwise turn subtracts. The x/y/z of
-        the setpoint do not change — the FCU holds position while it yaws, and
-        the turn rate is ATC_SLEW_YAW's business, not this node's.
-        """
-        if self.pose is None:
-            return
-        self._hold()
-
-        error = abs(wrap_pi(yaw_of(self.pose) - self.setpoint[3]))
-        if error <= self.yaw_tol:
-            self.rotations_done += 1
-            self._enter(self.SETTLE)
-            return
-
-        if self._since_entered() > self.rotate_timeout:
-            self.get_logger().warn(
-                f"yaw still {math.degrees(error):.0f} deg off after "
-                f"{self.rotate_timeout:.0f} s — counting the turn anyway and "
-                "looking from here.")
-            self.rotations_done += 1
-            self._enter(self.SETTLE)
-
-    # ── TRAVEL ───────────────────────────────────────────────────────────────
 
     def _do_travel(self):
         """Fly to the setpoint SELECT placed. One leg, one setpoint.
@@ -1770,17 +1667,49 @@ class Phase1MissionNode(Node):
             self._blocked_target = False
             if self._viewpoint_leg:
                 self._viewpoint_leg = False
-                self._failed_viewpoints.append(
-                    (self.setpoint[0], self.setpoint[1]))
             elif self.target_id is not None:
                 self.get_logger().warn(
                     f"pad {self.target_id} is unreachable in the map — "
                     f"blacklisting it and searching on.")
                 self.blacklist.add(int(self.target_id))
                 self.target_id = None
-            self.rotations_done = 0
             self._enter(self.SETTLE)
             return
+
+        # RE-AIM IF THE MAP MOVED THE PAD. The setpoint was fixed when SELECT
+        # committed to this pad, but the map keeps fusing looks while the leg
+        # flies, and closer looks are worth far more than the distant one that
+        # first proposed it (pad_map weights by 1/range^2). So the estimate that
+        # sent the vehicle here is routinely the WORST one the mission will
+        # have.
+        #
+        # MEASURED 2026-09-01: pad 3 was proposed at (2.93, -0.96) from 7.8 m
+        # and corrected to (1.91, -1.18) — 1.02 m — while the leg was in the
+        # air. The vehicle flew to the stale point, ended up 0.99 m from the pad
+        # it believed it was over, the belly camera saw nothing in 25 s, and a
+        # REAL base was blacklisted.
+        #
+        # Only while there is a target pad and no bent path in progress: a
+        # `_leg` is a route around an obstacle and re-aiming mid-detour would
+        # throw away the avoidance.
+        if (self.target_id is not None and not self._viewpoint_leg
+                and not self._leg):
+            tgt = self._target_xy()
+            if tgt is not None:
+                moved = math.hypot(tgt[0] - self.setpoint[0],
+                                   tgt[1] - self.setpoint[1])
+                if moved > self.retarget_tol_m:
+                    self.get_logger().info(
+                        f"pad {self.target_id} moved {moved:.2f} m in the map "
+                        f"while flying to it — re-aiming at "
+                        f"({tgt[0]:.2f}, {tgt[1]:.2f})")
+                    self._goto(tgt[0], tgt[1], self.setpoint[2],
+                               self.setpoint[3])
+                    # The stall test measures progress toward a target; that
+                    # target just changed, so its history is about somewhere
+                    # else and would fire on the jump.
+                    self._travel_best = None
+                    self._travel_progress_t = self._now()
 
         d = math.hypot(self.pose.pose.position.x - self.setpoint[0],
                        self.pose.pose.position.y - self.setpoint[1])
@@ -1793,6 +1722,26 @@ class Phase1MissionNode(Node):
             self._travel_progress_t = now
         elif now - self._travel_progress_t > self.travel_stall_s:
             self._on_travel_stalled(d)
+            return
+
+        # ARRIVED MEANS POSITION AND HEADING, measured from the pose — never
+        # from a timer.
+        #
+        # A corner of the U is two setpoints at the SAME PLACE: one that only
+        # turns, then the leg that flies away on the new heading. Testing
+        # arrival by distance alone makes the turning setpoint "arrive" the
+        # instant it is issued, because the distance is already zero — so the
+        # next leg was released while the vehicle was still rotating, and it
+        # flew the corner as a curve with the camera sweeping through it.
+        #
+        # `yaw_tol` was declared for this and had no reader; it belonged to a
+        # rotate state that no longer exists.
+        dyaw = abs(wrap_pi(yaw_of(self.pose) - self.setpoint[3]))
+        if d <= self.arrive_tol and dyaw > self.yaw_tol:
+            self.get_logger().info(
+                f"in place, still turning: {math.degrees(dyaw):.0f} deg to go "
+                f"(tolerance {math.degrees(self.yaw_tol):.0f})",
+                throttle_duration_sec=2.0)
             return
 
         if d <= self.arrive_tol:
@@ -1822,7 +1771,6 @@ class Phase1MissionNode(Node):
                 self.get_logger().info(
                     f"arrived at the viewpoint ({self.setpoint[0]:.2f}, "
                     f"{self.setpoint[1]:.2f}) — looking around from here.")
-                self.rotations_done = 0
                 self._enter(self.SETTLE)
                 return
             if self.landing_for == self.LAND_FINAL:
@@ -1837,13 +1785,14 @@ class Phase1MissionNode(Node):
                     "arrived with no target pad — refusing to confirm or land. "
                     "Resuming the search.")
                 self._leg = []
-                self.rotations_done = 0
                 self._enter(self.SETTLE)
             else:
                 self.get_logger().info(
                     f"over pad {self.target_id} — confirming on the belly "
                     "camera.")
                 self._confirm_hits = 0
+                self._confirm_seen = 0
+                self._confirm_best = 0.0
                 self._servo.reset()
                 self._enter(self.CONFIRM)
             return
@@ -1870,8 +1819,6 @@ class Phase1MissionNode(Node):
                 f"({self.setpoint[0]:.2f}, {self.setpoint[1]:.2f}) — stopped "
                 f"{d:.2f} m out. Not going back to it; resuming the search "
                 f"from here.")
-            self._failed_viewpoints.append(
-                (self.setpoint[0], self.setpoint[1]))
             self._viewpoint_leg = False
             self._leg = []
             self._enter(self.SETTLE)
@@ -1915,6 +1862,14 @@ class Phase1MissionNode(Node):
 
         fresh = (self._last_down is not None
                  and self._now() - self._last_down_t <= self.fresh_s)
+        if fresh:
+            # Counted BEFORE the confidence gate, which is the whole point: a
+            # frame that arrives and scores 0.2 and a frame that never arrives
+            # are the same "0/6 looks" in the log, and they have opposite
+            # fixes. One is the detector, the other is where the vehicle is.
+            self._confirm_seen += 1
+            self._confirm_best = max(self._confirm_best,
+                                     float(self._last_down.confidence))
         if fresh and self._last_down.confidence >= self.confirm_conf:
             # CENTRE THE PAD FIRST. The hover is directly over the thing it is
             # about to land on, and "directly" is the word doing the work: the
@@ -1946,7 +1901,50 @@ class Phase1MissionNode(Node):
                 f"{self.confirm_timeout:.0f} s ({self._confirm_hits}/"
                 f"{self.confirm_detections} looks) — not a landing site. "
                 "Blacklisting it and searching from here.")
+            # WHICH failure was it. `seen` counts belly frames that arrived at
+            # all; `best` is the highest confidence any of them reached against
+            # the gate. seen>0 with best below the gate means the camera was
+            # looking at the pad and the detector would not call it — lighting,
+            # threshold, exposure. seen==0 means the camera was pointed at
+            # empty floor, and no detector change can help that.
+            tgt = self._target_xy()
+            pos = (self.pose.pose.position if self.pose is not None else None)
+            if pos is not None and tgt is not None:
+                d = math.hypot(pos.x - tgt[0], pos.y - tgt[1])
+                self.get_logger().warn(
+                    f"  confirm autopsy: {self._confirm_seen} belly frame(s) "
+                    f"arrived, best conf {self._confirm_best:.2f} vs gate "
+                    f"{self.confirm_conf:.2f} | vehicle at "
+                    f"({pos.x:.2f}, {pos.y:.2f}, {pos.z:.2f}), pad believed at "
+                    f"({tgt[0]:.2f}, {tgt[1]:.2f}), off by {d:.2f} m")
             self._reject_target()
+
+    def _height_over_pad(self) -> float:
+        """Camera height above the surface being centred on, in metres.
+
+        The pad's own `height` when the map has one (it is corrected from the
+        rangefinder on the first hover), else the arena floor. Never below a
+        floor of 0.2 m: a non-positive or absurdly small value would blow the
+        servo's scale up instead of down.
+        """
+        z = self.pose.pose.position.z if self.pose is not None else 0.0
+        top = self.ground_z
+        if self.target_id is not None and self.pad_map is not None:
+            for pad in self.pad_map.pads:
+                if int(pad.id) == int(self.target_id):
+                    if pad.height_measured:
+                        top = float(pad.height)
+                    break
+        return max(z - top, 0.2)
+
+    def _target_xy(self):
+        """Where the map believes the pad being confirmed is, or None."""
+        if self.target_id is None or self.pad_map is None:
+            return None
+        for pad in self.pad_map.pads:
+            if int(pad.id) == int(self.target_id):
+                return (pad.position.x, pad.position.y)
+        return None
 
     def _centre_on_pad(self, det):
         """Nudge the setpoint so the belly camera's pad moves to `target_uv`.
@@ -1957,7 +1955,21 @@ class Phase1MissionNode(Node):
         """
         if not self.centre_on_pad or self.pose is None:
             return
-        step = self._servo.update((det.u, det.v), self.pose.pose.position.z)
+        # HEIGHT ABOVE THE PAD, not altitude. The pixel-to-metre scale is a
+        # function of how far the camera is from the SURFACE it is looking at,
+        # and `position.z` is measured from the takeoff plane — which is the
+        # top of the base the drone armed on, not the ground and not this pad.
+        #
+        # MEASURED 2026-09-01, confirmation hover at z = 1.5 m:
+        #
+        #     pad on the floor (top at -0.70)  ->  really 2.20 m, servo told 1.50
+        #     base 1.43 m tall (top at  0.73)  ->  really 0.77 m, servo told 1.50
+        #
+        # Twice the real height on a tall base means every correction comes out
+        # twice too big. It does not converge, it hunts: the nudges on pad 5 ran
+        # +0.25 then -0.25 m until the vehicle slid off the base and landed on
+        # the floor beside it — an off-base landing, which is eliminatory.
+        step = self._servo.update((det.u, det.v), self._height_over_pad())
         if step is None:
             return
         yaw = yaw_of(self.pose)
@@ -1978,7 +1990,6 @@ class Phase1MissionNode(Node):
         # A fresh search, not a continuation: the drone is somewhere new, facing
         # a direction it has not searched from, so the turns it already made
         # tell us nothing about what is visible from here.
-        self.rotations_done = 0
         if self.pose is not None:
             self._goto(self.pose.pose.position.x, self.pose.pose.position.y,
                        self.takeoff_alt, self.setpoint[3])
@@ -2305,12 +2316,6 @@ class Phase1MissionNode(Node):
             left = max(0.0, self.settle_s - self._since_entered())
             cue = (f"HOLD STILL where you are for {left:.0f} s — the map is not "
                    "read while anything is moving.")
-        elif self.state == self.ROTATE and pose is not None:
-            err = wrap_pi(self.setpoint[3] - yaw_of(pose))
-            way = "LEFT (anticlockwise)" if err > 0 else "RIGHT (clockwise)"
-            cue = (f"TURN the drone {way} {abs(math.degrees(err)):.0f} deg, on "
-                   f"the spot — to heading "
-                   f"{math.degrees(self.setpoint[3]):.0f} deg.")
         elif self.state == self.TRAVEL and pose is not None:
             dx = self.setpoint[0] - pose.pose.position.x
             dy = self.setpoint[1] - pose.pose.position.y
@@ -2394,7 +2399,6 @@ class Phase1MissionNode(Node):
             f"armed={self.mav_state.armed} "
             f"x={x:.2f} y={y:.2f} z={z:.2f} yaw={yaw:.0f} "
             f"landed={self.landed_count}/{self.target_bases} "
-            f"turns={self.rotations_done}/{self.max_rotations} "
             f"target={self.target_id} blacklisted={sorted(self.blacklist)}")))
 
 

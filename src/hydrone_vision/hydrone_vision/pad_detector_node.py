@@ -64,7 +64,7 @@ from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 
 from geometry_msgs.msg import PoseStamped
-from sensor_msgs.msg import CameraInfo, Image
+from sensor_msgs.msg import CameraInfo, Image, Range
 
 import tf2_ros
 
@@ -172,9 +172,34 @@ class PadDetectorNode(Node):
         # AIRFRAME; the defaults are empty.
         self.declare_parameter("ignore_regions", [0.0])
         self.declare_parameter("min_area_px", 150.0)
+        # Width of the CLOSE kernel on the colour masks, px. See pad_detector's
+        # _k_close: the belly camera needs a wide one, the forward camera does
+        # not (and a wide one there would merge neighbouring pads).
+        # Use the rangefinder as the depth for this camera. Only meaningful
+        # for a DOWN-facing one: the beam measures the surface beneath the
+        # vehicle, which for a nadir camera is the optical Z depth. It removes
+        # the flat-ground assumption entirely, and with it the error that
+        # assumption makes on an elevated base.
+        self.declare_parameter("range_as_depth", False)
+        self.declare_parameter("range_topic", "/mavros/distance_sensor/rangefinder")
+        self.declare_parameter("max_range_age", 0.5)
+        self.declare_parameter("range_min_m", 0.15)
+        self.declare_parameter("range_max_m", 12.0)
+        # cos of the largest tilt the rangefinder may be trusted at. 0.94 is
+        # about 20 deg: beyond that the beam and the optical axis have parted
+        # company and the range is not this camera's depth any more.
+        self.declare_parameter("min_nadir_cos", 0.94)
+        self.declare_parameter("close_px", 5)
         self.declare_parameter("min_confidence", 0.50)
 
         p = lambda name: self.get_parameter(name).value
+        self.range_as_depth = bool(p("range_as_depth"))
+        self.max_range_age = float(p("max_range_age"))
+        self.range_min = float(p("range_min_m"))
+        self.range_max = float(p("range_max_m"))
+        self.min_nadir_cos = float(p("min_nadir_cos"))
+        self.range_m: float | None = None
+        self.range_t = 0.0
         self.camera = p("camera")
         self.optical_frame = p("optical_frame")
         self.base_frame = p("base_frame")
@@ -204,6 +229,7 @@ class PadDetectorNode(Node):
             yellow_hsv_low=tuple(int(v) for v in p("yellow_hsv_low")),
             yellow_hsv_high=tuple(int(v) for v in p("yellow_hsv_high")),
             min_area_px=float(p("min_area_px")),
+            close_px=int(p("close_px")),
             min_confidence=float(p("min_confidence")),
         )
 
@@ -245,6 +271,9 @@ class PadDetectorNode(Node):
             if depth_topic:
                 self.create_subscription(Image, depth_topic,
                                          self._cb_depth, sensor_qos)
+        if self.range_as_depth:
+            self.create_subscription(Range, p("range_topic"),
+                                     self._cb_range, sensor_qos)
         self.create_subscription(Image, p("image_topic"),
                                  self._cb_image, sensor_qos)
 
@@ -268,6 +297,45 @@ class PadDetectorNode(Node):
     def _cb_pose(self, msg: PoseStamped):
         self.pose = msg
 
+    def _cb_range(self, msg):
+        self.range_m = float(msg.range)
+        self.range_t = self.get_clock().now().nanoseconds * 1e-9
+
+    def _range_as_depth(self):
+        """The rangefinder reading as an optical-Z depth, or None.
+
+        WHY THIS IS WORTH HAVING. The ground-plane fallback below assumes the
+        pad lies at `ground_z`, and a competition base is 0 to 1.5 m tall, so
+        for an elevated one the assumption is simply false and the answer lands
+        metres away — MEASURED 2026-09-01, a base 1.43 m tall seen from 7.7 m
+        was placed 1.06 m from where it is. The rangefinder assumes nothing: it
+        MEASURES the distance to whatever is underneath.
+
+        Only for a camera that looks DOWN, and only near level. The beam points
+        along the body's -Z and reports the distance to the surface below; that
+        is the optical Z depth for a nadir camera, and stops being so as the
+        vehicle tilts, so a banked frame is refused rather than mis-projected.
+
+        It is the surface UNDER THE VEHICLE, not under the pixel — right while
+        the pad is what the vehicle is over, which is exactly the confirmation
+        hover this camera exists for.
+        """
+        if not self.range_as_depth or self.range_m is None:
+            return None
+        now = self.get_clock().now().nanoseconds * 1e-9
+        if now - self.range_t > self.max_range_age:
+            return None
+        if not (self.range_min < self.range_m < self.range_max):
+            return None
+        # Optical Z in world coordinates: -1 is straight down.
+        q = self.pose.pose.orientation
+        R_world_opt = (quat_to_matrix(q.x, q.y, q.z, q.w) @ self.R_base_opt)
+        if R_world_opt[2, 2] > -self.min_nadir_cos:
+            self._throttled_warn(
+                "camera is not looking down enough to use the rangefinder")
+            return None
+        return self.range_m
+
     # ────────────────────────────────────────────────────────────────────────
     # Main loop
     # ────────────────────────────────────────────────────────────────────────
@@ -281,6 +349,23 @@ class PadDetectorNode(Node):
 
         frame = bgr_image_to_numpy(msg)
         dets = self.detector.detect(frame)
+
+        # WHY nothing came out. Every gate in the cascade returns the same
+        # empty list, so silence alone cannot say whether the colour mask was
+        # empty, the blob was the whole frame, or the ring check failed.
+        # Throttled: this is a debugging aid, not a running commentary.
+        rej = getattr(self.detector, "reject", None)
+        if rej is not None:
+            now = self.get_clock().now().nanoseconds
+            if not dets and now - getattr(self, "_rej_log_ns", 0) > 5e9:
+                self._rej_log_ns = now
+                probe = getattr(self.detector, "probe", []) or []
+                self.get_logger().info(
+                    f"0 pads: " + ", ".join(f"{k}={v}" for k, v in rej.items()
+                                            if v)
+                    + " | maiores: " + " ; ".join(probe)
+                    + (" | " + self.detector.last_conf
+                       if getattr(self.detector, "last_conf", None) else ""))
 
         for det in dets:
             self.pub_det.publish(self._to_msg(msg, det))
@@ -359,6 +444,8 @@ class PadDetectorNode(Node):
         ray_opt = np.array([(u - cx) / fx, (v - cy) / fy, 1.0])
 
         depth = self._depth_at(u, v)
+        if depth is None:
+            depth = self._range_as_depth()
         if depth is not None:
             # Depth is the distance ALONG the optical Z axis, not along the ray.
             point_opt = ray_opt * depth

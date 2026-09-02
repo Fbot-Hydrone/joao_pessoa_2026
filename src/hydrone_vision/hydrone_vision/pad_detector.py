@@ -300,6 +300,7 @@ class PadDetector:
         mid_occ_max: float = 0.85,
         structure_radius_px: float = 22.0,
         roi_erode_frac: float = 0.06,
+        close_px: int = 5,
         min_confidence: float = 0.50,
         max_detections: int = 8,
     ):
@@ -344,7 +345,16 @@ class PadDetector:
         self.max_detections = int(max_detections)
 
         # Reused structuring elements — allocating these per frame is pure waste.
-        self._k_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        # CLOSE knits the field back together across whatever cuts it. At
+        # range that is only colour fringing and 5 px is plenty — but the belly
+        # camera at confirmation height sees the ring and cross 10-20 px WIDE,
+        # and they carve the blue field into quadrants. MEASURED 2026-09-01,
+        # hovering dead centre over a real base (off by 0.00 m): every contour
+        # came back sol=0.28-0.70 against a 0.80 gate with yfrac=0.000 — pieces
+        # of a pad, each with the markings on its border instead of inside it.
+        # Two frames in 25 s got through, where six were needed.
+        k = max(3, int(close_px) | 1)          # odd, >= 3
+        self._k_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
         self._k_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
 
         # Last frame's masks, kept only so a caller can draw them for
@@ -451,6 +461,32 @@ class PadDetector:
         img_area = float(bgr.shape[0] * bgr.shape[1])
         contours, _ = cv2.findContours(field_mask, cv2.RETR_EXTERNAL,
                                        cv2.CHAIN_APPROX_SIMPLE)
+        # WHERE THE CASCADE LOSES THEM. Every gate below returns the same
+        # empty list, and an empty list cannot say which gate fired. Counted
+        # here so the node can print it.
+        self.reject = dict(contours=len(contours), area=0, solidity=0,
+                           aspect=0, no_yellow=0, yellow_frac=0,
+                           concentric=0, ring_cross=0, confidence=0)
+        # The COUNTS say which gate fired; they do not say by how much. For the
+        # three biggest blobs, measure the same quantities the gates test and
+        # keep them, so a threshold can be moved by a number instead of by
+        # guesswork.
+        self.probe = []
+        for c in sorted(contours, key=cv2.contourArea, reverse=True)[:3]:
+            a = float(cv2.contourArea(c))
+            if a < 1.0:
+                continue
+            hull = float(cv2.contourArea(cv2.convexHull(c)))
+            (_, _), (rw, rh), _ = cv2.minAreaRect(c)
+            x, y, w, h = cv2.boundingRect(c)
+            roi = np.zeros((h, w), dtype=np.uint8)
+            cv2.drawContours(roi, [c], -1, 255, cv2.FILLED, offset=(-x, -y))
+            ypx = int(cv2.countNonZero(cv2.bitwise_and(
+                yellow[y:y + h, x:x + w], roi)))
+            self.probe.append(
+                f"area={a / img_area:.3f} sol={a / hull if hull else 0:.2f} "
+                f"asp={max(rw, rh) / max(min(rw, rh), 1e-6):.1f} "
+                f"yfrac={ypx / a:.3f}")
 
         found: list[PadDetection2D] = []
         for contour in contours:
@@ -728,6 +764,10 @@ class PadDetector:
     # Per-candidate evaluation
     # ────────────────────────────────────────────────────────────────────────
 
+    def _rej(self, key):
+        if getattr(self, "reject", None) is not None:
+            self.reject[key] = self.reject.get(key, 0) + 1
+
     def _evaluate(self, contour, yellow,
                   img_area: float) -> PadDetection2D | None:
         """Run the check cascade on one blue-field contour. None = not a pad.
@@ -737,6 +777,7 @@ class PadDetector:
         """
         area = float(cv2.contourArea(contour))
         if area < self.min_area_px or area > self.max_area_frac * img_area:
+            self._rej("area")
             return None
 
         # ── Check 2: shape ──────────────────────────────────────────────────
@@ -746,6 +787,7 @@ class PadDetector:
         hull_area = float(cv2.contourArea(cv2.convexHull(contour)))
         solidity = area / hull_area if hull_area > 0 else 0.0
         if solidity < self.min_solidity:
+            self._rej("solidity")
             return None
 
         # Perspective squashes the pad but never into a sliver: a long thin
@@ -755,6 +797,7 @@ class PadDetector:
             return None
         aspect = max(rw, rh) / min(rw, rh)
         if aspect > self.max_aspect:
+            self._rej("aspect")
             return None
 
         # Fill the contour: everything below asks questions about the pad's
@@ -776,6 +819,7 @@ class PadDetector:
         yellow_roi = cv2.bitwise_and(yellow[y:y + h, x:x + w], roi)
         yellow_px = int(cv2.countNonZero(yellow_roi))
         if yellow_px == 0:
+            self._rej("no_yellow")
             return None
 
         # ── Check 3: colour coexistence ─────────────────────────────────────
@@ -783,6 +827,7 @@ class PadDetector:
         # object with a blue rim, or the mask leaked.
         yellow_frac = yellow_px / area
         if not (self.yellow_frac_min <= yellow_frac <= self.yellow_frac_max):
+            self._rej("yellow_frac")
             return None
 
         # ── Check 4: concentricity ──────────────────────────────────────────
@@ -799,6 +844,7 @@ class PadDetector:
         r_eq = math.sqrt(area / math.pi)
         offset = math.hypot(yellow_cx - foot_cx, yellow_cy - foot_cy) / r_eq
         if offset > self.max_center_offset:
+            self._rej("concentric")
             return None
 
         # ── Checks 5 & 6: ring coverage and cross arms, from one polar sweep ─
@@ -818,6 +864,7 @@ class PadDetector:
         if resolvable and not (
                 ring_cov >= self.ring_cov_min
                 and self.mid_occ_min <= mid_occ <= self.mid_occ_max):
+            self._rej("ring_cross")
             return None
 
         # ── Confidence ──────────────────────────────────────────────────────
@@ -839,6 +886,14 @@ class PadDetector:
                       + 0.13 * color_score
                       + 0.10 * shape_score)
         if confidence < self.min_confidence:
+            # The last gate, and the one a blob reaches only after passing
+            # every geometric test — so its SCORE, not just the count, is what
+            # says whether the threshold or the scene is wrong.
+            self._rej("confidence")
+            self.last_conf = (f"conf={confidence:.2f} centre={center_score:.2f} "
+                              f"ring={ring_score:.2f} cross={cross_score:.2f} "
+                              f"cov={ring_cov:.2f} arms={arms} "
+                              f"resolvable={resolvable} r95={r95:.0f}px")
             return None
 
         # The pad's centre is the footprint's centroid. The yellow centroid is

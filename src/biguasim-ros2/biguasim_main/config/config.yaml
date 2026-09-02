@@ -17,7 +17,7 @@
       # tick (biguasim_main/bases.py). Mesma seed -> mesma arena, sempre.
       # Remova o bloco inteiro para não spawnar base nenhuma.
       bases:
-        seed: 42
+        seed: 10
         count: 6
         blueprint: "Blueprint'/Game/Maps/arena__2_/BP_base.BP_base_C'"
         z_min: 0.0
@@ -76,7 +76,9 @@
               ros_publish: true
               Hz: 10
               location: [0.14, 0, -0.08]
-              configuration: {CaptureWidth: 640, CaptureHeight: 480}
+              configuration: {CaptureWidth: 640, CaptureHeight: 480,
+                             ManualExposure: true, ExposureBias: 10.0,
+                             ShutterSpeed: 60.0, ISO: 1600.0}
             # RIGHT eye of the stereo pair. The ZED 2i is a STEREO camera and
             # its tracker triangulates the features it follows from the two
             # views; feeding a ready-made depth image instead is a shortcut the
@@ -96,13 +98,17 @@
               ros_publish: true
               Hz: 10
               location: [0.14, -0.12, -0.08]
-              configuration: {CaptureWidth: 640, CaptureHeight: 480}
+              configuration: {CaptureWidth: 640, CaptureHeight: 480,
+                             ManualExposure: true, ExposureBias: 10.0,
+                             ShutterSpeed: 60.0, ISO: 1600.0}
             - sensor_type: DepthCamera
               ros_publish: true
               Hz: 10
               location: [0.14, 0, -0.08
               ]
-              configuration: {CaptureWidth: 640, CaptureHeight: 480, FOV: 90}
+              configuration: {CaptureWidth: 640, CaptureHeight: 480, FOV: 90,
+                             ManualExposure: true, ExposureBias: 10.0,
+                             ShutterSpeed: 60.0, ISO: 1600.0}
             # Down-facing RGB camera (nadir). The ZED faces forward, so it can
             # SPOT a landing pad ahead but loses it under the airframe exactly
             # when precision matters — during the final descent. This is the
@@ -142,7 +148,9 @@
               # 2.25 m. At 640x480 the pad is ~128 px at 2.5 m and the
               # structure resolves. The budget stays ~40% below the original
               # 3-camera load because the ZED pair now runs at 10 Hz.
-              configuration: {CaptureWidth: 640, CaptureHeight: 480, FOV: 90}
+              configuration: {CaptureWidth: 640, CaptureHeight: 480, FOV: 90,
+                             ManualExposure: true, ExposureBias: 10.0,
+                             ShutterSpeed: 60.0, ISO: 1600.0}
             # Down-facing rangefinder (nadir altimeter) — Phase 1&2 sensor config.
             # Holodeck's RangeFinderSensor is a LaserScan scanner; LaserCount:1 +
             # LaserAngle:-90 aims the single beam straight down. Published as
@@ -161,4 +169,5 @@
           control_abstraction : 'accel'
           location: [3, 3.4, 0.78]
           # location: [3, -9.4, 0.22]
+          # location: [3, -15, 0.2]
           rotation: [0, 0, -90]
