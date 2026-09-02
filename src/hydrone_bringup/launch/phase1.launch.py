@@ -311,8 +311,49 @@ def generate_launch_description():
             "depth_topic": "/zed/zed_node/depth/depth_registered",
             "optical_frame": "zed_left_camera_optical_frame",
             "publish_debug": ParameterValue(debug_images, value_type=bool),
-            "blue_hsv_low": blue_hsv_low,
+            # THE FORWARD CAMERA'S OWN BLUE BAND, and the V is the whole point.
+            #
+            # A competition base is a BOX: a bright top face carrying the ring
+            # and cross, standing on side walls of the same hue. From 2.5 m the
+            # ZED sees both, and at V >= 50 the mask admits both — so the top
+            # and the wall come back as ONE contour, in an L, and every check
+            # after that measures a shape that is not a pad. MEASURED over 150
+            # labelled frames of a real run (404 visible base appearances):
+            #
+            #     top face      V median 188      side wall  V median  61
+            #
+            # Cutting at 160 keeps the top and drops the wall. What that alone
+            # is worth, same frames, same everything else:
+            #
+            #     V >= 50    78/404 = 19.3%   solidity killed 22.9%
+            #     V >= 160  157/404 = 38.9%   solidity killed  1.5%
+            #
+            # THE COST, stated because it will matter: this is an ABSOLUTE
+            # brightness, and the bases it still misses are the ones in shadow
+            # — the 97 appearances that reach no contour measure V p90 median
+            # 90. Frame-relative and per-blob versions of the same split were
+            # measured too: both reach the same recall and DOUBLE the false
+            # positives (15 -> 35), because on a frame with no bright blue
+            # their cut slides down and admits floor. If the arena's exposure
+            # changes, this number moves, and the debug image is where to see
+            # it. docs/LANDING-SITES.md 3.
+            "blue_hsv_low": [95, 110, 160],
             "yellow_hsv_low": yellow_hsv_low,
+            # Both relaxed for THIS camera only, and only once the footprint
+            # above was right — measured with the old merged contour they moved
+            # nothing at all (17.4% -> 18.9%), which is what said the contour
+            # and not the threshold was wrong. With the top face isolated:
+            #
+            #     yellow_frac_min 0.02 -> 0.006   38.9% -> 41.1%   (6-8 m: 45 -> 54)
+            #     ring_cov_min    0.55 -> 0.35    41.1% -> 42.3%   (4-6 m: 112 -> 113)
+            #
+            # False positives did not move (15) across both: what holds the
+            # line here is the structural sweep and the confidence, not these.
+            # A pad at 7 m is a few dozen yellow pixels on a foreshortened top;
+            # asking it for the same marking fraction as a pad at hover is
+            # asking it to be closer than it is.
+            "yellow_frac_min": 0.006,
+            "ring_cov_min": 0.35,
             "min_confidence": 0.35,
             "field_mode": field_mode,
             # dark_blue: this camera's answer becomes a WORLD POSITION, so it

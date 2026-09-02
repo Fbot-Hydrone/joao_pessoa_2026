@@ -81,78 +81,120 @@ cada um: uma base de altura `h` tem o topo em `h + ground_z`, e o veículo repou
 0,12–0,14 m acima disso. Os três pousos bateram; os pousos inválidos de corridas
 anteriores erraram 1,30 m e são inconfundíveis por esse critério.
 
-## 3. O gargalo: a ZED não identifica a maioria das bases
+## 3. O gargalo era a detecção — medido, e não era o que se pensava
 
-**3 de 6 bases detectadas, e o motivo é geométrico, não algorítmico.**
+**Esta seção foi reescrita em 2026-09-02, à tarde.** A versão anterior dizia que
+o problema era `yellow_px == 0` (a ZED vendo só a lateral azul) e que o caminho
+mais barato era inclinar a câmera. As duas coisas estavam erradas, e o que
+mostrou isso foi medir em vez de ler código.
 
-A ZED aponta para a frente e voa a 2,5 m, então o que ela vê de uma base é a
-**lateral azul**. O anel e a cruz amarelos — que são a identidade do pad — estão
-no **topo**.
+### Como foi medido
 
-O `_evaluate` do `pad_detector` monta a máscara azul, tira os contornos e no
-quarto teste exige amarelo dentro do contorno:
+150 quadros da ZED gravados em voo, cada um com RGB, profundidade e pose, e com
+as bases **rotuladas pela mesma `sample_bases(seed)` que semeia a arena** — ou
+seja, verdade, não anotação. A profundidade descarta as ocluídas comparando o
+**Z óptico** esperado com o medido (comparar com a distância radial erra 30% na
+borda de um FOV de 90° e reprova quase tudo). Sobram **404 aparições de base
+visíveis**, alcance mediano 6,4 m, as seis alturas representadas.
 
-```python
-if yellow_px == 0:
-    return None
-```
+Isso é o que permite dizer "achou N de 404" em vez de "pareceu melhor".
 
-MEDIDO na corrida, os três maiores contornos de cada quadro:
+### O que a ZED realmente vê
 
-```
-area=0.183  sol=0.97  asp=3.0  yfrac=0.000
-area=0.104  sol=0.38  asp=3.3  yfrac=0.000
-area=0.014  sol=0.97  asp=3.0  yfrac=0.006
-```
+Ela vê o topo. Nos quadros de cruzeiro o anel e a cruz estão nítidos e grandes.
+O `yfrac` medido nos maiores contornos não é zero — 0,052, 0,068, 0,102, 0,132.
 
-Os dois maiores são paredes de base vistas de lado: azuis, grandes, **sem uma
-única pixel amarela dentro**. O terceiro é o topo de um pad ao longe, pequeno
-demais, e reprova no `yellow_frac_min = 0.02` por pouco — 0,006.
+A base é uma **caixa**: um topo claro com as marcações, sobre paredes laterais
+do mesmo matiz. A banda azul admitia `V >= 50`, que aceita as duas, então topo e
+parede voltavam num **único contorno em L** e tudo abaixo de `_evaluate` passava
+a medir uma forma que não é um pad.
 
-As imagens de depuração mostram isso direto: quadros com **quatro bases nítidas**
-e o overlay dizendo `forward 0 pad(s)`.
+    MEDIDO, 404 aparições:   topo  V mediana 188      parede  V mediana 61
 
-### A confirmação pela câmera de baixo tem o problema oposto
+E a assinatura disso é `solidity`, não `no_yellow`:
 
-Ela vê o topo sempre, mas na altura de confirmação o pad **transborda o quadro** e
-o anel fica de fora. A varredura polar exige `ring_cov >= 0.55` e reprova, com o
-pad debaixo do drone: `down 0 pad(s)`.
+| gate | com V >= 50 | com V >= 160 |
+|---|---|---|
+| solidity | 22,9% | 1,5% |
+| detectado | 19,3% | 38,9% |
 
-### A prova cruzada
+### Por que os limiares não resolviam sozinhos
 
-Numa corrida do mesmo dia, com a barriga projetando posição pelo rangefinder
-(`range_as_depth`), o nível 1 sozinho entregou **5 de 6**. Desligada, entrega 3.
-As duas que somem são exatamente as que só o topo revela.
+Varrer `min_solidity` e `yellow_frac_min` **com o contorno errado** move de
+17,4% para 18,9% — nada. Foi isso que disse que o contorno, e não o limiar, era
+o problema. As distribuições explicam: `solidity` de base verdadeira tem mediana
+0,900 contra 0,844 de não-base — ele **não separa nada** nesta cena. Quem separa
+é `yellow_frac` (0,023 contra 0,000).
 
-E a precisão das duas rotas, na mesma arena:
+Depois do footprint certo, os mesmos limiares passam a pagar:
 
-| fonte | base | distância | erro |
-|---|---|---|---|
-| frontal, plano do chão | 1,29 m de altura | 7,7 m | **1,06 m** |
-| barriga, rangefinder | 1,29 m de altura | 2,0 m | **0,04 m** |
+    V >= 160                          157/404 = 38,9%   falsos 15
+    + yellow_frac_min 0.02 -> 0.006   166/404 = 41,1%   (6-8 m: 45 -> 54)
+    + ring_cov_min    0.55 -> 0.35    171/404 = 42,3%   (4-6 m: 112 -> 113)
 
-A projeção da frontal cruza o raio com `z = ground_z`. Para uma base elevada esse
-plano está errado, e o erro cresce com a distância porque o ângulo fica raso.
+**19,3% -> 42,3%, com os falsos positivos indo de 7 para 15.** Nada disso é
+algoritmo novo: são três números na frontal do `phase1.launch.py`, dois dos
+quais o nó passou a expor.
 
-### Caminhos, do mais barato ao mais caro
+### O que ficou de fora, e o custo
 
-1. **Inclinar a ZED para baixo** (20–30°). Uma linha no `rotation` do sensor no
-   `config.yaml`. Ela passa a ver topos em vez de paredes, o `yfrac` deixa de ser
-   zero e nada mais no pipeline muda. Vale igual no drone real, onde é questão de
-   como a câmera é parafusada. **Não testado.**
-2. **Casar RGB e profundidade por estampa de tempo.** O `_cb_depth` guarda o
-   último quadro recebido e o `_cb_image` usa o que estiver lá, sem comparar
-   estampas. A `depth_registered` roda a ~2,5 Hz contra ~3,3 Hz da RGB, então
-   muitos quadros caem no fallback do plano do chão — que é a rota que erra.
-3. **Baixar `yellow_frac_min`**, que reprovou topos distantes por 0,006 contra
-   0,02.
-4. **Religar a barriga como fonte de posição** (`project_position` +
-   `range_as_depth`). Funciona e está medido; foi desligada porque um falso
-   positivo dela vira pouso, e essa barreira precisa existir antes.
-5. **YOLO.** Para o simulador não paga: o detector clássico acerta quando enxerga.
-   Para a **arena real** provavelmente é obrigatório — o `pad_detector.py`
-   documenta que lá o amarelo lido pela ZED dá S=44 contra um limiar de 110, e a
-   banda *"admits ZERO pixels"*. Cor absoluta não funciona naquela iluminação.
+`V >= 160` é **brilho absoluto**, exatamente o tipo de limiar que este repo já
+viu quebrar quando a exposição mudou. Foi escolhido medindo contra duas
+alternativas que não têm esse defeito:
+
+| corte | recall | falsos |
+|---|---|---|
+| absoluto `V >= 160` | 42,3% | 15 |
+| relativo ao quadro, `0,75 * p95(V do azul)` | 42,1% | 36 |
+| relativo por caixa, `0,85 * p95(V)` | 42,6% | 33 |
+
+Recall igual, **falso positivo dobrado** nas duas adaptativas: num quadro sem
+azul claro o corte desce e admite chão. E subir a confiança para compensar
+derruba o recall sem derrubar os falsos (42,6% -> 31,2% com falsos 33 -> 24),
+o que diz que os falsos delas são estruturalmente parecidos com pad.
+
+**As que ainda se perdem são as bases na sombra:** as 97 aparições que não
+chegam a nenhum contorno medem V (p90 local) com mediana **90**. É o limiar
+absoluto que as descarta, e é aí que está o próximo ganho — provavelmente
+segmentando o plano do topo pela profundidade, que já está no quadro e não
+depende de brilho nenhum. Não feito.
+
+### Confirmado em voo
+
+Corrida completa depois da mudança, `--phase1 --ground-truth`, seed 10:
+
+| | antes | depois |
+|---|---|---|
+| bases achadas | 3 de 6 | **4 de 6** |
+| pousos | 3 | **4** |
+| `solidity` disparando | 22,9% das aparições | 3 vezes na corrida inteira |
+
+As quatro bases entraram no mapa a 2, 5, 11 e 16 cm da posição verdadeira, e os
+quatro pousos bateram a altura da base ao centímetro:
+
+    #1  repousou -0,03 m   base 5, esperado -0,02
+    #2  repousou +0,21 m   base 1, esperado +0,21
+    #3  repousou +0,30 m   base 0, esperado +0,30
+    #4  repousou +0,86 m   base 2, esperado +0,86
+
+As duas que faltam (base 3 e base 4) estão nos cantos distantes, e a base 4 é a
+mais baixa da arena (0,20 m) — quase rente ao chão, que é o caso em que o topo
+some primeiro.
+
+### O que continua valendo da versão anterior
+
+A confirmação pela barriga tem o problema oposto: na altura de confirmação o pad
+transborda o quadro e `ring_cov >= 0.55` reprova com o pad debaixo do drone. E a
+projeção do frontal pelo plano do chão erra 1,06 m numa base de 1,29 m vista de
+7,7 m, porque o plano está errado para base elevada. **Nenhum dos dois foi
+mexido aqui** — esta rodada é só detecção.
+
+Uma tentativa de casar RGB e profundidade por estampa foi feita e **revertida**:
+o `dt` entre os dois streams tem piso de 306 ms (offset sistemático, não jitter),
+uma tolerância de 250 ms recusou todo quadro, o frontal caiu no plano do chão
+sempre e o drone passou a pousar fora da base. Fica aberto se os 306 ms são de
+carimbo ou de conteúdo — a resposta decide o conserto.
+
 
 ## 4. O que foi removido, e por quê
 

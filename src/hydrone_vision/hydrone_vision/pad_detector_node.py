@@ -190,6 +190,16 @@ class PadDetectorNode(Node):
         # company and the range is not this camera's depth any more.
         self.declare_parameter("min_nadir_cos", 0.94)
         self.declare_parameter("close_px", 5)
+        # How much of the field's area has to be marking, and how much of the
+        # polar sweep has to meet marking at all. Both scale with how well the
+        # pad RESOLVES, so they belong to a camera and a range, not to the
+        # algorithm: the belly camera at hover sees a pad hundreds of pixels
+        # across and can be asked for a whole ring, while the forward ZED reads
+        # a pad across the arena whose markings are a few dozen pixels in total.
+        # Defaults are the library's, so a caller that does not set them gets
+        # exactly the behaviour it had before these existed.
+        self.declare_parameter("yellow_frac_min", 0.02)
+        self.declare_parameter("ring_cov_min", 0.55)
         self.declare_parameter("min_confidence", 0.50)
 
         p = lambda name: self.get_parameter(name).value
@@ -230,6 +240,8 @@ class PadDetectorNode(Node):
             yellow_hsv_high=tuple(int(v) for v in p("yellow_hsv_high")),
             min_area_px=float(p("min_area_px")),
             close_px=int(p("close_px")),
+            yellow_frac_min=float(p("yellow_frac_min")),
+            ring_cov_min=float(p("ring_cov_min")),
             min_confidence=float(p("min_confidence")),
         )
 

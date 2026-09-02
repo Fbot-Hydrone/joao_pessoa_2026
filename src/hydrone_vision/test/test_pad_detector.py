@@ -294,6 +294,89 @@ def test_handles_degenerate_input():
     assert d.detect(np.zeros((8, 8, 3), np.uint8)) == []
 
 
+# ── The base is a BOX, not a decal ──────────────────────────────────────────
+# Everything above renders the pad flat on the floor. The competition's bases
+# are 0 to 1.5 m TALL, and from the forward camera's 2.5 m that means the frame
+# holds a bright top face carrying the markings AND a side wall of the same hue
+# standing under it.
+#
+# MEASURED over 150 labelled frames of a real run, 404 visible base
+# appearances: top face V median 188, side wall V median 61. A blue band whose
+# floor is V >= 50 admits both, they come back as one L-shaped contour, and the
+# checks below `_evaluate` then measure a shape that is not a pad — solidity
+# alone threw out 22.9% of every base in view. Cutting the band at V 160 took
+# the run from 78/404 to 157/404 and left solidity killing 1.5%.
+#
+# These pin the MECHANISM, not the number: that a dark wall under a bright top
+# merges with it, and that separating them by brightness is what recovers the
+# pad. phase1.launch.py carries the number and the rest of the measurement.
+
+DARK_BLUE_BGR = (60, 18, 3)     # the same hue as BLUE_BGR at ~30% brightness
+
+
+def render_raised_base(top_half=70, wall_px=95, squash=0.45, cx=320, cy=200):
+    """A base seen from above and in front: foreshortened top, wall below it.
+
+    `squash` is the top's foreshortening — 1.0 would be straight down, and the
+    forward camera at cruise sees something nearer 0.4.
+    """
+    scene = ground()
+    quad = [(cx - top_half, cy - top_half * squash),
+            (cx + top_half, cy - top_half * squash),
+            (cx + top_half, cy + top_half * squash),
+            (cx - top_half, cy + top_half * squash)]
+    # The wall first, so the top overwrites its upper edge exactly as the box
+    # occludes its own far side.
+    wall = np.array([[cx - top_half, cy + top_half * squash],
+                     [cx + top_half, cy + top_half * squash],
+                     [cx + top_half, cy + top_half * squash + wall_px],
+                     [cx - top_half, cy + top_half * squash + wall_px]], np.int32)
+    cv2.fillPoly(scene, [wall], DARK_BLUE_BGR)
+    return paste_pad(scene, render_pad(), quad), (cx, cy)
+
+
+def forward_detector(**over):
+    """The forward ZED's settings, as phase1.launch.py builds them."""
+    return PadDetector(**{**dict(blue_hsv_low=(95, 110, 160),
+                                 yellow_hsv_low=(18, 80, 90),
+                                 yellow_frac_min=0.006, ring_cov_min=0.35,
+                                 min_confidence=0.35), **over})
+
+
+def test_dark_wall_merges_with_the_top_when_the_band_admits_it():
+    """The failure this whole change is about, reproduced.
+
+    With the old V floor the mask cannot tell the lit top from the wall holding
+    it up, so one contour spans both — and its solidity is not a pad's.
+    """
+    scene, (cx, cy) = render_raised_base()
+    field, _ = PadDetector(blue_hsv_low=(95, 110, 50)).color_masks(scene)
+    contours, _ = cv2.findContours(field, cv2.RETR_EXTERNAL,
+                                   cv2.CHAIN_APPROX_SIMPLE)
+    owner = [c for c in contours
+             if cv2.pointPolygonTest(c, (float(cx), float(cy)), False) >= 0]
+    assert owner, "the top itself must be in the mask; that was never in doubt"
+    _, _, _, h = cv2.boundingRect(owner[0])
+    assert h > 100, ("top and wall came back as separate contours — this test "
+                     "no longer reproduces the merge it exists to pin")
+
+
+def test_raised_base_is_found_once_the_wall_is_out_of_the_band():
+    scene, (cx, cy) = render_raised_base()
+    dets = forward_detector().detect(scene)
+    assert len(dets) == 1, f"expected the top face alone, got {len(dets)}"
+    assert math.hypot(dets[0].u - cx, dets[0].v - cy) < 20, (
+        "the centre must sit on the TOP face — a centroid dragged down the "
+        "wall is what puts the landing setpoint short of the base")
+
+
+def test_the_wall_alone_is_not_a_pad():
+    """Raising the V floor must not be a licence to accept any bright blue."""
+    scene = ground()
+    cv2.rectangle(scene, (240, 180), (400, 300), BLUE_BGR, -1)
+    assert not forward_detector().detect(scene), "no markings, no pad"
+
+
 # ── The REAL pad ────────────────────────────────────────────────────────────
 # Photographed 2026-08-22 in the arena, and grabbed off the ZED the same
 # evening. It is NOT the simulated pad recoloured:
