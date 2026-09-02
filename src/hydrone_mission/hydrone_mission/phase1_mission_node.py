@@ -1675,7 +1675,8 @@ class Phase1MissionNode(Node):
             self.get_logger().info(
                 f"MAP SWEEP 2/2: {lanes} lane(s) at {self.takeoff_alt:.1f} m — "
                 f"the belly camera covers {swath:.2f} m across from "
-                f"{self.takeoff_alt - self.ground_z:.1f} m up, so lanes sit "
+                f"{self.takeoff_alt - self.ground_z - self.sweep_max_surface:.1f} m "
+                f"above the tallest surface it flies over, so lanes sit "
                 f"{coverage.lane_spacing(swath, overlap=self.sweep_overlap):.2f} m "
                 f"apart at {self.sweep_overlap * 100:.0f}% overlap.")
             return True

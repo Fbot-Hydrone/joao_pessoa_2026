@@ -65,6 +65,49 @@ sobre a superfície mais alta que a varredura sobrevoa. A arena passa de 3 para
 **Por que a seed 10 escondia isso:** ela não tem nenhuma base no telhado. Era a
 única arena em que o modo havia sido medido.
 
+### E a correção NÃO resolveu o problema do telhado
+
+Isto precisa ficar registrado com a mesma clareza do achado, porque a narrativa
+era boa demais. As seeds 3 e 5 foram revoadas com a correção:
+
+| seed | | nível 2 voado? | detectadas | pousos válidos |
+|---|---|---|---|---|
+| 3 | antes | **não** | 3/6 | 0 de 3 |
+| 3 | depois | **não** | 4/6 | 4 de 6 |
+| 5 | antes | sim, 3 faixas @ 4,80 m | 3/6 | 2 de 3 |
+| 5 | depois | sim, **5 faixas @ 2,55 m** | 3/6 | 2 de 3 |
+
+**A seed 3 nunca chegou ao nível 2 em nenhuma das duas corridas** — ela pousa
+durante o perímetro e o `land_during_survey` consome a missão antes das faixas.
+A correção é inerte para ela, então a melhora de 0 para 4 pousos válidos é
+**variação entre corridas, não efeito do conserto**.
+
+**A seed 5 é o único teste controlado**, e nela a correção fez exatamente o que
+promete — 3 faixas viram 5, o swath cai de 4,80 para 2,55 m — e o resultado
+**não muda**.
+
+Conclusão honesta: o buraco de cobertura era aritmética real e a correlação
+monotônica em sete arenas era forte, mas a cobertura **não era o que custava as
+bases do telhado**. A correção fica porque a aritmética dela está certa; ela
+apenas não é o conserto que se procurava. E n=1 em teste controlado é fraco nos
+dois sentidos.
+
+### O que o telhado parece ser, então
+
+Na seed 3 revoada, a base 5 (telhado) FOI detectada e posicionada **1,01 m**
+errado:
+
+    pad 1 (-1.96, +1.71)  ->  base 5 (-2.95, +1.50)   d = 1.01 m
+
+Isso é projeção, não varredura. A hipótese que se encaixa: o octomap não tem o
+topo da casinha — a ZED aponta para a frente e o perímetro voa as bordas, então
+o telhado a 0,80 pode nunca entrar na banda de profundidade. Sem resposta do
+mapa, a projeção cai no rangefinder, que mede o nadir do VEÍCULO; com o pad na
+borda do quadro isso desloca cerca de 1 m, que é a assinatura observada.
+
+**Como confirmar sem voar de novo:** contar o campo `source` das detecções
+sobre a casinha (3 = mapa, 1 = profundidade/rangefinder). Não feito.
+
 ## 4. O segundo achado: a missão declara pousos que não aconteceram
 
 Na seed 3, os três pousos registraram `-0.58`, `-0.58` e `-0.36`. O chão está em
