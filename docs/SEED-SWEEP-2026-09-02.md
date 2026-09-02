@@ -129,6 +129,32 @@ que aparece em todas as sete arenas: a detecção individual mede 6 cm e o mapa
 mede 45. Nas arenas boas a cauda do erro ainda cai dentro da base de 1 m e a
 centragem visual salva o pouso; na seed 3 a cauda esticou até 1,5 m e não salvou.
 
+## 4b. O corta-grama quase nunca roda — e a razão liga os dois achados
+
+Contando quantas das oito corridas chegaram ao **nível 2**, que é a passada de
+faixas, o centro da abordagem:
+
+    nivel 2 voado:  seeds 5, 6      (e a 5 de novo na revoada)
+    nivel 2 NAO:    seeds 1, 2, 3, 4  (e a 3 de novo)
+
+**Três de oito.** O que quase todas as corridas mediram foi o **perímetro
+sozinho**, não o corta-grama — a seed 4, que fez 6/6 com 6 pousos válidos,
+nunca varreu faixa nenhuma.
+
+E o motivo fecha o círculo com a seção 4. A missão para quando atinge
+`target_bases`, e **ela conta pouso inválido como base visitada**. Na seed 3
+revoada ela "completou" com 6 pousos dos quais 4 em base — os dois no chão nu
+contaram, o alvo foi atingido, e o nível 2 nunca foi necessário.
+
+Ou seja, um único conserto — **comparar a altura de repouso com a altura da
+base** — resolve duas coisas de uma vez: para de declarar sucesso onde não
+houve, e faz a missão continuar procurando até o corta-grama, que é a parte que
+ainda não foi realmente exercitada.
+
+Isso também é uma advertência sobre os números da seção 2: eles medem
+majoritariamente o perímetro. **O corta-grama continua essencialmente não
+testado**, e a comparação entre os dois modos ainda não foi feita de verdade.
+
 ## 5. O que isto diz sobre o que fazer
 
 O gargalo **mudou de lugar**. Não é mais detecção — a projeção pelo mapa entrega
@@ -138,8 +164,10 @@ ocasionalmente produz fantasmas que viram pouso em chão vazio.
 Três coisas em ordem de retorno, nenhuma feita:
 
 1. **Verificação de altura no pouso.** Os dados existem (`pad.height_measured`,
-   e a assinatura de 0,12–0,14 m) e nada compara. É o que impede um pouso
-   inválido de contar como sucesso, e é barato.
+   e a assinatura de 0,12–0,14 m) e nada compara. É de longe o de maior
+   retorno: impede um pouso inválido de contar como sucesso E faz a missão
+   continuar até o corta-grama, que hoje roda em 3 de 8 corridas justamente
+   porque pousos no chão satisfazem o alvo. Ver 4b.
 2. **A fusão.** `pad_map` pondera por `confiança / alcance²`, e num corta-grama
    2,0 m contra 3,9 m não separa o suficiente — as poucas leituras de nadir se
    perdem entre muitas medianas de meio-de-faixa. Vale investigar o viés
