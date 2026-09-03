@@ -21,7 +21,14 @@ BASE_HALF = 0.5         # base de pouso 1 x 1 m
 # A casinha e a base de decolagem vêm do config.yaml, como
 # [x_min, x_max, y_min, y_max] em metros. Estes são só os defaults.
 DEFAULT_HOUSE = (-4.0, 2.0, 2.0, 4.0)
-DEFAULT_HOUSE_HEIGHT = 1.5
+# Altura do TELHADO da casinha, que é onde uma base sorteada sobre ela repousa.
+# Não é uma altura sorteada e não obedece z_max: é a superfície que existe ali.
+#
+# MEDIDO 2026-09-03, seed 100: com este valor em 1,5 a base sorteada sobre a
+# casinha nascia DENTRO dela, 10 cm abaixo do telhado — visível no viewport. A
+# regra do sorteio estava certa (só spawna em cima, e inteira no telhado); o
+# número é que estava errado.
+DEFAULT_HOUSE_HEIGHT = 1.6
 DEFAULT_TAKEOFF = (2.0, 4.0, 2.0, 4.0)
 
 

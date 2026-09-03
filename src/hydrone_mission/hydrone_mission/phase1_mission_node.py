@@ -341,8 +341,11 @@ class Phase1MissionNode(Node):
         # metre of the one structure that carries raised bases was never
         # looked at. 1.5 is the competition's own number: bases are 0 to 1.5 m
         # and the house roof is 1.5 m, so nothing the sweep passes over is
-        # higher.
-        self.declare_parameter("sweep_max_surface_m", 1.5)
+        # higher. Subiu de 1,5 para 1,6 em 2026-09-03 junto com house_height:
+        # o telhado sempre esteve a 1,6 e uma base posta a 1,5 nascia dentro da
+        # casinha. Este parâmetro tem de acompanhar aquele — se o telhado sobe,
+        # a pegada da câmera sobre ele encolhe.
+        self.declare_parameter("sweep_max_surface_m", 1.6)
         self.declare_parameter("survey_circuit", True)
         # How far the circuit is inset from the arena bounds. Far enough that
         # the drone is not skimming the wall, close enough that the camera
