@@ -267,6 +267,16 @@ def generate_launch_description():
             description="Publish annotated detector views on "
                         "/hydrone/pads/<camera>/debug_image."),
         DeclareLaunchArgument(
+            "belly_coverage", default_value="true",
+            description="Paint what the DOWN camera has actually looked at, "
+                        "plus the path actually flown, for RViz. Pure "
+                        "observer — /hydrone/belly/{coverage,footprint,"
+                        "trajectory}. The patch is sized by the RANGEFINDER, "
+                        "so it shrinks over a raised structure on its own and "
+                        "the strip the lanes then miss shows as unpainted "
+                        "floor. Different question from feature_map's grid, "
+                        "which is the ZED's depth reach."),
+        DeclareLaunchArgument(
             "feature_map", default_value="true",
             description="Run the world/coverage mapper over the ZED's point "
                         "cloud. Pure observer — turn it off to save CPU."),
@@ -560,6 +570,21 @@ def generate_launch_description():
         }],
     )
 
+    # What the BELLY camera has swept, and where the vehicle actually went.
+    # In map_sweep that camera is the only detector, so its footprint IS the
+    # search coverage and a gap in the grid is a strip a base could hide in.
+    belly_coverage = Node(
+        package="hydrone_map",
+        executable="belly_coverage_node",
+        name="belly_coverage",
+        output="screen",
+        condition=IfCondition(LaunchConfiguration("belly_coverage")),
+        parameters=[{
+            "range_topic": LaunchConfiguration("range_topic"),
+            "ground_z": ParameterValue(ground_z, value_type=float),
+        }],
+    )
+
     # Accumulates the ZED's own point cloud into a persistent voxel map plus a
     # coverage grid. Pure observer; nothing in this mission reads it.
     feature_map = Node(
@@ -752,6 +777,7 @@ def generate_launch_description():
         forward_detector,
         down_detector,
         pad_map,
+        belly_coverage,
         feature_map,
         cloud_filter,
         octomap,

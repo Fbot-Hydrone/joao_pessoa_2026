@@ -22,6 +22,7 @@ setup(
             'pad_map_node = hydrone_map.pad_map_node:main',
             'cloud_filter_node = hydrone_map.cloud_filter_node:main',
             'feature_map_node = hydrone_map.feature_map_node:main',
+            'belly_coverage_node = hydrone_map.belly_coverage_node:main',
         ],
     },
 )
