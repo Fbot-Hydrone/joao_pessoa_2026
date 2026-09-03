@@ -48,7 +48,7 @@ Visualization Manager:
       Max. Height Display: 3.4028234663852886e+38
       Min. Height Display: -3.4028234663852886e+38
       Max. Octree Depth: 16
-      Voxel Alpha: 0.7
+      Voxel Alpha: 1
       Voxel Coloring: Z-Axis
       Voxel Rendering: Occupied Voxels
 
