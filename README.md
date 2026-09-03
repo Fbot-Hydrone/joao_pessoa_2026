@@ -36,7 +36,7 @@ project: it starts the BiguaSim⇄ArduPilot physics bridge and ArduPilot SITL
 | `deps.repos` | Pinned source dependencies (ArduPilot, micro-ROS agent/msgs, XRCE-Gen) |
 | `docker/`, `Dockerfile`, `docker-compose.yml` | Reproducible containerized bringup |
 | `docker-compose.dev.yml` | Dev override: bind-mounts `src/` so code edits need no image rebuild (`docker_up.sh --dev`) |
-| `docs/` | Onboarding notes and historical docs. Start with [`PHASE1-MISSION.md`](docs/PHASE1-MISSION.md), [`LANDING-SITES.md`](docs/LANDING-SITES.md) and [`DEVELOP-PIPELINES.md`](docs/DEVELOP-PIPELINES.md) |
+| `docs/` | Onboarding notes and historical docs. Start with [`ESTRUTURA-E-COMANDOS.md`](docs/ESTRUTURA-E-COMANDOS.md) — which nodes exist, who starts whom, and what each command actually calls — then [`PHASE1-MISSION.md`](docs/PHASE1-MISSION.md) and [`LANDING-SITES.md`](docs/LANDING-SITES.md) |
 
 Third-party sources (`src/ardupilot`, `src/micro_ros_agent`, `src/micro_ros_msgs`,
 `tools/Micro-XRCE-DDS-Gen`) are **not committed** — they are pinned in
@@ -57,8 +57,13 @@ anywhere else, point `BS_SIM_DIR` at it).
 ./scripts/docker_up.sh
 # sim repo in a custom location:
 BS_SIM_DIR=~/Documents/bs-drone-competition ./scripts/docker_up.sh
-# Phase 1 mission (turn until a base is found, confirm it, land, come home):
-./scripts/docker_up.sh --phase1             # docs/PHASE1-MISSION.md
+# Phase 1 mission (map the arena, mow it with the belly camera, land on
+# every base, come home):
+./scripts/docker_up.sh --phase1             # docs/ESTRUTURA-E-COMANDOS.md
+# ...with rviz and the detector's annotated view open:
+./scripts/docker_up.sh --phase1 --debug
+# the older division of labour, where the ZED detects the bases:
+./scripts/docker_up.sh --zed-detect         # docs/MAP-SWEEP-2026-09-02.md
 # the earlier landing-site mission (fly forward, land on what you see):
 ./scripts/docker_up.sh --landing-sites      # docs/LANDING-SITES.md
 # any name:=value argument is forwarded to the launch:
