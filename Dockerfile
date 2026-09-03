@@ -74,6 +74,17 @@ RUN apt-get update && apt-get install -y \
       ros-humble-octomap-rviz-plugins \
     && rm -rf /var/lib/apt/lists/*
 
+# rqt_image_view, for `--phase1 --debug` to open the belly camera's annotated
+# view next to rviz. hydrone_vision/view_topic.py exists because rqt "pulls in
+# most of rqt and Qt for one window" — that objection was written before rviz2
+# was in this image, and rviz2 brings the whole of Qt anyway, so the marginal
+# cost is now the rqt shell rather than a graphics stack. The script stays: it
+# is what runs from the HOST against a real drone, where the container's Qt is
+# not in play.
+RUN apt-get update && apt-get install -y \
+      ros-humble-rqt-image-view \
+    && rm -rf /var/lib/apt/lists/*
+
 # octomap-python: the ONLY way a Python node can ask the octree a question.
 # ROS's own converters (octomap_msgs::binaryMsgToMap) are C++ only, so without
 # this /octomap_binary is a byte blob to everything in this stack — a 3-D map

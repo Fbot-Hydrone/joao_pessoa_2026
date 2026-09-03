@@ -33,6 +33,13 @@
 #                     AID for separating autonomy bugs from localization bugs —
 #                     a green run on ground truth proves nothing about the real
 #                     drone, which has none. See docs/LANDING-SITES.md §10.
+#   --debug           open the windows: rviz2 preloaded with the mission's
+#                     layout (octomap, vehicle pose, the pad map, the belly
+#                     camera's coverage/footprint/trajectory, the planned
+#                     route) and rqt_image_view on the belly detector's
+#                     annotated view. Both run INSIDE the container and draw on
+#                     this machine's X server, so there is no ROS_DOMAIN_ID to
+#                     match and nothing else to start. Needs a display.
 #   --no-odom-print   silence odom_error_node's 1 Hz VO-drift line (the CSV is
 #                     still written either way). On by default.
 #
@@ -60,6 +67,7 @@ compose_args=()
 for arg in "$@"; do
     case "$arg" in
         --no-odom-print) ODOM_ERROR_PRINT=false ;;
+        --debug)         launch_args+=("debug:=true") ;;
         --phase1)        HYDRONE_LAUNCH=phase1_sim.launch.py ;;
         --landing-sites) HYDRONE_LAUNCH=landing_sites_sim.launch.py ;;
         --zed-detect)    HYDRONE_LAUNCH=phase1_zed_detect_sim.launch.py ;;

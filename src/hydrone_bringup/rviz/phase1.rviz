@@ -1,0 +1,187 @@
+# RViz layout for the Phase 1 mission. Started by `--phase1 --debug`.
+#
+# Fixed Frame is `map`, which is the FCU's local ENU — the frame the mission's
+# setpoints, the pad map and the belly coverage all speak. NOT `odom`: the two
+# differ here by yaw +90 deg and z -0.78 m (map_odom_node measures it), and
+# picking the wrong one puts every overlay in the wrong place without an error.
+#
+# The octomap display is octomap_rviz_plugins/OccupancyGrid on
+# /octomap/octomap_binary, and that choice is deliberate. The MarkerArray
+# alternatives (/octomap/occupied_cells_vis_array) are republished WHOLE on
+# every insert — 16 DELETEs and one ADD per update — which is what makes the
+# cubes blink. The binary tree is ~3 KB, latched, and decoded locally.
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded: ~
+      Splitter Ratio: 0.5
+    Tree Height: 700
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Name: root
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: map
+    Frame Rate: 20
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 1
+      Plane Cell Count: 16
+      Color: 90; 90; 90
+      Alpha: 0.4
+      Reference Frame: <Fixed Frame>
+
+    # ── the 3-D map the whole mission projects into ──────────────────────
+    - Class: octomap_rviz_plugins/OccupancyGrid
+      Name: Octomap
+      Enabled: true
+      Topic:
+        Value: /octomap/octomap_binary
+        Depth: 5
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Max. Height Display: 3.4028234663852886e+38
+      Min. Height Display: -3.4028234663852886e+38
+      Max. Octree Depth: 16
+      Voxel Alpha: 0.7
+      Voxel Coloring: Z-Axis
+      Voxel Rendering: Occupied Voxels
+
+    # ── what the BELLY camera has actually swept ─────────────────────────
+    # A gap here is a strip of floor no pass looked at, which in this mission
+    # is a base that can hide. The patch is sized by the rangefinder, so it
+    # shrinks over the house roof on its own.
+    - Class: rviz_default_plugins/Map
+      Name: Belly coverage
+      Enabled: true
+      Topic:
+        Value: /hydrone/belly/coverage
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Alpha: 0.55
+      Color Scheme: costmap
+      Draw Behind: true
+
+    - Class: rviz_default_plugins/Marker
+      Name: Belly footprint
+      Enabled: true
+      Topic:
+        Value: /hydrone/belly/footprint
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+
+    - Class: rviz_default_plugins/Path
+      Name: Flown trajectory
+      Enabled: true
+      Topic:
+        Value: /hydrone/belly/trajectory
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Color: 255; 200; 0
+      Line Style: Lines
+      Line Width: 0.02
+      Alpha: 1
+
+    # ── what the mission believes, and what it intends ───────────────────
+    # The pad map: every base the mission thinks it has found, with its
+    # confidence and its id. This is what it flies to, so a marker sitting off
+    # a real base is the failure to look for first.
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Pad map
+      Enabled: true
+      Topic:
+        Value: /hydrone/pads/markers
+        Depth: 20
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+
+    - Class: rviz_default_plugins/Path
+      Name: Planned route
+      Enabled: true
+      Topic:
+        Value: /hydrone/nav/plan
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Color: 0; 200; 255
+      Line Style: Lines
+      Line Width: 0.03
+      Alpha: 0.8
+
+    # ── where the vehicle is, and where the frames are ───────────────────
+    - Class: rviz_default_plugins/Pose
+      Name: Vehicle pose
+      Enabled: true
+      Topic:
+        Value: /mavros/local_position/pose
+        Depth: 1
+        Durability Policy: Volatile
+        Reliability Policy: Best Effort
+      Shape: Arrow
+      Color: 255; 25; 0
+      Alpha: 1
+      Shaft Length: 0.4
+      Shaft Radius: 0.04
+      Head Length: 0.15
+      Head Radius: 0.09
+
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: false
+      Marker Scale: 0.5
+      Show Arrows: false
+      Show Axes: true
+      Show Names: true
+
+    # ── the ZED's own cloud. OFF by default: it is the heaviest thing on the
+    # bus and this mission does not use the forward camera to find pads.
+    - Class: rviz_default_plugins/PointCloud2
+      Name: ZED cloud
+      Enabled: false
+      Topic:
+        Value: /hydrone/map/cloud
+        Depth: 2
+        Durability Policy: Volatile
+        Reliability Policy: Best Effort
+      Size (m): 0.03
+      Style: Points
+      Color Transformer: AxisColor
+
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+      Line color: 128; 128; 0
+
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Name: Current View
+      # Looking down the arena from above and behind, far enough to hold an
+      # 8 x 8 m floor with the drone at cruise in frame.
+      Distance: 16
+      Pitch: 0.85
+      Yaw: 0.9
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 0
+      Target Frame: <Fixed Frame>
+    Saved: ~
+
+Window Geometry:
+  Height: 900
+  Width: 1500
+  Displays:
+    collapsed: false
+  Views:
+    collapsed: true

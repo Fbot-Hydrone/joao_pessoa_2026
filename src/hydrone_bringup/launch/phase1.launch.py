@@ -78,14 +78,18 @@ BiguaSim and passes no overrides.
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
+from launch_ros.substitutions import FindPackageShare
 
 # The belly camera's private detection topic. Deliberately NOT the
 # /hydrone/pads/detections bus pad_map_node fuses: these detections carry no
 # position, and the map must not be able to consume one by accident.
 DOWN_DETECTIONS = "/hydrone/pads/down/detections"
+
+# The belly detector's annotated overlay — what rqt_image_view opens.
+DOWN_DEBUG_IMAGE = "/hydrone/pads/down/debug_image"
 
 
 def generate_launch_description():
@@ -284,6 +288,19 @@ def generate_launch_description():
                         "its own leaves /mavros/cmd/arming callable by "
                         "anything else in the graph, so it is not by itself a "
                         "reason to hold the drone."),
+        DeclareLaunchArgument(
+            "debug_image_topic", default_value=DOWN_DEBUG_IMAGE,
+            description="What rqt_image_view opens when debug:=true. The "
+                        "belly detector's overlay by default, since the belly "
+                        "camera is this mission's only detector; point it at "
+                        "/hydrone/pads/forward/debug_image for --zed-detect."),
+        DeclareLaunchArgument(
+            "debug", default_value="false",
+            description="Open the WINDOWS: rviz2 preloaded with this mission's "
+                        "layout, and rqt_image_view on the belly camera's "
+                        "annotated view. Off by default because both need an X "
+                        "display, which a headless run and the drone do not "
+                        "have. ./scripts/docker_up.sh --phase1 --debug sets it."),
         DeclareLaunchArgument(
             "debug_images", default_value="true",
             description="Publish annotated detector views on "
@@ -608,6 +625,41 @@ def generate_launch_description():
         }],
     )
 
+    # ── The debug windows ────────────────────────────────────────────────────
+    #
+    # Both run INSIDE the container, drawing on the host's X server through the
+    # /tmp/.X11-unix mount that docker-compose already makes and the
+    # `xhost +local:docker` that docker_up.sh already runs. That is the whole
+    # reason they can be launch nodes rather than a second thing to start by
+    # hand: no ROS_DOMAIN_ID to match, no DDS to cross, nothing to keep in sync.
+    #
+    # rviz2 gets a VERSIONED layout. Before this existed, every debug session
+    # began by adding eight displays by hand, setting the Fixed Frame to `map`
+    # (not `odom` — they differ by 90 deg here), and knowing from the docs which
+    # octomap display not to pick. See rviz/phase1.rviz.
+    rviz = Node(
+        package="rviz2",
+        executable="rviz2",
+        name="rviz2",
+        output="log",
+        condition=IfCondition(LaunchConfiguration("debug")),
+        arguments=["-d", PathJoinSubstitution(
+            [FindPackageShare("hydrone_bringup"), "rviz", "phase1.rviz"])],
+    )
+
+    # The belly camera's ANNOTATED view — the detector's own overlay, not the
+    # raw frame. It is the one window that answers "is the detector seeing
+    # what I think it is seeing", which docs/PHASE1-MISSION.md 13 lists as the
+    # thing to look at before touching the state machine.
+    image_view = Node(
+        package="rqt_image_view",
+        executable="rqt_image_view",
+        name="rqt_image_view",
+        output="log",
+        condition=IfCondition(LaunchConfiguration("debug")),
+        arguments=[LaunchConfiguration("debug_image_topic")],
+    )
+
     # Accumulates the ZED's own point cloud into a persistent voxel map plus a
     # coverage grid. Pure observer; nothing in this mission reads it.
     feature_map = Node(
@@ -801,6 +853,8 @@ def generate_launch_description():
         down_detector,
         pad_map,
         belly_coverage,
+        rviz,
+        image_view,
         feature_map,
         cloud_filter,
         octomap,
