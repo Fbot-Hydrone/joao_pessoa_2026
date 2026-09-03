@@ -11,18 +11,23 @@
 #                     Use scripts/dev_rebuild.sh for .msg / setup.py / new-file
 #                     changes. Implies --no-build.
 #   --no-build        don't pass --build to compose (reuse the current image).
-#   --phase1          run the Phase 1 mission (take off, turn on the spot until
-#                     a landing base is found, fly over it, confirm it on the
-#                     belly camera, land, repeat, come home) instead of the bare
-#                     sim bring-up. See docs/PHASE1-MISSION.md.
+#   --phase1          run the Phase 1 mission: take off, MAP the arena with a
+#                     closed perimeter, mow it with the belly camera, land on
+#                     every base found, come home. The ZED does odometry and
+#                     mapping only; the belly camera is the detector AND the
+#                     position source, placing each pad by casting its pixel
+#                     into the occupancy map. See docs/PHASE1-MISSION.md and
+#                     docs/MAP-SWEEP-2026-09-02.md.
 #   --landing-sites   run the earlier landing-site mission (fly forward and land
 #                     on whatever the belly camera sees). See docs/LANDING-SITES.md.
-#   --map-sweep       run the map-sweep EXPERIMENT: the ZED does odometry and
-#                     mapping only, the drone flies a closed perimeter to build
-#                     the occupancy map, then lanes spaced by the belly camera's
-#                     own footprint — and the belly camera places each pad by
-#                     casting its pixel into that map. See
-#                     src/hydrone_bringup/launch/phase1_map_sweep.launch.py.
+#   --zed-detect      run the OLDER division of labour, where the forward ZED
+#                     both finds a base across the arena and says where it is,
+#                     the belly camera only votes yes/no, and the search is a
+#                     three-sided U flown twice. This was --phase1 until
+#                     2026-09-02. Kept because it places pads better (2-16 cm
+#                     against 45 cm) while finding fewer of them, so it is both
+#                     the fallback and the comparison. See
+#                     src/hydrone_bringup/launch/phase1_zed_detect.launch.py.
 #   --ground-truth    fly the EKF on BiguaSim ground truth instead of the real
 #                     visual odometry (odom_source:=ground_truth). A DEBUGGING
 #                     AID for separating autonomy bugs from localization bugs —
@@ -37,8 +42,8 @@
 #
 #   scripts/docker_up.sh --phase1 target_bases:=2 takeoff_alt:=1.5
 #
-# --phase1, --landing-sites and --map-sweep are mutually exclusive; the last one
-# given wins.
+# --phase1, --landing-sites and --zed-detect are mutually exclusive; the last
+# one given wins.
 # Anything else is forwarded untouched to `docker compose up` (-d, --force-recreate, ...).
 set -e
 cd "$(dirname "$0")/.."
@@ -57,7 +62,7 @@ for arg in "$@"; do
         --no-odom-print) ODOM_ERROR_PRINT=false ;;
         --phase1)        HYDRONE_LAUNCH=phase1_sim.launch.py ;;
         --landing-sites) HYDRONE_LAUNCH=landing_sites_sim.launch.py ;;
-        --map-sweep)     HYDRONE_LAUNCH=phase1_map_sweep_sim.launch.py ;;
+        --zed-detect)    HYDRONE_LAUNCH=phase1_zed_detect_sim.launch.py ;;
         --ground-truth)  ODOM_SOURCE=ground_truth ;;
         --dev)           DEV_MODE=true; DO_BUILD=false ;;
         --no-build)      DO_BUILD=false ;;

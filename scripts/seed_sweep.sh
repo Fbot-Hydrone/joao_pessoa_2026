@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Fly the SAME mission over MANY base layouts, and score each one.
 #
-#   scripts/seed_sweep.sh                    # map_sweep, seeds 1..8
+#   scripts/seed_sweep.sh                    # the default mission, seeds 1..8
 #   scripts/seed_sweep.sh 11 12 13           # those seeds
-#   MISSION=--phase1 scripts/seed_sweep.sh   # the U mission instead
+#   MISSION=--zed-detect scripts/seed_sweep.sh   # the ZED-detects mission
 #
-# WHY. Both missions have been measured on ONE arena, seed 10, and tuned while
-# looking at it. A threshold that happens to suit six particular base positions
-# is indistinguishable from one that generalises, until it is flown on layouts
-# nobody looked at. This is what turns "it works" into "it works on 7 of 8".
+# WHY. Both missions were tuned while looking at ONE arena, seed 10. A threshold
+# that happens to suit six particular base positions is indistinguishable from
+# one that generalises, until it is flown on layouts nobody looked at. This is
+# what turns "it works" into "it works on 7 of 8".
 #
 # Each seed is a full bring-up: the sim spawns a different set of six bases
 # (biguasim_main.bases.sample_bases, same function this script scores against,
@@ -23,7 +23,7 @@
 set -u
 cd "$(dirname "$0")/.."
 
-MISSION="${MISSION:---map-sweep}"
+MISSION="${MISSION:---phase1}"
 ODOM="${ODOM:---ground-truth}"
 # Wall-clock ceiling per seed. A run that has not finished by then is recorded
 # as TIMEOUT and the sweep moves on rather than stalling on one arena.

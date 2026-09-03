@@ -1,58 +1,73 @@
 """
 hydrone_bringup/launch/phase1.launch.py
 
-AUTONOMY layer for the Phase 1 mission: take off, turn on the spot until a
-landing base is in the map, fly over it, confirm it on the belly camera, land,
-repeat, then come home to the base we started on.
+AUTONOMY layer for the Phase 1 mission: take off, MAP the arena, mow it with
+the belly camera, land on every base found, then come home to the base we
+started on.
 
-This is an ALTERNATIVE to hydrone.launch.py and to landing_sites.launch.py, not
-an addition to either. All three drive the vehicle, and running two of them puts
-two nodes on /mavros/setpoint_position/local fighting over the setpoint. Pick
-one.
+    ros2 launch hydrone_bringup phase1_sim.launch.py     # sim, everything
+    ros2 launch hydrone_bringup phase1.launch.py         # autonomy only
+    ./scripts/docker_up.sh --phase1 --ground-truth
 
-  ros2 launch hydrone_bringup phase1_sim.launch.py     # sim, everything
-  ros2 launch hydrone_bringup phase1.launch.py         # autonomy only
+An ALTERNATIVE to hydrone.launch.py and landing_sites.launch.py, not an
+addition: all three drive the vehicle, and two of them together put two nodes
+on /mavros/setpoint_position/local fighting over the setpoint. Pick one.
+
+THE DIVISION OF LABOUR, which is what this file chooses
+-------------------------------------------------------
+The ZED does NOT look for pads. It flies the odometry and it fills the
+occupancy map, and that is all. The belly camera is the only detector, and it
+is also the only thing that says WHERE a base is, because it has a way to
+answer that assumes nothing:
+
+    a pixel is a RAY. Cast it into the occupancy map. The first occupied voxel
+    is the surface that pixel is looking at — the TOP of a raised base if that
+    is what is under it, the floor if it is not.
+
+Every earlier route had to guess the surface. A plane at `ground_z` is wrong
+for a base raised 0 to 1.5 m (MEASURED: a base 1.29 m tall seen from 7.7 m
+placed 1.06 m out), and the rangefinder measures what is under the VEHICLE
+rather than under the pixel. MEASURED on a full run, the map route places a pad
+to 5-6 cm against the forward camera's 2-16 cm and the ground plane's 1.06 m.
+
+So the search is two passes with different products:
+
+  1  CLOSED PERIMETER at cruise, four sides, back where it started. Its product
+     is the MAP, not detections — which is why it has to come first, and why it
+     closes where the older U skipped its fourth side.
+  2  LANES spaced by the belly camera's own FOOTPRINT, computed at run time
+     from the live CameraInfo and the height above the tallest surface the
+     sweep flies over. It cannot be a constant: the simulated camera covers
+     4.80 m and the real one 1.47 m from the same altitude.
+
+THE OTHER MISSION
+-----------------
+`phase1_zed_detect.launch.py` is the older division, where the forward ZED both
+finds a base across the arena and places it, the belly camera only votes yes/no,
+and the search is a three-sided U flown twice. It flips this file's arguments
+rather than copying it, so the two cannot drift apart — everything below the
+argument block is shared and identical.
 
 Nodes
 -----
-  pad_detector (forward)  ZED RGB+depth  -> /hydrone/pads/detections
-  pad_detector (down)     belly RGB      -> /hydrone/pads/down/detections
-  pad_map                 forward dets   -> /hydrone/pads/map + RViz markers
+  pad_detector (forward)  ZED RGB+depth  -> /hydrone/pads/detections   [off by default]
+  pad_detector (down)     belly RGB+map  -> /hydrone/pads/down/detections
+  pad_map                 detections     -> /hydrone/pads/map + RViz markers
+  belly_coverage          pose+range     -> /hydrone/belly/{coverage,footprint,trajectory}
   feature_map             ZED point cloud-> /hydrone/map/cloud + coverage
-  cloud_filter+octomap    ZED cloud      -> 3-D occupancy map      [opt-in: octomap:=true]
+  cloud_filter+octomap    ZED cloud      -> 3-D occupancy map
   map_odom_tf             measured map -> odom (joins TF's two trees)
   phase1_mission          map + MAVROS   -> the flight itself
 
-How this differs from landing_sites.launch.py
----------------------------------------------
-The sensing half is identical — same two detectors, same map, same tuning — and
-that is deliberate: the detector is the part that is partially validated and it
-should not be forked. What changes is above it.
-
-  * `phase1_mission_node` replaces `pad_mission_node`. The old one flies +X in
-    steps and lands on whatever the belly camera happens to see; this one never
-    translates without a target and searches by turning in place.
-  * **Both cameras now feed the decision, in different currencies.** The old
-    mission threw away every forward-camera detection. This one takes its leads
-    from the MAP — built from the ZED alone — and the belly camera votes yes/no
-    on what it finds there.
-
-    The belly camera contributes NO POSITION, and that is the point. It runs
-    with `project_position: False` and on its own topic, so pad_map_node never
-    sees it. Its old ground-plane cast assumed a flat floor at `ground_z`, which
-    the competition's RAISED bases break: from overhead the ray crosses the
-    assumed plane past the pad it actually hit. And pad_map weights projections
-    by `confidence / max(range, 1)`, so a confirmation hover — hundreds of
-    close-range frames — would have outvoted the ZED and rewritten the very map
-    entry the drone was flown there on. The ZED is the position estimate for
-    everything; the belly camera answers one question, "is a base under me".
-    A simpler pipeline has fewer ways to be wrong.
-  * `pad_map` maps nothing until the vehicle first arms, and the base the drone
-    starts on is REGISTERED rather than detected — see docs/PHASE1-MISSION.md.
-  * Altitude is 1 m, not 2.5 m. This is test code and a fall from 1 m is cheap.
-    Note that it therefore does NOT clear the 1.5 m structure the landing_sites
-    cruise altitude was chosen for: this launch assumes the Phase 1 arena is
-    clear, which is the arena being flown.
+WHAT IS NOT SETTLED
+-------------------
+The lanes pass over every part of the arena ONCE, so a base the belly camera
+misses on its single pass is one this mission never sees, where the U got two
+looks from different angles. And across seven arenas the LANES themselves ran
+in only three runs: the perimeter plus land-during-survey usually reaches
+`target_bases` first — helped by the mission counting a landing on bare floor
+as a base visited, which it cannot yet tell apart. See
+docs/SEED-SWEEP-2026-09-02.md.
 
 Like the rest of the autonomy layer this consumes ONLY the agnostic contract
 buses (/zed/zed_node/*, /down_cam/*, /mavros/*), so it is identical in sim and
@@ -104,50 +119,57 @@ def generate_launch_description():
                         "empty, so no check ever runs and nothing is detected "
                         "or explained. phase1_real.launch.py sets this; see "
                         "docs/LANDING-SITES.md."),
-        # ── The map-sweep experiment ────────────────────────────────────────
-        # Every one of these defaults to what this launch has always done, so
-        # phase1_sim.launch.py is byte-for-byte the mission that landed on four
-        # bases. phase1_map_sweep.launch.py is the file that flips them, and it
-        # exists rather than a copy of this one so the two cannot drift apart.
+        # ── The division of labour between the two cameras ───────────────────
+        # These EIGHT arguments together choose which mission this is, and
+        # their defaults are the map sweep — the belly camera finds and places
+        # every pad, and the ZED only flies the odometry and fills the map.
+        #
+        # phase1_zed_detect.launch.py flips all eight back to the older
+        # division, where the forward ZED both finds a base and says where it
+        # is. It flips arguments rather than copying this file so the two
+        # cannot drift apart; everything below this block — the state machine,
+        # the confirmation, the landing, the octomap, the return home — is
+        # shared and identical.
         DeclareLaunchArgument(
-            "search_mode", default_value="u",
+            "search_mode", default_value="map_sweep",
             description="Which shape the search flies. 'u' is the measured "
                         "ladder built around the FORWARD camera. 'map_sweep' "
                         "flies a closed perimeter to build the occupancy map, "
                         "then lanes spaced by what the BELLY camera actually "
-                        "covers — see phase1_map_sweep.launch.py."),
+                        "covers, and is the default — see this file's docstring. "
+                        "phase1_zed_detect.launch.py sets 'u'."),
         DeclareLaunchArgument(
-            "forward_detector", default_value="true",
+            "forward_detector", default_value="false",
             description="Run the forward ZED pad detector. False leaves the "
                         "ZED doing odometry and mapping only, which is what "
                         "map_sweep wants: there the belly camera is the sole "
                         "detector."),
         DeclareLaunchArgument(
-            "down_project_position", default_value="false",
+            "down_project_position", default_value="true",
             description="Let the belly camera report WHERE, not just whether. "
                         "Off by default because its only route used to be a "
                         "cast onto a flat floor, which a raised base breaks. "
                         "With down_map_topic set it casts into the occupancy "
                         "map instead, which has the base's top in it."),
         DeclareLaunchArgument(
-            "down_map_topic", default_value="",
+            "down_map_topic", default_value="/octomap/octomap_binary",
             description="Occupancy map the belly camera projects into. Empty "
                         "disables the route. '/octomap/octomap_binary' is "
                         "where this launch's octomap_server publishes."),
         DeclareLaunchArgument(
-            "down_range_as_depth", default_value="false",
+            "down_range_as_depth", default_value="true",
             description="Fall back to the rangefinder when the map has no "
                         "answer for a pixel — an unmapped cell, or a ray that "
                         "leaves the tree. Measures under the VEHICLE, so it is "
                         "right while the pad is near the frame centre."),
         DeclareLaunchArgument(
-            "map_down_detections", default_value="",
+            "map_down_detections", default_value=DOWN_DETECTIONS,
             description="Belly-camera topic pad_map should FUSE, as opposed to "
                         "the mission's confirmation feed. Empty keeps the map "
                         "blind to it. Set it and the same topic serves both: "
                         "pad_map fuses positions, the mission counts looks."),
         DeclareLaunchArgument(
-            "max_map_speed", default_value="0.15",
+            "max_map_speed", default_value="2.0",
             description="Fastest the vehicle may be moving for pad_map to "
                         "accept a detection, m/s. The default exists because a "
                         "projection is only as good as the pose it is composed "
@@ -160,7 +182,7 @@ def generate_launch_description():
                         "is 2 m and near-vertical where the forward camera's "
                         "was 8 m and shallow."),
         DeclareLaunchArgument(
-            "max_map_yaw_rate_deg", default_value="10.0",
+            "max_map_yaw_rate_deg", default_value="60.0",
             description="Fastest the vehicle may be SLEWING for pad_map to "
                         "accept a detection, deg/s. Same story as "
                         "max_map_speed, and MEASURED to be worse than "
@@ -548,8 +570,9 @@ def generate_launch_description():
         parameters=[{
             "range_topic": LaunchConfiguration("range_topic"),
             # Empty by default: the belly camera is confirmation-only, so it
-            # publishes no position for the map to fuse. map_sweep sets it to
-            # the belly's own topic — the SAME topic the mission confirms on,
+            # publishes no position for the map to fuse, which is what
+            # phase1_zed_detect sets. The DEFAULT is the belly's own topic —
+            # the SAME topic the mission confirms on,
             # because pad_map and the mission want different things from the
             # same message (a position, and a count of looks).
             "down_detections_topic": LaunchConfiguration("map_down_detections"),

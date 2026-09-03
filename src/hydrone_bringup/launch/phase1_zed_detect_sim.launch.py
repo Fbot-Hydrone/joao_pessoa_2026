@@ -1,26 +1,27 @@
 """
-hydrone_bringup/launch/phase1_map_sweep_sim.launch.py
+hydrone_bringup/launch/phase1_zed_detect_sim.launch.py
 
-ONE COMMAND to fly the map-sweep experiment in simulation:
+ONE COMMAND to fly the ZED-detects mission in simulation:
 
-    ros2 launch hydrone_bringup phase1_map_sweep_sim.launch.py
+    ros2 launch hydrone_bringup phase1_zed_detect_sim.launch.py
+    ./scripts/docker_up.sh --zed-detect --ground-truth
 
-  = sources_sim.launch.py        (BiguaSim + SITL + MAVROS + zed_mimic + down_cam)
-  + phase1_map_sweep.launch.py   (which is phase1 with the two cameras' jobs swapped)
+  = sources_sim.launch.py           (BiguaSim + SITL + MAVROS + zed_mimic + down_cam)
+  + phase1_zed_detect.launch.py     (phase1 with the two cameras' jobs swapped back)
 
 The counterpart of phase1_sim.launch.py, and a PURE WRAPPER for the same
-reason: it passes the autonomy layer nothing, and it does not restate the
-mission's arguments. Re-declaring one here would carry THIS file's default and
-overwrite whatever phase1.launch.py declared — measured 2026-08-22, and the
-symptom is that editing a default does nothing whenever the sim wrapper is the
-entry point, which is almost always.
+reason: it passes the autonomy layer nothing and does not restate the mission's
+arguments. Re-declaring one here would carry THIS file's default and overwrite
+whatever phase1.launch.py declared — measured 2026-08-22, and the symptom is
+that editing a default does nothing whenever the sim wrapper is the entry
+point, which is almost always.
 
-    ros2 launch hydrone_bringup phase1_map_sweep_sim.launch.py sweep_overlap:=0.4
+    ros2 launch hydrone_bringup phase1_zed_detect_sim.launch.py takeoff_alt:=3.0
 
-reaches phase1_map_sweep.launch.py unchanged.
+reaches phase1.launch.py unchanged.
 
-Read phase1_map_sweep.launch.py for what the experiment is and what is not
-known about it.
+Read phase1_zed_detect.launch.py for what this mission is and what is measured
+about it.
 """
 
 import os
@@ -58,7 +59,7 @@ def generate_launch_description():
 
     autonomy = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(launch_dir, "phase1_map_sweep.launch.py")),
+            os.path.join(launch_dir, "phase1_zed_detect.launch.py")),
     )
 
     return LaunchDescription(args + [sources, autonomy])

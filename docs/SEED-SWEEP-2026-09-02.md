@@ -4,7 +4,10 @@ Escrito em 2026-09-02. Registra a primeira varredura por seeds do `map_sweep`, o
 defeito que ela encontrou, e o que continua aberto.
 
     scripts/seed_sweep.sh 1 2 3 4 5 6
-    MISSION=--phase1 scripts/seed_sweep.sh 1 2 3 4 5 6    # o U, para comparar
+    MISSION=--zed-detect scripts/seed_sweep.sh 1 2 3 4 5 6   # a antiga, comparar
+
+**Nomes:** o que este documento chama de `map_sweep` é, desde 2026-09-02, a
+missão padrão (`--phase1`). O que ele chama de "o U" é `--zed-detect`.
 
 ---
 
