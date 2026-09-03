@@ -91,6 +91,39 @@ export HYDRONE_LAUNCH       # ditto — selects which launch file the container 
 export ODOM_SOURCE          # ditto — what the EKF navigates on (vo|ground_truth)
 export HYDRONE_LAUNCH_ARGS  # ditto — extra name:=value pairs, possibly empty
 
+# ── Reap what the last run leaked ────────────────────────────────────────────
+#
+# Two things grow without bound across bring-ups, and both have filled this
+# machine's disk or RAM:
+#
+#   .utrace   Unreal Insights writes one profiling capture per run into
+#             ~/UnrealEngine/UnrealTrace/Store. They are pure diagnostics —
+#             nothing reads them, and re-running regenerates them. MEASURED
+#             2026-09-02: a single long run left an 87 GB file, and a month of
+#             runs had accumulated 512 GB and taken the disk to 100%, at which
+#             point nothing on the machine can write at all.
+#
+#   /dev/shm  every bring-up leaks HOLODECK_MEM<uuid>_* segments through
+#             ipc:host. They are RAM, not disk: 1098 of them held 491 MB.
+#
+# Both are reaped here rather than after a run, because a run that crashes or
+# is killed never gets to clean up after itself — and that is exactly the run
+# that leaves the biggest trace behind.
+TRACE_DIR="$HOME/UnrealEngine/UnrealTrace/Store"
+if [ -d "$TRACE_DIR" ]; then
+    traces=$(find "$TRACE_DIR" -name '*.utrace' 2>/dev/null | wc -l)
+    if [ "$traces" -gt 0 ]; then
+        size=$(du -sh "$TRACE_DIR" 2>/dev/null | cut -f1)
+        echo "Reaping $traces Unreal trace(s), $size — profiling only, regenerated on demand."
+        find "$TRACE_DIR" -name '*.utrace' -delete 2>/dev/null
+    fi
+fi
+shm=$(ls /dev/shm 2>/dev/null | grep -c HOLODECK_MEM || true)
+if [ "${shm:-0}" -gt 0 ]; then
+    echo "Reaping $shm leaked HOLODECK_MEM segment(s) from /dev/shm."
+    rm -f /dev/shm/HOLODECK_MEM* 2>/dev/null || true
+fi
+
 # Let the containerized UE5 viewport open on the host X server
 xhost +local:docker
 
@@ -100,7 +133,9 @@ mkdir -p "$HOME/.local/share/biguasim"
 # Locate the BiguaSim repo (mounted into the container). Set BS_SIM_DIR to
 # override; otherwise try the common sibling locations.
 if [ -z "${BS_SIM_DIR:-}" ]; then
-    for candidate in ../bs-competition/bs-drone-competition ../bs-drone-competition; do
+    for candidate in ../bs-competition/bs-drone-competition \
+                     ../biguasim-competicao/bs-drone-competition \
+                     ../bs-drone-competition; do
         if [ -d "$candidate" ]; then
             BS_SIM_DIR=$candidate
             break

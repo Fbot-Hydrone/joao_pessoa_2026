@@ -12,11 +12,17 @@ Todos passam pelo mesmo script, que constrói a imagem, sobe o container e roda
 **um** launch dentro dele:
 
 ```bash
-BS_SIM_DIR=/caminho/para/bs-drone-competition ./scripts/docker_up.sh <flags>
+./scripts/docker_up.sh <flags>
 ```
 
-`BS_SIM_DIR` aponta o repo do BiguaSim. Nesta máquina:
-`/home/lh/Documents/biguasim-competicao/bs-drone-competition`.
+O script acha o repo do BiguaSim sozinho, procurando por ele ao lado deste
+(`../biguasim-competicao/bs-drone-competition` e mais dois nomes comuns). Se o
+seu estiver em outro lugar, `BS_SIM_DIR=/caminho/para/ele` sobrepõe.
+
+Ele também **limpa antes de subir** o que a corrida anterior vazou: os
+`.utrace` do Unreal Insights (profiling puro — um único voo longo deixou 87 GB,
+e um mês deles levou o disco a 100%) e os segmentos `HOLODECK_MEM` do
+`/dev/shm`.
 
 ### As missões
 
@@ -49,16 +55,16 @@ Qualquer argumento com `:=` vira **argumento de launch** e é repassado:
 
 ```bash
 # a missão padrão, com as janelas de debug abertas
-BS_SIM_DIR=... ./scripts/docker_up.sh --phase1 --debug --ground-truth
+./scripts/docker_up.sh --phase1 --debug --ground-truth
 
 # a mesma missão, voando na odometria de verdade (sem --ground-truth)
-BS_SIM_DIR=... ./scripts/docker_up.sh --phase1
+./scripts/docker_up.sh --phase1
 
 # comparar as duas divisões de trabalho na mesma arena
-BS_SIM_DIR=... ./scripts/docker_up.sh --zed-detect --ground-truth
+./scripts/docker_up.sh --zed-detect --ground-truth
 
 # outra arena: BASES_SEED sobrepõe a seed do config.yaml, sem rebuild
-BASES_SEED=3 BS_SIM_DIR=... ./scripts/docker_up.sh --phase1 --ground-truth
+BASES_SEED=3 ./scripts/docker_up.sh --phase1 --ground-truth
 ```
 
 ### O que NÃO passa pelo docker_up
@@ -215,9 +221,10 @@ Para a missão `--zed-detect`, aponte para a frontal:
 - **Não rode `docker compose exec` contra o container durante uma corrida.**
   Aqui isso derrubou o `docker compose up` com `exit 137`, que parece crash do
   simulador e não é. Use `docker exec joao_pessoa_2026-hydrone-1 ...`.
-- **Cada bringup escreve um `.utrace`** em `~/UnrealEngine/UnrealTrace/Store/`,
-  de dezenas a centenas de MB. Em um mês isso acumulou **512G** e encheu o
-  disco. É profiling puro, regenerável, e pode ser apagado.
+- **Cada bringup escreve um `.utrace`** em `~/UnrealEngine/UnrealTrace/Store/`.
+  Uma corrida longa deixou **87 GB sozinha**, e um mês delas acumulou 512 GB e
+  levou o disco a 100% — ponto em que nada na máquina consegue escrever. O
+  `docker_up.sh` agora os limpa antes de cada subida.
 - **`source scripts/env.sh` antes de qualquer ferramenta ROS no host** — ele
   casa o `ROS_DOMAIN_ID` com o do compose (63). Com o valor errado o rviz não
   lista nada enquanto o stack publica centenas de tópicos.
