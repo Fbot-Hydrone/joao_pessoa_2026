@@ -166,6 +166,41 @@ def generate_launch_description():
                         "answer for a pixel — an unmapped cell, or a ray that "
                         "leaves the tree. Measures under the VEHICLE, so it is "
                         "right while the pad is near the frame centre."),
+        # ── Backend do detector: HSV/contorno clássico ou YOLO treinado ──────
+        # As duas classes (PadDetector e YoloPadDetector) têm a mesma
+        # interface pública, então trocar o backend não muda nada mais na
+        # missão, no mapa ou na projeção 3D — só a forma de achar o pixel da
+        # base. Um argumento por câmera porque normalmente só faz sentido
+        # trocar a de baixo (a que confirma o pouso) primeiro.
+        DeclareLaunchArgument(
+            "down_detector_backend", default_value="cv",
+            description="'cv' (HSV/contorno, o de sempre) ou 'yolo' (modelo "
+                        "treinado em 1_train_yolo.py sobre fotos reais da "
+                        "base). Ver down_yolo_weights."),
+        DeclareLaunchArgument(
+            "down_yolo_weights",
+            default_value=PathJoinSubstitution(
+                [FindPackageShare("hydrone_vision"), "models",
+                 "pad_seg_yolo11.pt"]),
+            description="Caminho do best.pt para a câmera de baixo. Por "
+                        "padrão aponta para "
+                        "src/hydrone_vision/models/pad_seg_yolo11.pt "
+                        "(instalado pelo colcon build) — basta colocar o "
+                        "arquivo lá e recompilar; nada de scp manual. Só é "
+                        "lido quando down_detector_backend:=yolo."),
+        DeclareLaunchArgument(
+            "down_yolo_conf_threshold", default_value="0.5"),
+        DeclareLaunchArgument(
+            "forward_detector_backend", default_value="cv",
+            description="Idem, para a câmera forward (ZED). Só importa "
+                        "quando forward_detector:=true."),
+        DeclareLaunchArgument(
+            "forward_yolo_weights",
+            default_value=PathJoinSubstitution(
+                [FindPackageShare("hydrone_vision"), "models",
+                 "pad_seg_yolo11.pt"])),
+        DeclareLaunchArgument(
+            "forward_yolo_conf_threshold", default_value="0.5"),
         DeclareLaunchArgument(
             "map_down_detections", default_value=DOWN_DETECTIONS,
             description="Belly-camera topic pad_map should FUSE, as opposed to "
@@ -499,6 +534,11 @@ def generate_launch_description():
             # high min_seen refuses both rather than take the biased one.
             "min_seen": 0.85,
             "ground_z": ParameterValue(ground_z, value_type=float),
+            "detector_backend": LaunchConfiguration("forward_detector_backend"),
+            "yolo_weights_path": LaunchConfiguration("forward_yolo_weights"),
+            "yolo_conf_threshold": ParameterValue(
+                LaunchConfiguration("forward_yolo_conf_threshold"),
+                value_type=float),
         }],
     )
 
@@ -576,6 +616,11 @@ def generate_launch_description():
             # /hydrone/pads/down/debug_image on the ground with rotors stopped.
             "ignore_regions": [0.75, 0.0, 1.0, 0.22,
                                0.0, 0.78, 0.16, 1.0],
+            "detector_backend": LaunchConfiguration("down_detector_backend"),
+            "yolo_weights_path": LaunchConfiguration("down_yolo_weights"),
+            "yolo_conf_threshold": ParameterValue(
+                LaunchConfiguration("down_yolo_conf_threshold"),
+                value_type=float),
         }],
     )
 
