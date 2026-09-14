@@ -106,6 +106,23 @@ export HYDRONE_LAUNCH_ARGS  # ditto — extra name:=value pairs, possibly empty
 #   /dev/shm  every bring-up leaks HOLODECK_MEM<uuid>_* segments through
 #             ipc:host. They are RAM, not disk: 1098 of them held 491 MB.
 #
+#             The same leak has a SECOND half that costs more than RAM: the
+#             POSIX semaphores, which the kernel stores as /dev/shm/sem.*.
+#             HOLODECK_SEMAPHORE_SERVER<uuid>, _CLIENT<uuid> and
+#             HOLODECK_LOADING_SEM<uuid> survive a crashed run, and the next
+#             bring-up does not merely waste memory — it FAILS:
+#
+#               posix_ipc.BusyError: Semaphore is busy
+#               (biguasim/environments.py, __linux_start_process__)
+#
+#             ardubridge_node dies there, so no physics is ever produced, and
+#             the symptom further downstream says nothing about the cause:
+#             SITL repeats "No JSON sensor message received, resending servos"
+#             and the mission waits forever on "waiting for MAVROS link and a
+#             local position...". MEASURED 2026-09-14: five stale sem.HOLODECK_*
+#             entries, left by runs on 2026-09-08 and -09, blocked every
+#             bring-up on this machine until they were removed.
+#
 # Both are reaped here rather than after a run, because a run that crashes or
 # is killed never gets to clean up after itself — and that is exactly the run
 # that leaves the biggest trace behind.
@@ -122,6 +139,20 @@ shm=$(ls /dev/shm 2>/dev/null | grep -c HOLODECK_MEM || true)
 if [ "${shm:-0}" -gt 0 ]; then
     echo "Reaping $shm leaked HOLODECK_MEM segment(s) from /dev/shm."
     rm -f /dev/shm/HOLODECK_MEM* 2>/dev/null || true
+fi
+# The semaphores, which is the half that BLOCKS the next run rather than just
+# wasting RAM. Only reaped when nothing is holding them: with the stack down
+# there is no owner, and removing them is what makes the next bring-up work.
+sems=$(ls /dev/shm 2>/dev/null | grep -c '^sem\.HOLODECK' || true)
+if [ "${sems:-0}" -gt 0 ]; then
+    if docker compose ps --status running 2>/dev/null | grep -q hydrone; then
+        echo "WARNING: $sems stale HOLODECK semaphore(s) in /dev/shm, but the" >&2
+        echo "  stack is RUNNING — not touching them. Stop it and re-run." >&2
+    else
+        echo "Reaping $sems leaked HOLODECK semaphore(s) from /dev/shm"
+        echo "  (these make the next run die with 'Semaphore is busy')."
+        rm -f /dev/shm/sem.HOLODECK* 2>/dev/null || true
+    fi
 fi
 
 # Let the containerized UE5 viewport open on the host X server
@@ -153,10 +184,40 @@ echo "BiguaSim repo: $BS_SIM_DIR"
 # Use the NVIDIA dGPU when the container runtime is available (see
 # docker-compose.nvidia.yml for the host setup), otherwise fall back to
 # the integrated GPU via /dev/dri.
+#
+# BOTH conditions are checked, and the second one is the lesson: the runtime
+# being REGISTERED with docker says nothing about the driver working. After a
+# driver upgrade without a reboot, the kernel module and the userspace library
+# disagree, `docker info` still lists the nvidia runtime, and the container
+# dies at startup with
+#
+#   failed to fulfil mount request: open /run/nvidia-persistenced/socket:
+#   no such file or directory
+#
+# which names a socket and not the real cause. `nvidia-smi -L` fails cleanly in
+# that state ("Driver/library version mismatch"), so it is the honest probe:
+# ask whether the driver WORKS, not whether it is installed. Falling back to
+# the iGPU keeps the simulator runnable until the machine is rebooted, which is
+# what actually fixes the mismatch.
 compose_files=(-f docker-compose.yml)
 if docker info 2>/dev/null | grep -qi 'runtimes:.*nvidia'; then
-    echo "NVIDIA container runtime detected — rendering on the dGPU"
-    compose_files+=(-f docker-compose.nvidia.yml)
+    if nvidia-smi -L >/dev/null 2>&1; then
+        echo "NVIDIA container runtime detected — rendering on the dGPU"
+        compose_files+=(-f docker-compose.nvidia.yml)
+    else
+        echo "NVIDIA runtime is registered but the driver is NOT usable:" >&2
+        nvidia-smi -L 2>&1 | sed 's/^/  /' >&2
+        echo "" >&2
+        echo "  The kernel module and the userspace library disagree, which is" >&2
+        echo "  what a driver upgrade without a reboot leaves behind. Compare:" >&2
+        echo "    kernel:    $(sed -n 's/^NVRM version:.*Module  \([0-9.]*\).*/\1/p' /proc/driver/nvidia/version 2>/dev/null)" >&2
+        echo "    userspace: $(nvidia-smi -L 2>&1 | sed -n 's/.*NVML library version: //p')" >&2
+        echo "" >&2
+        echo "  Falling back to whatever /dev/dri offers. If this machine has NO" >&2
+        echo "  second GPU, that is llvmpipe (SOFTWARE rendering) and UE5 will" >&2
+        echo "  NOT start: Holodeck dies immediately and the run hangs on" >&2
+        echo "  'No JSON sensor message received'. REBOOT to fix it." >&2
+    fi
 else
     echo "No NVIDIA container runtime — rendering on the iGPU (see README for dGPU setup)"
 fi
