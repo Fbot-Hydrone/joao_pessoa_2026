@@ -39,6 +39,45 @@ RUN pip3 install --no-cache-dir mediapipe pyzbar opencv-python "numpy<2"
 RUN pip3 install --no-cache-dir torch==2.7.1 --index-url https://download.pytorch.org/whl/cpu && \
     pip3 install --no-cache-dir roma==1.5.3 matplotlib
 
+# The YOLO backend of the pad detector (hydrone_vision/yolo_pad_detector.py,
+# reached with detector_backend:="yolo"). torch is already installed above;
+# ultralytics needs torchvision on top of it, because the segmentation head
+# runs torchvision.ops.nms on every frame — without it the import succeeds and
+# the FIRST inference is what fails.
+#
+# --no-deps is load-bearing, not tidiness. ultralytics' own requirements pull
+# pandas and scipy, and their wheels drag numpy 2.x in, which breaks cv_bridge
+# exactly the way the pin above describes (MEASURED here: pandas took numpy to
+# 2.2.6 and `import matplotlib` then died with "numpy.core.multiarray failed to
+# import"). Inference needs neither pandas nor scipy. The packages on the third
+# line are ultralytics' real import-time needs and are installed WITH their own
+# dependencies, because none of them touch numpy — installing THOSE --no-deps
+# is its own trap: requests without urllib3 fails at `import ultralytics`.
+#
+# The assert is the regression test. If a future edit reintroduces numpy 2 the
+# build stops here, instead of shipping an image whose visual_odometry_node
+# segfaults on the first frame in flight.
+#
+# MEASURED in this image: numpy stays 1.21.5, cv_bridge still round-trips, and
+# pad_seg_yolo11 runs in ~17 ms/frame on CPU after a 1.2 s load — unprivileged
+# and with the network off.
+RUN pip3 install --no-cache-dir --no-deps torchvision==0.22.1 \
+        --index-url https://download.pytorch.org/whl/cpu && \
+    pip3 install --no-cache-dir --no-deps ultralytics==8.3.40 ultralytics-thop && \
+    pip3 install --no-cache-dir pyyaml tqdm psutil py-cpuinfo pillow requests && \
+    python3 -c "import numpy, sys; v = numpy.__version__; print('numpy kept at', v); sys.exit(0 if int(v.split('.')[0]) < 2 else 1)" && \
+    python3 -c "from cv_bridge import CvBridge; CvBridge(); print('cv_bridge still imports')"
+
+# Ultralytics writes a settings file and offers to phone home on first import.
+# The entrypoint drops to the unprivileged 'hydrone' user, so point it at a
+# world-writable directory outside $HOME (which is partly a read-only bind
+# mount) and pre-seed it with sync OFF: a detector node must never block on the
+# network while the drone is in the air.
+ENV YOLO_CONFIG_DIR=/opt/ultralytics-cfg
+RUN mkdir -p $YOLO_CONFIG_DIR && \
+    python3 -c "from ultralytics import settings; settings.update({'sync': False})" && \
+    chmod -R a+rwX $YOLO_CONFIG_DIR
+
 # UE5 runtime: Vulkan loader + mesa drivers, and an unprivileged user —
 # Unreal refuses to start as root, so the entrypoint drops to this user.
 RUN apt-get update && apt-get install -y --no-install-recommends \

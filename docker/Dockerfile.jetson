@@ -130,21 +130,46 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
         libgtk-3-0 x11-apps \
     && rm -rf /var/lib/apt/lists/*
 
-# For YOLO 8.3.40, torch 2.7.1 is the last CPU-only build that works on aarch64. The
-# wheel is built against numpy 1.24, so the pip install of torch must come before the pip install of numpy<2 above, or else pip will upgrade numpy to 2.
-'''RUN python3 -m pip install --no-cache-dir \
-        torch==2.7.1 --index-url https://download.pytorch.org/whl/cpu \
+# The YOLO backend of the pad detector (detector_backend:="yolo"), the aarch64
+# counterpart of the block in the x86 Dockerfile. Deliberately BELOW the
+# "numpy<2" layer above: every install here is constrained not to move numpy,
+# and the assertion at the end is what proves it still did not.
+#
+# --no-deps on ultralytics and torchvision is load-bearing. ultralytics'
+# requirements pull pandas and scipy, whose wheels drag numpy 2.x in, and numpy
+# 2 against this image's apt cv2 (4.5.4) is silent at import and SEGFAULTS at
+# the first conversion — the same failure the pyzed block above documents at
+# length. Inference needs neither pandas nor scipy.
+#
+# torchvision is NOT optional: the segmentation head runs torchvision.ops.nms
+# on every frame, so without it `import ultralytics` succeeds and the FIRST
+# inference is what fails. The light packages on the last pip line are
+# installed WITH their dependencies on purpose — `requests` --no-deps leaves
+# urllib3 missing and `import ultralytics` dies there.
+#
+# NOT YET BUILT ON THE JETSON. The recipe is the one MEASURED in the x86 image
+# (numpy held at 1.21.5, cv_bridge intact, ~17 ms/frame on CPU); the wheel
+# index below serves aarch64 for these versions, but that has not been
+# confirmed on the board. Build this image before counting on it in the field.
+RUN python3 -m pip install --no-cache-dir --no-deps \
+        torch==2.7.1 torchvision==0.22.1 \
+        --index-url https://download.pytorch.org/whl/cpu \
+    && python3 -m pip install --no-cache-dir --no-deps \
+        ultralytics==8.3.40 ultralytics-thop \
     && python3 -m pip install --no-cache-dir \
         pyyaml tqdm psutil py-cpuinfo pillow "requests>=2.23.0" \
         "matplotlib>=3.3.0" \
-    && python3 -m pip install --no-cache-dir --no-deps ultralytics==8.3.40 \
-    && python3 -c "\
-import numpy, sys; \
-v = numpy.__version__; \
-print('numpy', v); \
-sys.exit(0 if int(v.split('.')[0]) < 2 else 1)" \
-    && python3 -c "from ultralytics import YOLO; print('ultralytics OK')"
-'''
+    && python3 -c "import numpy, sys; v = numpy.__version__; print('numpy', v); sys.exit(0 if int(v.split('.')[0]) < 2 else 1)" \
+    && python3 -c "from ultralytics import YOLO; print('ultralytics OK')" \
+    && python3 -c "from cv_bridge import CvBridge; CvBridge(); print('cv_bridge still imports')"
+
+# Ultralytics writes settings and offers to phone home on first import; point
+# it somewhere world-writable and turn sync off, so no detector node can block
+# on the network in flight.
+ENV YOLO_CONFIG_DIR=/opt/ultralytics-cfg
+RUN mkdir -p $YOLO_CONFIG_DIR \
+    && python3 -c "from ultralytics import settings; settings.update({'sync': False})" \
+    && chmod -R a+rwX $YOLO_CONFIG_DIR
 
 # ── The workspace ───────────────────────────────────────────────────────────
 # --symlink-install so the dev bind mount can put the host's working tree at the
