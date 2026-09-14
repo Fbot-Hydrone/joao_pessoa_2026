@@ -607,7 +607,9 @@ def generate_launch_description():
             "ground_z": ParameterValue(ground_z, value_type=float),
             "out_topic": DOWN_DETECTIONS,
             "publish_debug": ParameterValue(debug_images, value_type=bool),
-            "blue_hsv_low": [95, 110,
+            # O H e o S documentados acima; so o V vem do argumento, que e o
+            # unico dos tres que difere entre as duas cameras.
+            "blue_hsv_low": [blue_hsv_low[0], blue_hsv_low[1],
                              ParameterValue(
                                  LaunchConfiguration("down_blue_v_min"),
                                  value_type=int)],

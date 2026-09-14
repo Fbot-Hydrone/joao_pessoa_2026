@@ -66,6 +66,13 @@ WRAPPER_PAIRS = [
     # The real-hardware wrapper includes TWO files and must not shadow either.
     ("phase1_real.launch.py", "phase1.launch.py"),
     ("phase1_real.launch.py", "sources_real.launch.py"),
+    # Same shape, one camera's job swapped: the real-hardware wrapper for the
+    # older ZED-detects mission. Added 2026-09-05 alongside the YOLO backend —
+    # this is the file that made phase1_zed_detect.launch.py runnable on the
+    # drone at all, and it is exactly the shape the 2026-08-22 bug hit, so it
+    # gets the same two checks as its sibling.
+    ("phase1_zed_detect_real.launch.py", "phase1_zed_detect.launch.py"),
+    ("phase1_zed_detect_real.launch.py", "sources_real.launch.py"),
     # phase1_dry is here for the SHADOWING test only — it must not re-declare
     # anything either. It is exempt from the forwarding test, because
     # forwarding is the entire reason it exists; see FORWARDING_EXEMPT and
@@ -83,6 +90,10 @@ FORWARDING_EXEMPT = {
     # wrapper knows and the shared autonomy file cannot. Forwarded without
     # being declared, so a command-line value still wins.
     ("phase1_real.launch.py", "phase1.launch.py"): {"field_mode"},
+    # Same exemption, same reason, one camera over: a fact about the pad in
+    # front of whichever camera is doing the detecting in THIS mission.
+    ("phase1_zed_detect_real.launch.py", "phase1_zed_detect.launch.py"):
+        {"field_mode"},
     # The dry launch exists to override its includes. Neither is tuning
     # somebody would edit elsewhere and expect to win, and dry_run is asserted
     # to actually arrive by test_the_dry_launch_really_is_dry.
@@ -254,6 +265,7 @@ LAUNCH_FILES = [
     "landing_sites_sim.launch.py",
     "hydrone_sim.launch.py",
     "hydrone_bringup.launch.py",
+    "phase1_zed_detect_real.launch.py",
 ]
 
 
