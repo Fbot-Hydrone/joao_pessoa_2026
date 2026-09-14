@@ -409,6 +409,27 @@ class Phase1MissionNode(Node):
         # the belly camera. The pixel-to-metre mapping is learned in flight;
         # see hydrone_nav.servo for why it cannot be a constant.
         self.declare_parameter("centre_on_pad", True)
+        # How far off-centre the pad may still be when the confirmation hover
+        # decides to land, as a FRACTION OF THE PAD'S OWN RADIUS in the image.
+        #
+        # Relative to the radius and not a pixel count on purpose: the hover
+        # sits `takeoff_alt` above the PAD TOP, and pad tops in one arena range
+        # from 0.12 m to 1.6 m, so the same misalignment in metres is a wildly
+        # different number of pixels from one pad to the next. The pad's own
+        # apparent size carries exactly that scale, so 0.7 means "0.7 of a pad
+        # radius off-centre", which is ~0.35 m on the 1 m pads, whatever the
+        # height and whatever the lens.
+        #
+        # Deliberately LOOSE. This is not an alignment target, it is a veto on
+        # landing somewhere absurd: the vehicle centres once and lands, it does
+        # not chase the last few pixels. MEASURED 2026-09-14, the run that
+        # aborted at 5/6 — the four good landings finished 8-21 px off and
+        # touched down 0.14-0.33 m from the pad centre, while the fifth was
+        # accepted at (448, 438) against a (320, 240) target, 236 px off, and
+        # touched down 0.40 m out on a pad whose edge is at 0.50 m. It balanced
+        # there for six seconds, slid off, fell 1.1 m, and every takeoff after
+        # that was refused by the FCU — the whole attempt ended at 5 of 6.
+        self.declare_parameter("land_centre_max_frac", 0.7)
         # Where the pad should sit in the belly image. The image centre unless
         # the lens is off-centre on the airframe — which the servo CANNOT
         # learn, because it is what "centred" means. Measure it once by
@@ -580,6 +601,7 @@ class Phase1MissionNode(Node):
         self.retarget_tol_m = float(p("retarget_tol_m"))
         self.max_search_level = int(p("max_search_level"))
         self.centre_on_pad = bool(p("centre_on_pad"))
+        self.land_centre_max_frac = float(p("land_centre_max_frac"))
         t = [float(v) for v in p("pad_target_uv")]
         self._servo = servo.VisualServo(target_uv=(t[0], t[1]))
         self._level = 1
@@ -2048,18 +2070,52 @@ class Phase1MissionNode(Node):
             # which can be written down for an airframe whose camera may be
             # bolted on differently from the simulator's, and getting the sign
             # wrong does not centre slowly, it flies away.
-            self._centre_on_pad(self._last_down)
+            det = self._last_down
+            self._centre_on_pad(det)
             self._confirm_hits += 1
             # One detection must not be counted twice: the belly camera runs at
             # 10 Hz and this tick at 10 Hz, so without clearing it a single
             # frame would satisfy the whole quota on its own.
             self._last_down = None
             if self._confirm_hits >= self.confirm_detections:
-                self.get_logger().info(
-                    f"pad {self.target_id} CONFIRMED on the belly camera "
-                    f"({self._confirm_hits} looks) — landing.")
-                self._begin_landing()
-                return
+                # COUNTING LOOKS IS NOT THE SAME AS BEING OVER THE PAD, and
+                # until 2026-09-14 this gate was the count alone: six looks and
+                # it landed, wherever the pad happened to sit in frame. The
+                # servo above ran every tick, but nothing ever read its result.
+                #
+                # That is how the 5/6 abort happened. The last look before
+                # landing put the pad at (448, 438) against a (320, 240)
+                # target — 236 px out, against 8-21 px on the four landings
+                # that worked — and the mission landed anyway, 0.40 m from the
+                # centre of a pad whose edge is 0.50 m out. It balanced on the
+                # lip for six seconds, slid off, fell 1.1 m, and the FCU
+                # refused every takeoff after that.
+                #
+                # So the count is necessary and not sufficient: the pad must
+                # also BE somewhere sane. One look decides it — the vehicle
+                # centres and lands, it does not hunt the last few pixels.
+                off = self._centre_offset_px(det)
+                if off is not None and off > self._centre_tolerance_px(det):
+                    # Not landing THIS tick. The servo keeps nudging on the
+                    # following ones, and `confirm_timeout` is already the
+                    # escape: a pad the vehicle can never get over is
+                    # blacklisted there, exactly as one that never confirms.
+                    self.get_logger().warn(
+                        f"pad {self.target_id}: {self._confirm_hits} looks, but "
+                        f"the pad is {off:.0f} px off centre (limit "
+                        f"{self._centre_tolerance_px(det):.0f} px) — holding, "
+                        "not landing on the edge.",
+                        throttle_duration_sec=2.0)
+                else:
+                    self.get_logger().info(
+                        f"pad {self.target_id} CONFIRMED on the belly camera "
+                        f"({self._confirm_hits} looks, "
+                        f"{off:.0f} px off centre) — landing."
+                        if off is not None else
+                        f"pad {self.target_id} CONFIRMED on the belly camera "
+                        f"({self._confirm_hits} looks) — landing.")
+                    self._begin_landing()
+                    return
 
         if self._since_entered() > self.confirm_timeout:
             self.get_logger().warn(
@@ -2111,6 +2167,23 @@ class Phase1MissionNode(Node):
             if int(pad.id) == int(self.target_id):
                 return (pad.position.x, pad.position.y)
         return None
+
+    def _centre_offset_px(self, det):
+        """How far the pad is from where it should sit in the image, in px."""
+        if det is None:
+            return None
+        u0, v0 = self._servo.target_uv
+        return math.hypot(float(det.u) - u0, float(det.v) - v0)
+
+    def _centre_tolerance_px(self, det):
+        """The offset above which landing is refused, in px.
+
+        Scaled by the PAD'S OWN RADIUS rather than fixed, because the hover is
+        `takeoff_alt` above the pad TOP and tops differ by more than a metre
+        across one arena — the same 0.3 m miss is a different pixel count on a
+        0.12 m pad and on a 1.6 m one. The radius carries that scale for free.
+        """
+        return self.land_centre_max_frac * max(float(det.radius_px), 1.0)
 
     def _centre_on_pad(self, det):
         """Nudge the setpoint so the belly camera's pad moves to `target_uv`.

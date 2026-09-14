@@ -103,12 +103,22 @@ def set_map(node, *pads):
     node.pad_map = m
 
 
-def see_pad(node, confidence=0.9, age_s=0.0):
-    """Pretend the belly camera just reported a pad."""
+def see_pad(node, confidence=0.9, age_s=0.0, uv=None, radius_px=100.0):
+    """Pretend the belly camera just reported a pad.
+
+    Defaults to a pad sitting exactly where it should in the image, because
+    that is the ordinary case and every test that is not ABOUT centring wants
+    it: landing is gated on the pad being roughly centred, so a detection with
+    u = v = 0 would read as 400 px off and refuse to land.
+    """
     det = PadDetection()
     det.camera = "down"
     det.confidence = float(confidence)
     det.position_valid = True
+    u0, v0 = node._servo.target_uv if uv is None else uv
+    det.u = float(u0)
+    det.v = float(v0)
+    det.radius_px = float(radius_px)
     node._last_down = det
     node._last_down_t = node._now() - age_s
 
@@ -479,6 +489,77 @@ def test_confirmation_needs_several_looks(node):
     node._do_confirm()
     assert node.state == node.LAND
     assert node.landing_for == node.LAND_PAD
+
+
+def test_a_pad_far_off_centre_does_not_trigger_a_landing(node):
+    """The 5/6 abort of 2026-09-14, as a test.
+
+    Counting looks is not the same as being over the pad. This gate did not
+    exist, and the run that found it landed with the pad at (448, 438) against
+    a (320, 240) target — 236 px out, against 8-21 px on the four landings that
+    worked. It touched down 0.40 m from the centre of a pad whose edge is
+    0.50 m out, balanced on the lip for six seconds, slid off, fell 1.1 m, and
+    the FCU refused every takeoff after that. The attempt ended at 5 of 6.
+    """
+    node.target_id = 4
+    enter(node, node.CONFIRM)
+    for _ in range(node.confirm_detections * 3):
+        see_pad(node, confidence=0.9, uv=(448.0, 438.0), radius_px=100.0)
+        node._do_confirm()
+    # The looks were all counted — the pad IS there and IS confident.
+    assert node._confirm_hits >= node.confirm_detections
+    # But the vehicle is not over it, so it must still be hovering.
+    assert node.state == node.CONFIRM
+
+
+def test_a_centred_pad_lands_on_the_first_look_that_completes_the_quota(node):
+    """The gate is a veto, not an alignment target: one centred look is enough.
+
+    It must not wait for the pad to be centred SEVERAL times, or a vehicle
+    drifting a few pixels either side of the target never commits.
+    """
+    node.target_id = 4
+    enter(node, node.CONFIRM)
+    for _ in range(node.confirm_detections - 1):
+        see_pad(node, confidence=0.9, uv=(340.0, 250.0), radius_px=100.0)
+        node._do_confirm()
+        assert node.state == node.CONFIRM
+    see_pad(node, confidence=0.9, uv=(340.0, 250.0), radius_px=100.0)
+    node._do_confirm()
+    assert node.state == node.LAND
+
+
+def test_the_tolerance_scales_with_the_pad_and_not_with_pixels(node):
+    """Same pixel offset, two pad sizes, opposite verdicts.
+
+    The hover sits `takeoff_alt` above the pad TOP, and tops in one arena range
+    from 0.12 m to 1.6 m, so the same miss in metres is a different pixel count
+    from one pad to the next. A fixed pixel budget would be too tight on a tall
+    pad (close camera, pad large in frame) and too loose on a low one.
+    """
+    u0, v0 = node._servo.target_uv
+    off = (u0 + 60.0, v0)
+    big = PadDetection(); big.radius_px = 200.0; big.u, big.v = off
+    small = PadDetection(); small.radius_px = 50.0; small.u, small.v = off
+    assert node._centre_offset_px(big) == pytest.approx(60.0)
+    assert node._centre_offset_px(small) == pytest.approx(60.0)
+    # 60 px is a third of the big pad's radius, but more than the small one's.
+    assert node._centre_offset_px(big) < node._centre_tolerance_px(big)
+    assert node._centre_offset_px(small) > node._centre_tolerance_px(small)
+
+
+def test_a_pad_that_never_centres_is_eventually_blacklisted(node):
+    """The gate must not become a way to hover forever.
+
+    Refusing to land is only safe because `confirm_timeout` is already the
+    escape — the same one that catches a candidate which never confirms.
+    """
+    node.target_id = 4
+    enter(node, node.CONFIRM, age_s=node.confirm_timeout + 1.0)
+    see_pad(node, confidence=0.9, uv=(448.0, 438.0), radius_px=100.0)
+    node._do_confirm()
+    assert 4 in node.blacklist
+    assert node.state != node.LAND
 
 
 def test_one_frame_cannot_satisfy_the_whole_quota(node):

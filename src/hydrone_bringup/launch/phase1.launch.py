@@ -303,6 +303,22 @@ def generate_launch_description():
             description="Confidence that counts as a look. Raise it if the "
                         "drone lands on things that are merely blue."),
         DeclareLaunchArgument(
+            "land_centre_max_frac", default_value="0.7",
+            description="Quao descentrada a base ainda pode estar, em FRACOES "
+                        "DO RAIO DELA na imagem, na hora de comprometer o "
+                        "pouso. Fracao do raio e nao pixels porque a pairagem "
+                        "fica takeoff_alt acima do TOPO da base, e os topos de "
+                        "uma arena vao de 0,12 a 1,6 m — o mesmo desvio em "
+                        "metros da contagens de pixel muito diferentes. "
+                        "Deliberadamente FROUXO: nao e alvo de alinhamento, e "
+                        "veto contra pousar em lugar absurdo; o veiculo "
+                        "centraliza uma vez e pousa, nao persegue os ultimos "
+                        "pixels. MEDIDO 2026-09-14: os quatro pousos bons "
+                        "terminaram a 8-21 px e tocaram a 0,14-0,33 m do "
+                        "centro; o quinto foi aceito a 236 px, tocou a 0,40 m "
+                        "numa base cuja borda esta a 0,50, escorregou e "
+                        "encerrou a tentativa em 5 de 6."),
+        DeclareLaunchArgument(
             "confirm_timeout_s", default_value="25.0",
             description="How long to hover over a candidate before declaring "
                         "it is not a landing site, blacklisting it and "
@@ -923,6 +939,8 @@ def generate_launch_description():
                 LaunchConfiguration("confirm_confidence"), value_type=float),
             "confirm_timeout_s": ParameterValue(
                 LaunchConfiguration("confirm_timeout_s"), value_type=float),
+            "land_centre_max_frac": ParameterValue(
+                LaunchConfiguration("land_centre_max_frac"), value_type=float),
             "auto_start": ParameterValue(
                 LaunchConfiguration("auto_start"), value_type=bool),
             "dry_run": ParameterValue(
