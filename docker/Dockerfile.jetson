@@ -161,7 +161,7 @@ RUN python3 -m pip install --no-cache-dir --no-deps \
         "matplotlib>=3.3.0" \
     && python3 -c "import numpy, sys; v = numpy.__version__; print('numpy', v); sys.exit(0 if int(v.split('.')[0]) < 2 else 1)" \
     && python3 -c "from ultralytics import YOLO; print('ultralytics OK')" \
-    && python3 -c "from cv_bridge import CvBridge; CvBridge(); print('cv_bridge still imports')"
+    && bash -c ". /opt/ros/humble/setup.sh && python3 -c 'from cv_bridge import CvBridge; CvBridge()' && echo 'cv_bridge still imports'"
 
 # Ultralytics writes settings and offers to phone home on first import; point
 # it somewhere world-writable and turn sync off, so no detector node can block

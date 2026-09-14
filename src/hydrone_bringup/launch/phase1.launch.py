@@ -75,10 +75,13 @@ on the real drone. phase1_sim adds the sources that produce those buses from
 BiguaSim and passes no overrides.
 """
 
+from typing import List
+
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import (LaunchConfiguration, PathJoinSubstitution,
+                                  TextSubstitution)
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
@@ -609,10 +612,18 @@ def generate_launch_description():
             "publish_debug": ParameterValue(debug_images, value_type=bool),
             # O H e o S documentados acima; so o V vem do argumento, que e o
             # unico dos tres que difere entre as duas cameras.
-            "blue_hsv_low": [blue_hsv_low[0], blue_hsv_low[1],
-                             ParameterValue(
-                                 LaunchConfiguration("down_blue_v_min"),
-                                 value_type=int)],
+            #
+            # A lista e montada como TEXTO e so entao convertida em List[int].
+            # Um ParameterValue solto DENTRO de uma lista nao e aceito pelo
+            # launch — ele quebra o arquivo inteiro na hora de carregar, com
+            # "Expected 'subvalue' to be one of [...]", e nao em voo: `ros2
+            # launch phase1.launch.py` nem chega a subir um no.
+            "blue_hsv_low": ParameterValue(
+                [TextSubstitution(
+                    text=f"[{blue_hsv_low[0]}, {blue_hsv_low[1]}, "),
+                 LaunchConfiguration("down_blue_v_min"),
+                 TextSubstitution(text="]")],
+                value_type=List[int]),
             "yellow_hsv_low": yellow_hsv_low,
             # O detector filtra com min_confidence ANTES de publicar, e a missao
             # testa confirm_confidence depois. Com 0.50 contra 0.40 o gate da
