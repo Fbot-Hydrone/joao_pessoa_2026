@@ -297,6 +297,27 @@ def generate_launch_description():
                         "camera is this mission's only detector; point it at "
                         "/hydrone/pads/forward/debug_image for --zed-detect."),
         DeclareLaunchArgument(
+            "down_blue_v_min", default_value="50",
+            description="Piso de V da banda azul da BARRIGA. A frontal usa 160 "
+                        "porque uma base e uma CAIXA — topo claro sobre parede "
+                        "escura do mesmo matiz — e a 50 as duas entram na "
+                        "mascara e voltam num contorno em L cuja solidez "
+                        "reprova. MEDIDO 2026-09-03 na pairagem sobre a base "
+                        "mais alta da seed 100: solidity foi o gate que "
+                        "disparou (sol 0.64/0.68/0.77 contra 0.80) com "
+                        "yfrac 0.128-0.147, ou seja o amarelo estava la e a "
+                        "forma e que nao fechava."),
+        DeclareLaunchArgument(
+            "down_min_confidence", default_value="0.30",
+            description="Confiança mínima com que o detector da BARRIGA "
+                        "publica. Ele filtra ANTES de publicar, e a missão "
+                        "testa confirm_confidence depois — com os dois em 0,30 "
+                        "o gate da missão é letra morta: quem corta é sempre o "
+                        "detector, e a missão nunca vê o que ele descartou. "
+                        "Baixe para 0.0 e a distribuição inteira aparece em "
+                        "/hydrone/pads/down/detections, que é como se mede o "
+                        "que a pairagem de confirmação realmente recebe."),
+        DeclareLaunchArgument(
             "debug", default_value="false",
             description="Open the WINDOWS: rviz2 preloaded with this mission's "
                         "layout, and rqt_image_view on the belly camera's "
@@ -546,7 +567,10 @@ def generate_launch_description():
             "ground_z": ParameterValue(ground_z, value_type=float),
             "out_topic": DOWN_DETECTIONS,
             "publish_debug": ParameterValue(debug_images, value_type=bool),
-            "blue_hsv_low": blue_hsv_low,
+            "blue_hsv_low": [95, 110,
+                             ParameterValue(
+                                 LaunchConfiguration("down_blue_v_min"),
+                                 value_type=int)],
             "yellow_hsv_low": yellow_hsv_low,
             # O detector filtra com min_confidence ANTES de publicar, e a missao
             # testa confirm_confidence depois. Com 0.50 contra 0.40 o gate da
@@ -557,7 +581,8 @@ def generate_launch_description():
             # demais pontuavam logo abaixo de 0.50 e nunca eram publicados.
             # Alinhado com confirm_confidence; a barreira de seguranca continua
             # sendo confirm_detections frames SEPARADOS acima dela.
-            "min_confidence": 0.30,
+            "min_confidence": ParameterValue(
+                LaunchConfiguration("down_min_confidence"), value_type=float),
             # A 1 m pad at the 1.5 m confirmation hover is ~213 px across and
             # its markings 10-20 px wide; 5 px cannot bridge them.
             "close_px": 25,
