@@ -27,13 +27,34 @@ repositories:
   # ros-humble-mavros-msgs for humble — ros-humble-mavros, -mavros-extras and
   # -libmavconn were all dropped (the iron builds of the same packages are
   # still there, so this is a humble-specific removal, not an upstream
-  # retirement). Pinned to 2.15.1, the exact version the mavros_msgs binary
-  # still advertises, so nothing here moves relative to what used to be
-  # installed.
+  # retirement).
+  #
+  # PINNED TO 2.14.0, NOT to the newest tag, and the reason is load-bearing.
+  # 2.15.0 carries commit 63f73928 ("fix composable node ownership cycle and
+  # plugin naming", 2026-08-04), which added to Plugin::Plugin:
+  #
+  #     node_options.use_global_arguments(false);
+  #
+  # Every plugin that builds its own sub-node then IGNORES the process-global
+  # --params-file arguments, so parameter FILES never reach it. distance_sensor
+  # is one of those, and the result is that mavros_distance_sensor.yaml is
+  # silently discarded: the plugin logs "DS: Plugin not configured!", never
+  # subscribes to /mavros/rangefinder, never sends DISTANCE_SENSOR to SITL, and
+  # ArduPilot refuses to arm with
+  #
+  #     Arm: Rangefinder 1: No Data
+  #
+  # The drone simply never takes off. Plugins using the OTHER constructor
+  # (setpoint_position, local_position) keep working, which is what makes this
+  # look like a config bug rather than a version bug.
+  #
+  # 2.14.0 is the last tag without that commit — verified by `git show
+  # 2.14.0:mavros/src/lib/plugin.cpp | grep -c use_global_arguments` -> 0.
+  # Revisit only when upstream forwards parameter overrides into the sub-node.
   src/mavros:
     type: git
     url: https://github.com/mavlink/mavros.git
-    version: 0755770a058e2aed558b3d4fc10e45ba68d2b117
+    version: 9a192906400156f841e81123c60581be9ff29099
   # NOTE: ArduPilot's fork, not eProsima upstream — the pinned commit only
   # exists there (it carries ArduPilot patches, e.g. the OMG-IDL-Parser
   # submodule and C++ const generation).
