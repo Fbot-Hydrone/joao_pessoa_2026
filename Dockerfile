@@ -50,9 +50,32 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # controller_node speaks (arming, mode, setpoints). Also provides mavros_msgs,
 # a runtime import of controller_node. install_geographiclib_datasets pulls the
 # geoid the global-position plugin needs (non-fatal if it can't download).
+#
+# BUILT FROM SOURCE now (deps.repos pins mavros 2.15.1), because the humble
+# binaries are GONE: `ros-humble-mavros`, `-mavros-extras` and
+# `-libmavconn` were dropped from packages.ros.org in the 2026-09-07 sync,
+# leaving only `ros-humble-mavlink` and `ros-humble-mavros-msgs`. VERIFIED
+# 2026-09-14 in a fresh osrf/ros:humble-desktop — and the ros-iron builds of
+# all of them are still published, so this is a humble-specific removal.
+# Before that was noticed, this layer simply failed with
+#   E: Unable to locate package ros-humble-mavros
+# and the image could not be rebuilt at all.
+#
+# mavros_msgs is NOT installed from apt any more either: the source build
+# provides it, and having both would put two copies of the same messages on
+# the overlay. What is installed here is only what mavros needs to BUILD and
+# RUN — the marshaling library and GeographicLib.
+#
+# The list is rosdep's, not a guess: it is what
+#   rosdep install --from-paths <mavros 2.15.1> --ignore-src --simulate
+# resolves to on this base image. libasio-dev is the one that is easy to miss
+# and fails LAST — libmavconn's find_package(ASIO) is the first thing to break
+# without it, and only after the ~20 minute SITL layer has rebuilt.
 RUN apt-get update && apt-get install -y \
-      ros-humble-mavros ros-humble-mavros-msgs ros-humble-mavros-extras \
-      geographiclib-tools \
+      ros-humble-mavlink ros-humble-diagnostic-updater \
+      ros-humble-eigen-stl-containers ros-humble-geographic-msgs \
+      ros-humble-ament-cmake-google-benchmark \
+      libasio-dev libgeographic-dev geographiclib-tools python3-click \
     && (geographiclib-get-geoids egm96-5 || true) \
     && rm -rf /var/lib/apt/lists/*
 
@@ -93,12 +116,12 @@ RUN pip install --no-cache-dir octomap-python==1.10.0.0
 
 # Placed DOWN HERE, below every apt layer, and that position is deliberate.
 # It belongs above `COPY src/` by the rule below, but it must also stay BELOW
-# the apt layers: `ros-humble-mavros` and `-extras` have been REMOVED from
-# packages.ros.org (2026-09-07 sync leaves only `ros-humble-mavros-msgs`), so
-# the MAVROS layer no longer rebuilds. Anything inserted above it invalidates
-# its cache and the image stops building — which is exactly what happened when
-# this block was first written next to torch. Until that layer is fixed, treat
-# everything above as frozen and add pip dependencies here.
+# the apt layers, which are the fragile ones: the MAVROS layer above had to be
+# rewritten to build from source after its packages vanished from
+# packages.ros.org, and anything inserted above an apt layer invalidates its
+# cache and re-runs it against whatever the archives hold TODAY. Keeping new
+# pip dependencies down here means a routine addition cannot resurrect that
+# class of failure.
 # The YOLO backend of the pad detector (hydrone_vision/yolo_pad_detector.py,
 # reached with detector_backend:="yolo"). torch is already installed above;
 # ultralytics needs torchvision on top of it, because the segmentation head
@@ -167,7 +190,8 @@ ENV PATH="$MICROXRCEDDSGEN_DIR/scripts:$PATH"
 #    generator's JVM, which dies with exit 255.
 RUN . /opt/ros/humble/setup.sh && \
     colcon build --symlink-install --executor sequential \
-      --packages-up-to ardupilot_sitl ardupilot_msgs micro_ros_agent
+      --packages-up-to ardupilot_sitl ardupilot_msgs micro_ros_agent \
+                       mavros mavros_extras
 
 # 4. The biguasim Python package (simulator client) is installed at container
 #    start from the mounted bs-drone-competition repo — see docker/entrypoint.sh.

@@ -22,6 +22,18 @@ repositories:
     type: git
     url: https://github.com/micro-ROS/micro_ros_msgs.git
     version: 2ea89dcb89a524b09fbde7d11f8bd9cddb0598d8
+  # MAVROS. Built from source because the humble BINARIES ARE GONE: as of the
+  # 2026-09-07 sync, packages.ros.org carries only ros-humble-mavlink and
+  # ros-humble-mavros-msgs for humble — ros-humble-mavros, -mavros-extras and
+  # -libmavconn were all dropped (the iron builds of the same packages are
+  # still there, so this is a humble-specific removal, not an upstream
+  # retirement). Pinned to 2.15.1, the exact version the mavros_msgs binary
+  # still advertises, so nothing here moves relative to what used to be
+  # installed.
+  src/mavros:
+    type: git
+    url: https://github.com/mavlink/mavros.git
+    version: 0755770a058e2aed558b3d4fc10e45ba68d2b117
   # NOTE: ArduPilot's fork, not eProsima upstream — the pinned commit only
   # exists there (it carries ArduPilot patches, e.g. the OMG-IDL-Parser
   # submodule and C++ const generation).
