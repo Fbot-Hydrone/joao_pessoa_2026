@@ -224,6 +224,21 @@ class PadDetectorNode(Node):
         self.declare_parameter("ring_cov_min", 0.55)
         self.declare_parameter("min_confidence", 0.50)
 
+        # ── YOLO backend ────────────────────────────────────────────────────
+        # "cv" = a cascata HSV/contorno de sempre (PadDetector, acima). "yolo"
+        # = hydrone_vision.yolo_pad_detector.YoloPadDetector, treinado em
+        # 1_train_yolo.py sobre fotos reais da base capturadas pela própria
+        # câmera. As duas classes têm a MESMA interface pública
+        # (.detect(bgr) -> list[PadDetection2D]), então nada mais neste
+        # arquivo muda — projeção, TF, QoS e publicação em PadDetection são
+        # idênticos para os dois backends.
+        self.declare_parameter("detector_backend", "cv")
+        self.declare_parameter("yolo_weights_path", "")
+        self.declare_parameter("yolo_conf_threshold", 0.5)
+        self.declare_parameter("yolo_target_classes", ["base_pouso"])
+        self.declare_parameter("yolo_device", "cpu")
+        self.declare_parameter("yolo_imgsz", 640)
+
         p = lambda name: self.get_parameter(name).value
         self.range_as_depth = bool(p("range_as_depth"))
         self.max_range_age = float(p("max_range_age"))
@@ -248,24 +263,50 @@ class PadDetectorNode(Node):
         if len(ignore) < 4:
             ignore = []
 
-        self.detector = PadDetector(
-            blue_hsv_low=tuple(int(v) for v in p("blue_hsv_low")),
-            blue_hsv_high=tuple(int(v) for v in p("blue_hsv_high")),
-            field_mode=str(p("field_mode")),
-            mark_delta=float(p("mark_delta")),
-            mark_window_frac=float(p("mark_window_frac")),
-            mark_contrast_mult=float(p("mark_contrast_mult")),
-            min_axis_px=float(p("min_axis_px")),
-            min_seen=float(p("min_seen")),
-            ignore_regions=ignore,
-            yellow_hsv_low=tuple(int(v) for v in p("yellow_hsv_low")),
-            yellow_hsv_high=tuple(int(v) for v in p("yellow_hsv_high")),
-            min_area_px=float(p("min_area_px")),
-            close_px=int(p("close_px")),
-            yellow_frac_min=float(p("yellow_frac_min")),
-            ring_cov_min=float(p("ring_cov_min")),
-            min_confidence=float(p("min_confidence")),
-        )
+        backend = str(p("detector_backend"))
+        if backend == "yolo":
+            # Import tardio: ultralytics carrega torch, e um nó rodando com
+            # detector_backend:="cv" (o padrão) não deve pagar esse custo nem
+            # precisar do pacote instalado.
+            from hydrone_vision.yolo_pad_detector import YoloPadDetector
+
+            weights = str(p("yolo_weights_path"))
+            if not weights:
+                raise ValueError(
+                    "detector_backend:=\"yolo\" mas yolo_weights_path está "
+                    "vazio — aponte para o best.pt gerado por 1_train_yolo.py "
+                    "(ex.: /home/<usuario>/hydrone_ws/models/"
+                    "pad_seg_yolo11.pt).")
+            self.detector = YoloPadDetector(
+                weights_path=weights,
+                conf_threshold=float(p("yolo_conf_threshold")),
+                target_classes=tuple(p("yolo_target_classes")),
+                device=str(p("yolo_device")),
+                imgsz=int(p("yolo_imgsz")),
+                ignore_regions=ignore,
+            )
+        elif backend == "cv":
+            self.detector = PadDetector(
+                blue_hsv_low=tuple(int(v) for v in p("blue_hsv_low")),
+                blue_hsv_high=tuple(int(v) for v in p("blue_hsv_high")),
+                field_mode=str(p("field_mode")),
+                mark_delta=float(p("mark_delta")),
+                mark_window_frac=float(p("mark_window_frac")),
+                mark_contrast_mult=float(p("mark_contrast_mult")),
+                min_axis_px=float(p("min_axis_px")),
+                min_seen=float(p("min_seen")),
+                ignore_regions=ignore,
+                yellow_hsv_low=tuple(int(v) for v in p("yellow_hsv_low")),
+                yellow_hsv_high=tuple(int(v) for v in p("yellow_hsv_high")),
+                min_area_px=float(p("min_area_px")),
+                close_px=int(p("close_px")),
+                yellow_frac_min=float(p("yellow_frac_min")),
+                ring_cov_min=float(p("ring_cov_min")),
+                min_confidence=float(p("min_confidence")),
+            )
+        else:
+            raise ValueError(
+                f"detector_backend deve ser 'cv' ou 'yolo', recebi {backend!r}")
 
         # ── State ───────────────────────────────────────────────────────────
         self.K: np.ndarray | None = None
@@ -337,8 +378,8 @@ class PadDetectorNode(Node):
                else "ground-plane projection" if self.project_position
                else "DETECTION ONLY — publishes no position")
         self.get_logger().info(
-            f"pad_detector[{self.camera}] up — image={p('image_topic')} "
-            f"{how} -> {p('out_topic')}")
+            f"pad_detector[{self.camera}] up — backend={backend} "
+            f"image={p('image_topic')} {how} -> {p('out_topic')}")
 
     # ────────────────────────────────────────────────────────────────────────
     # Inputs

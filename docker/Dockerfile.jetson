@@ -130,6 +130,22 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
         libgtk-3-0 x11-apps \
     && rm -rf /var/lib/apt/lists/*
 
+# For YOLO 8.3.40, torch 2.7.1 is the last CPU-only build that works on aarch64. The
+# wheel is built against numpy 1.24, so the pip install of torch must come before the pip install of numpy<2 above, or else pip will upgrade numpy to 2.
+'''RUN python3 -m pip install --no-cache-dir \
+        torch==2.7.1 --index-url https://download.pytorch.org/whl/cpu \
+    && python3 -m pip install --no-cache-dir \
+        pyyaml tqdm psutil py-cpuinfo pillow "requests>=2.23.0" \
+        "matplotlib>=3.3.0" \
+    && python3 -m pip install --no-cache-dir --no-deps ultralytics==8.3.40 \
+    && python3 -c "\
+import numpy, sys; \
+v = numpy.__version__; \
+print('numpy', v); \
+sys.exit(0 if int(v.split('.')[0]) < 2 else 1)" \
+    && python3 -c "from ultralytics import YOLO; print('ultralytics OK')"
+'''
+
 # ── The workspace ───────────────────────────────────────────────────────────
 # --symlink-install so the dev bind mount can put the host's working tree at the
 # end of the install/ -> build/ -> src/ chain, exactly as the x86 image does.
