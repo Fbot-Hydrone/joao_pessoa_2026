@@ -569,6 +569,23 @@ def test_the_budget_is_centimetres_on_the_ground_not_pixels(node):
     assert near < node.land_centre_max_cm < far
 
 
+def test_a_budget_of_zero_turns_the_gate_off_rather_than_vetoing_everything(node):
+    """`land_centre_max_cm:=0` must mean OFF, not "zero tolerance".
+
+    It is what makes with-and-without a measurable pair for
+    scripts/param_sweep.sh. Read the other way, a sweep asking for the
+    no-gate control would instead fly a run that can never land, and score it
+    as if the gate had simply been very strict.
+    """
+    node.land_centre_max_cm = 0.0
+    node.target_id = 4
+    enter(node, node.CONFIRM)
+    for _ in range(node.confirm_detections):
+        see_pad(node, confidence=0.9, uv=(448.0, 438.0), radius_px=100.0)
+        node._do_confirm()
+    assert node.state == node.LAND
+
+
 def test_without_camera_info_the_gate_does_not_veto(node):
     """The gate is a safety veto, not a dependency. No CameraInfo, no judgement.
 

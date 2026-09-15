@@ -23,7 +23,7 @@ cd "$(dirname "$0")/.."
 export BS_SIM_DIR
 SEEDS="${SEEDS:-1 2 3 4 5 6 7 8}"
 RUN_TIMEOUT="${RUN_TIMEOUT:-1500}"
-CONFIGS="base,fast,fast_acc,fast_settle,early_land"
+CONFIGS="veto_off,veto60,veto45,fast_acc,fast_settle,early_land"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -34,19 +34,33 @@ done
 
 # Each config is: the SITL parameter overlay, then the launch arguments.
 # Keeping them in one place means the summary can name exactly what flew.
+# Each config is: the SITL parameter overlay, then the launch arguments.
+# Keeping them in one place means the summary can name exactly what flew.
+#
+# TWO LADDERS, on purpose, because round 1 found two different things.
+#
+#   veto_off / veto60 / veto45 / (base, already flown) vary ONLY the landing
+#   centring budget, on BASE parameters, so they are directly comparable to the
+#   `base` row already in hand. Round 1 measured the 30 cm budget raising the
+#   valid-landing RATE from 76% to 85% while dropping the absolute count from
+#   22 to 17 and completed missions from 5/6 to 3/6 — a trade that loses. This
+#   ladder finds where it stops losing.
+#
+#   fast_acc / fast_settle / early_land are round 1's three lost configs: the
+#   fast_acc overlay was written after the image was built, so every one of
+#   those 18 runs hit the overlay's own "file does not exist" guard and flew
+#   nothing. The guard did its job; the rebuild was missed.
 config_overlay() {
     case "$1" in
-        base)         echo "" ;;
-        fast)         echo "fast" ;;
-        fast_acc)     echo "fast_acc" ;;
-        fast_settle)  echo "fast_acc" ;;
-        early_land)   echo "fast_acc" ;;
+        veto_off|veto60|veto45)  echo "" ;;
+        fast_acc|fast_settle|early_land) echo "fast_acc" ;;
     esac
 }
 config_args() {
     case "$1" in
-        base)         echo "" ;;
-        fast)         echo "" ;;
+        veto_off)     echo "land_centre_max_cm:=0" ;;
+        veto60)       echo "land_centre_max_cm:=60" ;;
+        veto45)       echo "land_centre_max_cm:=45" ;;
         fast_acc)     echo "" ;;
         fast_settle)  echo "settle_still_speed:=0.15 dwell_s:=2.0" ;;
         early_land)   echo "settle_still_speed:=0.15 dwell_s:=2.0 land_during_survey_min_level:=1" ;;

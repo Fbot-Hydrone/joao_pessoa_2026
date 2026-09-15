@@ -2146,7 +2146,12 @@ class Phase1MissionNode(Node):
                 # So the count is necessary and not sufficient: the pad must
                 # also BE somewhere sane. One look decides it — the vehicle
                 # centres and lands, it does not hunt the last few pixels.
-                off = self._centre_offset_cm(det)
+                # <= 0 turns the veto OFF, which is what makes "with and
+                # without" a measurable pair instead of an edit. Without the
+                # sentinel a budget of 0 would veto EVERY landing, which is the
+                # opposite of what asking for zero tolerance sounds like.
+                off = (self._centre_offset_cm(det)
+                       if self.land_centre_max_cm > 0.0 else None)
                 if off is not None and off > self.land_centre_max_cm:
                     # Not landing THIS tick. The servo keeps nudging on the
                     # following ones, and `confirm_timeout` is already the
