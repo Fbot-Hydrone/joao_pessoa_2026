@@ -325,6 +325,40 @@ def generate_launch_description():
                         "da ordem de 80 cm, tocou a 0,40 m numa base cuja "
                         "borda esta a 0,50, escorregou e encerrou a tentativa."),
         DeclareLaunchArgument(
+            "settle_still_speed", default_value="0.0",
+            description="Velocidade (m/s) abaixo da qual o veiculo ja conta "
+                        "como parado, encerrando a pausa de SETTLE antes do "
+                        "teto de settle_s. 0 mantem o relogio puro, que e o "
+                        "comportamento com que todas as corridas anteriores "
+                        "foram afinadas. MEDIDO 2026-09-14: SETTLE custou 46 s "
+                        "de uma missao de 526 s em 9 visitas, todas pagando os "
+                        "5 s inteiros, sendo que o que ele espera — a "
+                        "estimativa parar de se mexer — e observavel na "
+                        "velocidade do proprio EKF. FALHA FECHADO: sem "
+                        "mensagem de velocidade, paga a espera inteira."),
+        DeclareLaunchArgument(
+            "settle_still_yaw_rate_deg", default_value="8.0",
+            description="Idem para a taxa de guinada. Um giro ainda em "
+                        "andamento e exatamente o caso que a pausa existe "
+                        "para cobrir, entao nao basta a translacao ter parado."),
+        DeclareLaunchArgument(
+            "land_during_survey_min_level", default_value="2",
+            description="A partir de que NIVEL de busca uma base ja confirmada "
+                        "pode interromper o nivel para ser pousada. 2 mantem a "
+                        "barreira onde ela esta: o nivel 1, o perimetro "
+                        "fechado, e voado INTEIRO, e e ele que impede a missao "
+                        "de virar escrava do primeiro avistamento — e que "
+                        "enche o octomap em que a barriga projeta. 1 e a outra "
+                        "estrategia: pousar no primeiro confirmado e voltar "
+                        "depois para o que sobrou. Troca mapa por tempo, e as "
+                        "duas metades da troca sao medidas — com a varredura "
+                        "inteira o mapa ja erra 0,31-0,47 m numa base de 1 m. "
+                        "scripts/param_sweep.sh voa as duas nas mesmas seeds."),
+        DeclareLaunchArgument(
+            "dwell_s", default_value="4.0",
+            description="Quanto tempo sentado na base antes de rearmar e "
+                        "decolar. MEDIDO: 16 s de uma missao de 526 s."),
+        DeclareLaunchArgument(
             "confirm_timeout_s", default_value="25.0",
             description="How long to hover over a candidate before declaring "
                         "it is not a landing site, blacklisting it and "
@@ -947,6 +981,16 @@ def generate_launch_description():
                 LaunchConfiguration("confirm_timeout_s"), value_type=float),
             "land_centre_max_cm": ParameterValue(
                 LaunchConfiguration("land_centre_max_cm"), value_type=float),
+            "settle_still_speed": ParameterValue(
+                LaunchConfiguration("settle_still_speed"), value_type=float),
+            "settle_still_yaw_rate_deg": ParameterValue(
+                LaunchConfiguration("settle_still_yaw_rate_deg"),
+                value_type=float),
+            "dwell_s": ParameterValue(
+                LaunchConfiguration("dwell_s"), value_type=float),
+            "land_during_survey_min_level": ParameterValue(
+                LaunchConfiguration("land_during_survey_min_level"),
+                value_type=int),
             "auto_start": ParameterValue(
                 LaunchConfiguration("auto_start"), value_type=bool),
             "dry_run": ParameterValue(

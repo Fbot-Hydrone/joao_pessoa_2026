@@ -1,0 +1,20 @@
+# OVERLAY "fast_acc" — the speed variant PLUS the acceleration it needs to
+# actually reach that speed. Applied after holybro_sitl.parm.
+#
+# WHY THIS EXISTS, and it was measured rather than guessed. Flying `fast.parm`
+# (WP_SPD 1.0, WP_ACC left at 0.6) over seed 1 on 2026-09-15 moved the p90
+# ground speed from 0.19 to 0.32 m/s but the PEAK went DOWN, 0.43 to 0.36. The
+# ceiling was never reached: at 0.6 m/s/s, getting to 1.0 m/s takes 1.67 s and
+# 0.83 m, and stopping takes the same again, so no leg shorter than ~1.7 m ever
+# cruises at all. Raising the speed limit alone is half a change.
+#
+# THE RISK THIS TAKES, stated plainly, because it is the one the base file
+# warns about: acceleration is what the airframe FEELS when a new setpoint
+# appears, and BiguaSim's 0.3-0.5 s actuation lag turns a sharp demand into an
+# oscillation (~/work/biguasim-problems.md, 2026-08-18). 1.0 is a modest step
+# from 0.6 and still well under the 2.5 default — but if this config oscillates,
+# the seed sweep sees it as fewer valid landings and more VO drift, which is
+# exactly why it is a separate row in the table instead of folded into `fast`.
+WP_SPD          1.0
+WP_ACC          1.0
+ATC_RATE_WPY_MAX 25
