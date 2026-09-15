@@ -40,6 +40,7 @@ import rclpy
 from geometry_msgs.msg import PoseStamped
 
 from hydrone_msgs.msg import Pad, PadDetection, PadMap
+from sensor_msgs.msg import CameraInfo
 from hydrone_nav import servo as servo_module
 from hydrone_mission.phase1_mission_node import (
     Phase1MissionNode, wrap_pi, yaw_of)
@@ -64,6 +65,12 @@ def node():
         rclpy.parameter.Parameter("confirm_confidence", value=0.60),
     ])
     n.home = (0.0, 0.0)
+    # The belly CameraInfo, because the landing gate converts pixels to
+    # centimetres with it. fx 320 is the simulator's belly lens; at the 1.0 m
+    # hover below that makes one pixel 3.1 mm on the ground.
+    info = CameraInfo()
+    info.k = [320.0, 0.0, 320.0, 0.0, 320.0, 240.0, 0.0, 0.0, 1.0]
+    n._sweep_cam_info = info
     set_pose(n, 0.0, 0.0, 1.0)
     n.setpoint = [0.0, 0.0, 1.0, 0.0]
     yield n
@@ -84,9 +91,12 @@ def set_pose(node, x, y=0.0, z=1.0, yaw=0.0):
 
 
 def pad(pad_id, x, y, observations=5, visited=False, takeoff_base=False,
-        confidence=0.9):
+        confidence=0.9, height=None):
     p = Pad()
     p.id = int(pad_id)
+    if height is not None:
+        p.height = float(height)
+        p.height_measured = True
     p.position.x = float(x)
     p.position.y = float(y)
     p.observations = int(observations)
@@ -529,23 +539,50 @@ def test_a_centred_pad_lands_on_the_first_look_that_completes_the_quota(node):
     assert node.state == node.LAND
 
 
-def test_the_tolerance_scales_with_the_pad_and_not_with_pixels(node):
-    """Same pixel offset, two pad sizes, opposite verdicts.
+def test_the_budget_is_centimetres_on_the_ground_not_pixels(node):
+    """The same pixel offset is a different distance from two heights.
 
-    The hover sits `takeoff_alt` above the pad TOP, and tops in one arena range
-    from 0.12 m to 1.6 m, so the same miss in metres is a different pixel count
-    from one pad to the next. A fixed pixel budget would be too tight on a tall
-    pad (close camera, pad large in frame) and too loose on a low one.
+    This is the whole reason the budget is in centimetres. The hover sits
+    `takeoff_alt` above the pad TOP, and tops in one arena range from 0.12 m to
+    1.6 m, so a fixed pixel budget would be tight on a tall pad — camera close,
+    everything large in frame — and slack on a low one. It also travels: the
+    simulator's belly lens measures fx 320 and the real one 814.6.
     """
     u0, v0 = node._servo.target_uv
-    off = (u0 + 60.0, v0)
-    big = PadDetection(); big.radius_px = 200.0; big.u, big.v = off
-    small = PadDetection(); small.radius_px = 50.0; small.u, small.v = off
-    assert node._centre_offset_px(big) == pytest.approx(60.0)
-    assert node._centre_offset_px(small) == pytest.approx(60.0)
-    # 60 px is a third of the big pad's radius, but more than the small one's.
-    assert node._centre_offset_px(big) < node._centre_tolerance_px(big)
-    assert node._centre_offset_px(small) > node._centre_tolerance_px(small)
+    det = PadDetection()
+    det.u, det.v, det.radius_px = u0 + 64.0, v0, 100.0
+    # A pad whose top the map has measured, so the height below is the height
+    # over THAT TOP and not over the arena floor.
+    node.target_id = 4
+    set_map(node, pad(4, 1.0, 0.0, height=0.0))
+
+    set_pose(node, 0.0, 0.0, 1.0)          # 1.0 m over the pad top
+    near = node._centre_offset_cm(det)
+    set_pose(node, 0.0, 0.0, 3.0)          # 3.0 m over the pad top
+    far = node._centre_offset_cm(det)
+
+    # 64 px at fx 320 is a fifth of the height, whatever the height is.
+    assert near == pytest.approx(20.0, abs=0.5)     # 0.20 m
+    assert far == pytest.approx(60.0, abs=0.5)      # 0.60 m
+    # So the same picture is inside the budget from low down and outside it
+    # from high up — which is the point.
+    assert near < node.land_centre_max_cm < far
+
+
+def test_without_camera_info_the_gate_does_not_veto(node):
+    """The gate is a safety veto, not a dependency. No CameraInfo, no judgement.
+
+    It must not become a way to block every landing if the topic is late or
+    missing — the mission already refuses the map sweep outright in that case,
+    which is where that failure belongs.
+    """
+    node._sweep_cam_info = None
+    node.target_id = 4
+    enter(node, node.CONFIRM)
+    for _ in range(node.confirm_detections):
+        see_pad(node, confidence=0.9, uv=(448.0, 438.0), radius_px=100.0)
+        node._do_confirm()
+    assert node.state == node.LAND
 
 
 def test_a_pad_that_never_centres_is_eventually_blacklisted(node):

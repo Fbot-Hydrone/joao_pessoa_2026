@@ -303,21 +303,27 @@ def generate_launch_description():
             description="Confidence that counts as a look. Raise it if the "
                         "drone lands on things that are merely blue."),
         DeclareLaunchArgument(
-            "land_centre_max_frac", default_value="0.7",
-            description="Quao descentrada a base ainda pode estar, em FRACOES "
-                        "DO RAIO DELA na imagem, na hora de comprometer o "
-                        "pouso. Fracao do raio e nao pixels porque a pairagem "
-                        "fica takeoff_alt acima do TOPO da base, e os topos de "
-                        "uma arena vao de 0,12 a 1,6 m — o mesmo desvio em "
-                        "metros da contagens de pixel muito diferentes. "
-                        "Deliberadamente FROUXO: nao e alvo de alinhamento, e "
-                        "veto contra pousar em lugar absurdo; o veiculo "
-                        "centraliza uma vez e pousa, nao persegue os ultimos "
-                        "pixels. MEDIDO 2026-09-14: os quatro pousos bons "
-                        "terminaram a 8-21 px e tocaram a 0,14-0,33 m do "
-                        "centro; o quinto foi aceito a 236 px, tocou a 0,40 m "
-                        "numa base cuja borda esta a 0,50, escorregou e "
-                        "encerrou a tentativa em 5 de 6."),
+            "land_centre_max_cm", default_value="30.0",
+            description="Quantos CENTIMETROS no chao a base ainda pode estar "
+                        "fora do centro quando a pairagem decide pousar. A "
+                        "base tem 1 m, entao a borda dela esta a 50 cm do "
+                        "centro: 30 cm quer dizer 'fique nos dois tercos do "
+                        "meio'. Em centimetros e nao em pixels porque o mesmo "
+                        "numero de pixels vale distancias diferentes de base "
+                        "para base — a pairagem fica takeoff_alt acima do TOPO "
+                        "e os topos vao de 0,12 a 1,6 m — e de drone para "
+                        "drone, ja que a lente da barriga mede fx 320 no "
+                        "simulador e 814,6 na real. A conversao usa o "
+                        "CameraInfo e a altura sobre ESTA base, entao os dois "
+                        "somem. Deliberadamente FROUXO: nao e alvo de "
+                        "alinhamento, e veto contra pousar em lugar absurdo; o "
+                        "veiculo centraliza uma vez e pousa, nao persegue os "
+                        "ultimos centimetros. MEDIDO 2026-09-14, a corrida que "
+                        "abortou em 5 de 6: os quatro pousos bons estavam a "
+                        "8-21 px na pairagem, algo como 7-16 cm, e tocaram a "
+                        "0,14-0,33 m do centro; o quinto foi aceito a 236 px, "
+                        "da ordem de 80 cm, tocou a 0,40 m numa base cuja "
+                        "borda esta a 0,50, escorregou e encerrou a tentativa."),
         DeclareLaunchArgument(
             "confirm_timeout_s", default_value="25.0",
             description="How long to hover over a candidate before declaring "
@@ -939,8 +945,8 @@ def generate_launch_description():
                 LaunchConfiguration("confirm_confidence"), value_type=float),
             "confirm_timeout_s": ParameterValue(
                 LaunchConfiguration("confirm_timeout_s"), value_type=float),
-            "land_centre_max_frac": ParameterValue(
-                LaunchConfiguration("land_centre_max_frac"), value_type=float),
+            "land_centre_max_cm": ParameterValue(
+                LaunchConfiguration("land_centre_max_cm"), value_type=float),
             "auto_start": ParameterValue(
                 LaunchConfiguration("auto_start"), value_type=bool),
             "dry_run": ParameterValue(
