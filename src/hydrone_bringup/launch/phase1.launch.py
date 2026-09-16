@@ -303,6 +303,26 @@ def generate_launch_description():
             description="Confidence that counts as a look. Raise it if the "
                         "drone lands on things that are merely blue."),
         DeclareLaunchArgument(
+            "mission_budget_s", default_value="0.0",
+            description="O RELOGIO DA PROVA, em segundos de tempo de missao, "
+                        "contados do primeiro tick armado. 0 desliga. A prova "
+                        "da CBR da 10 minutos = 600 s. MEDIDO nas seeds 1-6 "
+                        "com o veto desligado: tres pousos aos 385 s, quatro "
+                        "aos 430, cinco aos 486 — tudo dentro de 600. A "
+                        "corrida mediana so terminava aos 603 s porque depois "
+                        "da ultima base ela segue escalando niveis de busca "
+                        "atras de mais uma, e so entao volta. O problema nunca "
+                        "foi voar devagar, foi nao saber parar."),
+        DeclareLaunchArgument(
+            "return_reserve_s", default_value="90.0",
+            description="Quanto tempo guardar para a volta. E o que torna o "
+                        "orcamento um PRAZO e nao um desejo: a decisao de "
+                        "voltar tem que ser tomada cedo o bastante para o voo "
+                        "de volta ainda caber. Estourar o limite no meio da "
+                        "arena e pousar fora da base e eliminatorio, entao a "
+                        "reserva e dimensionada para o pior trajeto, nao para "
+                        "o medio."),
+        DeclareLaunchArgument(
             "land_centre_max_cm", default_value="30.0",
             description="Quantos CENTIMETROS no chao a base ainda pode estar "
                         "fora do centro quando a pairagem decide pousar. A "
@@ -981,6 +1001,10 @@ def generate_launch_description():
                 LaunchConfiguration("confirm_timeout_s"), value_type=float),
             "land_centre_max_cm": ParameterValue(
                 LaunchConfiguration("land_centre_max_cm"), value_type=float),
+            "mission_budget_s": ParameterValue(
+                LaunchConfiguration("mission_budget_s"), value_type=float),
+            "return_reserve_s": ParameterValue(
+                LaunchConfiguration("return_reserve_s"), value_type=float),
             "settle_still_speed": ParameterValue(
                 LaunchConfiguration("settle_still_speed"), value_type=float),
             "settle_still_yaw_rate_deg": ParameterValue(

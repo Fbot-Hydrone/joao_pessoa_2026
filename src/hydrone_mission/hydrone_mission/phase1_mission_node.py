@@ -233,6 +233,26 @@ class Phase1MissionNode(Node):
         # end. Kept in step with phase1.launch.py's default so `ros2 run` and
         # `ros2 launch` do not quietly disagree.
         self.declare_parameter("target_bases", 1)
+        # THE COMPETITION CLOCK, in seconds of mission time, counted from the
+        # first tick after auto-start. 0 disables it and the mission runs until
+        # it runs out of things to try, which is the behaviour every run before
+        # 2026-09-15 had.
+        #
+        # It exists because the run does not fail by being slow at landing, it
+        # fails by not KNOWING when to stop. MEASURED over seeds 1-6 with the
+        # landing veto off: three landings by 385 s, four by 430, five by 486 —
+        # all comfortably inside a 600 s round. The median run then finished at
+        # 603 s, because after the last base it keeps escalating search levels
+        # looking for one more and only then flies home. The flying is not the
+        # problem; the not-stopping is.
+        #
+        # `return_reserve_s` is what makes this a DEADLINE rather than a wish:
+        # the decision to go home has to be taken early enough that the flight
+        # home still fits. Crossing the line mid-arena and landing off-base is
+        # eliminatory, so the reserve is sized for the worst transit, not the
+        # average one.
+        self.declare_parameter("mission_budget_s", 0.0)
+        self.declare_parameter("return_reserve_s", 90.0)
 
         # ── The search ──────────────────────────────────────────────────────
         # 8 x 45 deg = one full turn. Past that the drone is looking at scenery
@@ -606,6 +626,10 @@ class Phase1MissionNode(Node):
         p = lambda n: self.get_parameter(n).value
         self.takeoff_alt = float(p("takeoff_alt"))
         self.target_bases = int(p("target_bases"))
+        self.mission_budget_s = float(p("mission_budget_s"))
+        self.return_reserve_s = float(p("return_reserve_s"))
+        self._mission_t0 = None
+        self._budget_called = False
         self.settle_s = float(p("settle_s"))
         self.yaw_tol = math.radians(float(p("yaw_tol_deg")))
         self.rotate_timeout = float(p("rotate_timeout_s"))
@@ -1165,6 +1189,7 @@ class Phase1MissionNode(Node):
     def _tick(self):
         if self.state in (self.DONE, self.ABORTED):
             return
+        self._check_budget()
         handler = {
             self.WAIT_FCU: self._do_wait_fcu,
             self.ARMING: self._do_arming,
@@ -1675,6 +1700,51 @@ class Phase1MissionNode(Node):
             f"nothing left to find — returning to the takeoff base at "
             f"({hx:.2f}, {hy:.2f}) to end the run. NOT landing here: off-base "
             f"landings are eliminatory.")
+        self.target_id = None
+        self.landing_for = self.LAND_FINAL
+        self._viewpoint_leg = False
+        self._goto_via_map(hx, hy, self.takeoff_alt, self.setpoint[3])
+        self._enter(self.TRAVEL)
+
+    def _check_budget(self):
+        """Give up searching in time to still fly home, if a budget was set.
+
+        The clock starts on the first armed tick, not on node start-up, because
+        what a competition round measures is the flight — the wait for the FCU
+        and the EKF origin is setup and happens before anybody starts counting.
+
+        Fires ONCE. After it has spoken the mission is already heading home,
+        and re-deciding every 100 ms would re-issue the setpoint forever.
+
+        It does NOT interrupt a landing. A vehicle on final approach is seconds
+        from being down and those seconds are cheaper than the alternative: an
+        abandoned descent leaves it somewhere over a pad it has not committed
+        to, and the whole point of the reserve is to never be caught out there.
+        """
+        if self.mission_budget_s <= 0.0 or self._budget_called:
+            return
+        if self._mission_t0 is None:
+            if self.state in (self.WAIT_FCU, self.ARMING, self.REGISTER):
+                return
+            self._mission_t0 = self._now()
+            return
+        if self.landing_for == self.LAND_FINAL:
+            return
+        if self.state in (self.LAND, self.DWELL):
+            return
+
+        elapsed = self._now() - self._mission_t0
+        if elapsed < self.mission_budget_s - self.return_reserve_s:
+            return
+
+        self._budget_called = True
+        hx, hy = self._takeoff_base_xy()
+        self.get_logger().warn(
+            f"BUDGET: {elapsed:.0f} s of {self.mission_budget_s:.0f} used and "
+            f"{self.return_reserve_s:.0f} s reserved to get home — stopping the "
+            f"search with {self.landed_count} base(s) landed and flying to "
+            f"({hx:.2f}, {hy:.2f}). Whatever is still out there is worth less "
+            "than finishing inside the round.")
         self.target_id = None
         self.landing_for = self.LAND_FINAL
         self._viewpoint_leg = False
