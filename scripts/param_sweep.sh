@@ -23,7 +23,7 @@ cd "$(dirname "$0")/.."
 export BS_SIM_DIR
 SEEDS="${SEEDS:-1 2 3 4 5 6 7 8}"
 RUN_TIMEOUT="${RUN_TIMEOUT:-1500}"
-CONFIGS="veto_off,veto60,veto45,fast_acc,fast_settle,early_land"
+CONFIGS="defaults"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -52,12 +52,17 @@ done
 #   nothing. The guard did its job; the rebuild was missed.
 config_overlay() {
     case "$1" in
+        defaults)     echo "" ;;
         veto_off|veto60|veto45)  echo "" ;;
         fast_acc|fast_settle|early_land) echo "fast_acc" ;;
     esac
 }
 config_args() {
     case "$1" in
+        # Nothing passed: this is the shipped configuration, and the point
+        # is to score exactly what someone gets by typing docker_up.sh
+        # --phase1 with no flags at all.
+        defaults)     echo "" ;;
         veto_off)     echo "land_centre_max_cm:=0" ;;
         veto60)       echo "land_centre_max_cm:=60" ;;
         veto45)       echo "land_centre_max_cm:=45" ;;

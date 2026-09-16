@@ -2135,6 +2135,30 @@ class Phase1MissionNode(Node):
             return
 
         if self.landing_for == self.LAND_FINAL:
+            # Holding here is the right answer when a human is watching and the
+            # clock is theirs: parking beats landing somewhere nobody chose.
+            #
+            # Under a mission budget it is the WORST answer. The round ends
+            # either way, and hovering until the battery decides gains nothing:
+            # the x2 for the takeoff base is already lost the moment the leg
+            # cannot close, and by the rules landing off-base merely ENDS the
+            # attempt — the bases already visited still count. So when a budget
+            # is set, come down.
+            #
+            # FOUND BY THE VALIDATION RUN of the shipped defaults, seed 1,
+            # 2026-09-15: the budget fired correctly at 548 s, the return leg
+            # stalled 4.07 m out, and the mission held that hover for twenty
+            # minutes until the sweep's own timeout killed it. Nothing scored
+            # after that point and the attempt could never end itself.
+            if self.mission_budget_s > 0.0:
+                self.get_logger().error(
+                    f"the return leg is stuck {d:.2f} m out and the budget is "
+                    "spent — landing HERE rather than hovering. The takeoff "
+                    "base is out of reach, so its bonus is gone either way, "
+                    f"and the {self.landed_count} base(s) already visited "
+                    "still count.")
+                self._begin_landing()
+                return
             self.get_logger().error(
                 f"the return leg has not closed in {self.travel_stall_s:.0f} s "
                 f"and is stuck {d:.2f} m out — the estimate has drifted. "
