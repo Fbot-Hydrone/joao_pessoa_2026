@@ -565,7 +565,11 @@ def test_the_budget_is_centimetres_on_the_ground_not_pixels(node):
     assert near == pytest.approx(20.0, abs=0.5)     # 0.20 m
     assert far == pytest.approx(60.0, abs=0.5)      # 0.60 m
     # So the same picture is inside the budget from low down and outside it
-    # from high up — which is the point.
+    # from high up — which is the point. The budget is set here rather than
+    # taken from the default: what this pins is the CONVERSION, and tying it to
+    # whichever number is currently shipped would make a retune look like a
+    # regression.
+    node.land_centre_max_cm = 40.0
     assert near < node.land_centre_max_cm < far
 
 

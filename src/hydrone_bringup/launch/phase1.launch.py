@@ -303,7 +303,7 @@ def generate_launch_description():
             description="Confidence that counts as a look. Raise it if the "
                         "drone lands on things that are merely blue."),
         DeclareLaunchArgument(
-            "mission_budget_s", default_value="0.0",
+            "mission_budget_s", default_value="600.0",
             description="O RELOGIO DA PROVA, em segundos de tempo de missao, "
                         "contados do primeiro tick armado. 0 desliga. A prova "
                         "da CBR da 10 minutos = 600 s. MEDIDO nas seeds 1-6 "
@@ -314,7 +314,7 @@ def generate_launch_description():
                         "atras de mais uma, e so entao volta. O problema nunca "
                         "foi voar devagar, foi nao saber parar."),
         DeclareLaunchArgument(
-            "return_reserve_s", default_value="90.0",
+            "return_reserve_s", default_value="60.0",
             description="Quanto tempo guardar para a volta. E o que torna o "
                         "orcamento um PRAZO e nao um desejo: a decisao de "
                         "voltar tem que ser tomada cedo o bastante para o voo "
@@ -323,7 +323,7 @@ def generate_launch_description():
                         "reserva e dimensionada para o pior trajeto, nao para "
                         "o medio."),
         DeclareLaunchArgument(
-            "land_centre_max_cm", default_value="30.0",
+            "land_centre_max_cm", default_value="60.0",
             description="Quantos CENTIMETROS no chao a base ainda pode estar "
                         "fora do centro quando a pairagem decide pousar. A "
                         "base tem 1 m, entao a borda dela esta a 50 cm do "

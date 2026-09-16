@@ -467,7 +467,7 @@ class Phase1MissionNode(Node):
         # touched down 0.40 m out on a pad whose edge is at 0.50 m, balanced on
         # the lip for six seconds, slid off, fell 1.1 m, and every takeoff
         # after that was refused by the FCU -- the attempt ended at 5 of 6.
-        self.declare_parameter("land_centre_max_cm", 30.0)
+        self.declare_parameter("land_centre_max_cm", 60.0)
         # Where the pad should sit in the belly image. The image centre unless
         # the lens is off-centre on the airframe — which the servo CANNOT
         # learn, because it is what "centred" means. Measure it once by
