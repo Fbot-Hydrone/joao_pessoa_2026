@@ -192,7 +192,10 @@ def _launch_setup(context, *args, **kwargs):
         output='screen',
         parameters=[
             os.path.join(bringup_pkg, 'config', 'timeouts.yaml'),
-            {'in_odom': '/hydrone/lio/odom'},
+            # ground_truth is a DEBUGGING AID for tuning the airframe apart
+            # from the estimator; a flight on it proves nothing about the LIO
+            {'in_odom': '/hydrone/lio/odom' if LaunchConfiguration('ext_nav').perform(context) == 'lio'
+             else f'{prefix}/DynamicsSensor/Odom'},
         ],
     )
 
@@ -230,6 +233,10 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'phase', default_value='4',
             description='Competition phase passed to ardubridge (3 or 4 fly the Kopis).'),
+        DeclareLaunchArgument(
+            'ext_nav', default_value='lio',
+            description="What the EKF flies on: 'lio', or 'ground_truth' to tune "
+                        'the airframe without the estimator in the loop.'),
         DeclareLaunchArgument(
             'gate', default_value='true',
             description='Hold LIO poses back from the EKF when they disagree with '

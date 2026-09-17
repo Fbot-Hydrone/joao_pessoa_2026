@@ -36,3 +36,22 @@ EK3_SRC1_YAW    6
 COMPASS_USE     0
 COMPASS_USE2    0
 COMPASS_USE3    0
+
+# --- Kopis flight tune (2026-09-17) -----------------------------------------
+# Flight 1 on the inherited Holybro/firmware-default tune swung +-4 m and flung
+# the vehicle 8 m in 1.6 s: ground truth, so the airframe, not the LIO.
+# BiguaSim's Kopis maps PWM linearly to rotor speed and thrust = k*omega^2, so
+# the thrust curve is fully quadratic (expo 1), and hover is 19.6 N of 66.1 N
+# max, ~0.3 of thrust. Names checked against this 4.8-dev source.
+MOT_THST_EXPO   1.0
+MOT_THST_HOVER  0.3
+# Rate loop. With firmware defaults (P/I 0.135, D 0.0036) the Kopis hovered in a
+# 6.8 Hz roll/pitch limit cycle, gyro std 2.3 rad/s: invisible in position
+# (+-8 cm) but 100 rad/s^2 of angular acceleration, which wrecked the LIO.
+# Tuned live in hover 2026-09-17: P/I 0.07, D 0.0015 -> gyro std 0.004 rad/s.
+ATC_RAT_RLL_P   0.07
+ATC_RAT_RLL_I   0.07
+ATC_RAT_RLL_D   0.0015
+ATC_RAT_PIT_P   0.07
+ATC_RAT_PIT_I   0.07
+ATC_RAT_PIT_D   0.0015

@@ -21,6 +21,7 @@ on how fast the sim runs), add range noise and dropouts, and pack.
 
 import array
 import math
+from collections import deque
 
 import numpy as np
 import rclpy
@@ -99,6 +100,7 @@ class LivoxMimicNode(Node):
         self.create_subscription(PointCloud2, p('in_cloud'), self._cb_cloud, 400)
         self.create_subscription(Imu, p('in_imu'), self._cb_imu, 400)
 
+        self._gyro_hist = deque(maxlen=5)   # ~20 ms at 200 Hz
         self._window_start = None
         self._chunks = []       # (stamp_ns, Nx3 in livox_frame)
         self._published = 0
@@ -135,15 +137,22 @@ class LivoxMimicNode(Node):
         if self._settling(self._ns(msg.header.stamp)):
             return
         # The real Mid-360's IMU sits inside the unit, so move the body IMU's
-        # reading to the mount point before rotating it into the lidar's axes.
-        # Only the centripetal part of the lever arm: the angular-acceleration
-        # part needs a differentiated gyro, and at 5 ms ticks that turned 0.07 g
-        # of sim jitter into 0.5 g of noise. The real driver reports accel in g.
+        # reading to the mount point (full lever arm: alpha x r + w x (w x r))
+        # before rotating it into the lidar's axes. Angular acceleration is a
+        # backward difference over ~20 ms: a 5 ms one turned sim jitter into
+        # 0.5 g of noise, and dropping the term entirely cost 50 m/s^2 when the
+        # airframe oscillated. The real driver reports accel in g.
         w_b = np.array([msg.angular_velocity.x, msg.angular_velocity.y, msg.angular_velocity.z])
         a_b = np.array([msg.linear_acceleration.x, msg.linear_acceleration.y,
                         msg.linear_acceleration.z])
+        t = self._ns(msg.header.stamp)
+        self._gyro_hist.append((t, w_b))
+        alpha = np.zeros(3)
+        t0, w0 = self._gyro_hist[0]
+        if t > t0:
+            alpha = (w_b - w0) / ((t - t0) * 1e-9)
         r = self.t_mount
-        a_b = a_b + np.cross(w_b, np.cross(w_b, r))
+        a_b = a_b + np.cross(alpha, r) + np.cross(w_b, np.cross(w_b, r))
         a = self.r_mount.T @ a_b
         w = self.r_mount.T @ w_b
         out = Imu()
