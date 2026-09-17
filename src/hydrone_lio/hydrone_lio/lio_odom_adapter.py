@@ -69,7 +69,6 @@ class LioOdomAdapter(Node):
 
         self._bad_windows = 0
         self._gated = False
-        self._last = None   # (t, position) for the velocity estimate
         self.get_logger().info(f"lio_odom_adapter: {p('in_odom')} -> {p('out_odom')}")
 
     def _cb_check(self, msg: DiagnosticStatus):
@@ -103,14 +102,14 @@ class LioOdomAdapter(Node):
         out.pose.pose.orientation.z, out.pose.pose.orientation.w = float(qz), float(qw)
         out.pose.covariance = msg.pose.covariance
 
-        # FAST-LIO leaves twist empty; a plain difference is enough for consumers here
-        t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        if self._last is not None and t > self._last[0]:
-            v_odom = (pos - self._last[1]) / (t - self._last[0])
-            v_body = rot.T @ v_odom
-            out.twist.twist.linear.x, out.twist.twist.linear.y, out.twist.twist.linear.z = \
-                (float(v) for v in v_body)
-        self._last = (t, pos.copy())
+        # Vendored FAST-LIO puts its filter velocity in twist, in camera_init
+        # axes (src/fast_lio/VENDORED.md). The lidar's velocity is base_link's
+        # plus w x lever arm; the lever term is left out (0.5 m, slow turns).
+        v = msg.twist.twist.linear
+        v_odom = self.t_base_livox[:3, :3] @ np.array([v.x, v.y, v.z])
+        v_body = rot.T @ v_odom
+        out.twist.twist.linear.x, out.twist.twist.linear.y, out.twist.twist.linear.z = \
+            (float(c) for c in v_body)
 
         self.pub_raw.publish(out)
         if not self._gated:

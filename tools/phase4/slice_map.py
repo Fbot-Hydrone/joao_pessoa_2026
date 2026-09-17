@@ -1,4 +1,7 @@
-"""Height slices of a region of a saved map: python3 slice_map.py map_dir out.png xmin xmax ymin ymax"""
+"""Height slices of a region of a saved map.
+
+    python3 slice_map.py map_dir out.png xmin xmax ymin ymax [z0,z1,z2,...]
+"""
 import sys
 import matplotlib
 matplotlib.use('Agg')
@@ -11,7 +14,8 @@ d, out = sys.argv[1], sys.argv[2]
 x0, x1, y0, y1 = (float(v) for v in sys.argv[3:7])
 _, v = read_pcd(f'{d}/voxels.pcd')
 v = v[(v[:, 0] > x0) & (v[:, 0] < x1) & (v[:, 1] > y0) & (v[:, 1] < y1)]
-bands = [(-0.3, 0.1), (0.1, 0.3), (0.3, 0.5), (0.5, 0.7), (0.7, 0.9), (0.9, 1.2), (1.2, 1.6), (1.6, 3.0)]
+edges = [float(z) for z in sys.argv[7].split(',')] if len(sys.argv) > 7 else [-0.3, 0.1, 0.3, 0.5, 0.7, 0.9, 1.2, 1.6, 3.0]
+bands = list(zip(edges[:-1], edges[1:]))[:8]
 fig, axs = plt.subplots(2, 4, figsize=(22, 9))
 for ax, (a, b) in zip(axs.ravel(), bands):
     s = v[(v[:, 2] >= a) & (v[:, 2] < b)]

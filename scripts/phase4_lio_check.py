@@ -176,6 +176,13 @@ class Check(Node):
 
         s = a.side
         legs = [(s, 0, 0), (s, s, 0), (0, s, 0), (0, 0, 0)]
+        if a.waypoints:
+            # odom frame (x forward, y left at takeoff, z from the takeoff
+            # point). vision_odom_bridge turns odom into MAVROS ENU as (-y, x, z).
+            legs = []
+            for wp in a.waypoints.split(';'):
+                x, y, z = (float(v) for v in wp.split(','))
+                legs.append((-y, x, z - a.alt))
         reached = 0
         for leg in legs:
             target = home + np.array(leg, dtype=float)
@@ -203,6 +210,8 @@ def main():
     ap.add_argument('--side', type=float, default=2.0)
     ap.add_argument('--hover', type=float, default=20.0)
     ap.add_argument('--leg-timeout', type=float, default=240.0)
+    ap.add_argument('--waypoints', default='',
+                    help='"x,y,z;x,y,z" in the odom frame instead of the square')
     ap.add_argument('--gt-topic', default='/biguasim/uav0_id0/DynamicsSensor/Odom')
     args = ap.parse_args()
     rclpy.init()

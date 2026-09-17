@@ -20,7 +20,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, TwistStamped
 from geographic_msgs.msg import GeoPointStamped
 from mavros_msgs.msg import HomePosition
 
@@ -53,6 +53,10 @@ class VisionOdomBridge(Node):
         # race the simulator loses on a slow machine. This cap is only a backstop
         # against publishing forever if home never arrives.
         self.declare_parameter("origin_max_sends", 600)
+        # Also send the odometry's velocity as VISION_SPEED_ESTIMATE. Empty
+        # (the default) keeps the old pose-only behaviour; phase 4 turns it on
+        # because a 10 Hz LIO pose alone left the EKF differentiating it.
+        self.declare_parameter("out_speed", "")
         in_odom = self.get_parameter("in_odom").value
         out_pose = self.get_parameter("out_pose").value
 
@@ -66,6 +70,9 @@ class VisionOdomBridge(Node):
                              history=HistoryPolicy.KEEP_LAST, depth=10)
 
         self.pub = self.create_publisher(PoseStamped, out_pose, pub_qos)
+        out_speed = self.get_parameter("out_speed").value
+        self.pub_speed = (self.create_publisher(TwistStamped, out_speed, pub_qos)
+                          if out_speed else None)
         self.create_subscription(Odometry, in_odom, self._cb, sub_qos)
 
         # Set the global origin at 1 Hz until the FCU confirms home. Sending it
@@ -139,6 +146,19 @@ class VisionOdomBridge(Node):
         p.pose.orientation.y = s * (x + y)
         p.pose.orientation.z = s * (w + z)
         self.pub.publish(p)
+
+        if self.pub_speed is not None:
+            # twist is in the child (body) frame: body -> NWU world, then the
+            # same NWU -> ENU turn as the pose
+            v = msg.twist.twist.linear
+            xx, yy, zz = x * x, y * y, z * z
+            vx = (1 - 2 * (yy + zz)) * v.x + 2 * (x * y - z * w) * v.y + 2 * (x * z + y * w) * v.z
+            vy = 2 * (x * y + z * w) * v.x + (1 - 2 * (xx + zz)) * v.y + 2 * (y * z - x * w) * v.z
+            vz = 2 * (x * z - y * w) * v.x + 2 * (y * z + x * w) * v.y + (1 - 2 * (xx + yy)) * v.z
+            t = TwistStamped()
+            t.header = p.header
+            t.twist.linear.x, t.twist.linear.y, t.twist.linear.z = -vy, vx, vz
+            self.pub_speed.publish(t)
 
 
 def main(args=None):

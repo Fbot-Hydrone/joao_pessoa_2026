@@ -34,7 +34,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 
 BIGUASIM_NS = 'biguasim'
@@ -174,7 +174,8 @@ def _launch_setup(context, *args, **kwargs):
     mavros = Node(
         package='mavros', executable='mavros_node', output='screen',
         parameters=[
-            os.path.join(mavros_share, 'launch', 'apm_pluginlists.yaml'),
+            # apm_pluginlists minus vision_speed_estimate, which the LIO velocity needs
+            os.path.join(lio_pkg, 'config', 'mavros_pluginlists_phase4.yaml'),
             os.path.join(mavros_share, 'launch', 'apm_config.yaml'),
             os.path.join(bringup_pkg, 'config', 'timeouts.yaml'),
             {
@@ -195,7 +196,8 @@ def _launch_setup(context, *args, **kwargs):
             # ground_truth is a DEBUGGING AID for tuning the airframe apart
             # from the estimator; a flight on it proves nothing about the LIO
             {'in_odom': '/hydrone/lio/odom' if LaunchConfiguration('ext_nav').perform(context) == 'lio'
-             else f'{prefix}/DynamicsSensor/Odom'},
+             else f'{prefix}/DynamicsSensor/Odom',
+             'out_speed': '/mavros/vision_speed/speed_twist'},
         ],
     )
 
@@ -220,8 +222,13 @@ def _launch_setup(context, *args, **kwargs):
         }],
     )
 
+    maze = Node(
+        package='hydrone_mission', executable='phase4_maze_node', output='screen',
+        condition=IfCondition(PythonExpression(["'", LaunchConfiguration('mission'), "' == 'maze'"])),
+    )
+
     return [ardubridge, sitl_dds, livox, fast_lio, adapter, prior, mavros, lio_nav,
-            lio_map, odom_error]
+            lio_map, odom_error, maze]
 
 
 def generate_launch_description():
@@ -247,6 +254,10 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'load_map', default_value='false',
             description='Start from the saved map of the same name.'),
+        DeclareLaunchArgument(
+            'mission', default_value='none',
+            description="'maze' flies phase4_maze_node through the structure "
+                        'right of spawn; none just brings the vehicle up.'),
         DeclareLaunchArgument(
             'measure_drift', default_value='true',
             description='Log LIO drift against ground truth (sim only, never fed back).'),

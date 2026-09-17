@@ -55,3 +55,7 @@ ATC_RAT_RLL_D   0.0015
 ATC_RAT_PIT_P   0.07
 ATC_RAT_PIT_I   0.07
 ATC_RAT_PIT_D   0.0015
+# Speed limits for the maze: corridors are ~1 m wide. GUIDED targets take their
+# limits from these (see holybro_sitl.parm).
+WP_SPD          0.7
+WP_ACC          1.0
