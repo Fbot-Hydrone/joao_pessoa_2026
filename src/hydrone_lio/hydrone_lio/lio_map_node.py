@@ -152,6 +152,10 @@ class LioMapNode(Node):
         self._last_kf_pose = None
         self._pose = None
         self._dirty = False
+        # stamp of the newest scan: the map is published with it, not with
+        # now(), because the sensors run on sim time and a wall-clock stamp
+        # lands minutes "in the future" of every TF and RViz drops it
+        self._last_stamp = None
 
         if p('load_map'):
             self._load()
@@ -184,6 +188,7 @@ class LioMapNode(Node):
     def _cb_cloud(self, msg: PointCloud2):
         if msg.width == 0:
             return
+        self._last_stamp = msg.header.stamp
         pts = cloud_xyz(msg).astype(np.float64) @ self.r_mount.T + self.t_mount
         pts = pts[np.all(np.isfinite(pts), axis=1)].astype(np.float32)
 
@@ -208,7 +213,7 @@ class LioMapNode(Node):
         if not self._dirty:
             return
         self._dirty = False
-        stamp = self.get_clock().now().to_msg()
+        stamp = self._last_stamp or self.get_clock().now().to_msg()
         if self.voxels and self.pub_vox.get_subscription_count():
             keys = np.fromiter(self.voxels.keys(), dtype=np.int64, count=len(self.voxels))
             hits = np.fromiter(self.voxels.values(), dtype=np.float32, count=len(self.voxels))

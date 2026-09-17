@@ -29,7 +29,7 @@ from rclpy.node import Node
 from diagnostic_msgs.msg import DiagnosticStatus
 from geometry_msgs.msg import TransformStamped
 from nav_msgs.msg import Odometry
-from tf2_ros import TransformBroadcaster
+from tf2_ros import StaticTransformBroadcaster, TransformBroadcaster
 
 from hydrone_lio.geometry import (inv_tf, make_tf, matrix_to_quat,
                                   quat_to_matrix, rpy_to_matrix)
@@ -64,6 +64,21 @@ class LioOdomAdapter(Node):
         self.pub = self.create_publisher(Odometry, p('out_odom'), 10)
         self.pub_raw = self.create_publisher(Odometry, p('out_odom_raw'), 10)
         self.tf = TransformBroadcaster(self) if p('publish_tf') else None
+        # odom -> camera_init is just the mount, so FAST-LIO's own outputs
+        # (/Odometry, /cloud_registered, its camera_init -> body TF) sit in the
+        # same tree as everything else and RViz can show them in odom
+        self._tf_static = StaticTransformBroadcaster(self)
+        mount = TransformStamped()
+        mount.header.stamp = self.get_clock().now().to_msg()
+        mount.header.frame_id = self.odom_frame
+        mount.child_frame_id = 'camera_init'
+        mqx, mqy, mqz, mqw = matrix_to_quat(r)
+        mt = self.t_base_livox[:3, 3]
+        mount.transform.translation.x, mount.transform.translation.y, mount.transform.translation.z = \
+            (float(v) for v in mt)
+        mount.transform.rotation.x, mount.transform.rotation.y = float(mqx), float(mqy)
+        mount.transform.rotation.z, mount.transform.rotation.w = float(mqz), float(mqw)
+        self._tf_static.sendTransform(mount)
         self.create_subscription(Odometry, p('in_odom'), self._cb_odom, 10)
         self.create_subscription(DiagnosticStatus, p('in_consistency'), self._cb_check, 10)
 

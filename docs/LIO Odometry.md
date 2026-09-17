@@ -16,6 +16,14 @@ The check script arms, takes off to 1 m, hovers, flies a 2 m square, lands, and 
 
 Launch args: `ext_nav:=ground_truth` (debug only: tune the airframe without the estimator), `gate:=false`, `map_name:=`, `load_map:=true`, `measure_drift:=false`.
 
+## Viewing it in RViz
+`rviz2 -d src/hydrone_lio/rviz/phase4.rviz` (on the host, same `ROS_DOMAIN_ID`) or, inside the container, `rviz2 -d /ws/install/hydrone_lio/share/hydrone_lio/rviz/phase4.rviz`.
+- **Fixed Frame must be `odom`.** RViz defaults to `map`, which nothing publishes, so every display waits and drops ("queue is full").
+- View `/livox/lidar_pc` (10 Hz scan), `/hydrone/lio/odom_raw`, `/hydrone/map/voxels`, `/cloud_registered`.
+- **Not** the raw engine topics under `/biguasim/uav0_id0/...`: the per-tick `Mid360` cloud comes at ~37 msg/s and fills RViz's queue before the LIO TF for that instant arrives.
+- Stamps are simulation time and run minutes behind the wall clock (the sim is ~0.2× real time). That's expected. Everything published for viewing uses the same clock, so RViz is fine with it.
+- `odom → camera_init` is published statically by `lio_odom_adapter`, so FAST-LIO's own frames join the tree.
+
 ## Pipeline
 | Node | In | Out |
 |---|---|---|
