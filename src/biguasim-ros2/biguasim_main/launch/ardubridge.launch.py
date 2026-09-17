@@ -26,11 +26,10 @@ def generate_launch_description():
         emulate_tty=True,
         parameters=[{
             'params_file': ParameterValue(params_file, value_type=str),
-            # Which competition phase is flying. Phases 3 and 4 fly the Kopis,
-            # whose Livox Mid-360 is a depth camera this node spins; 1 and 2
-            # fly the Holybro, whose DepthCamera is the ZED's and must never
-            # be turned. See ArduBridgeNode._spin_setup.
+            # Phases 3 and 4 fly the Kopis: lidar wobble + ESC RPM topic.
+            # See ArduBridgeNode._lidar_setup.
             'phase': ParameterValue(LaunchConfiguration('phase'), value_type=int),
+            'stamp_clock': LaunchConfiguration('stamp_clock'),
         }]
     )
 
@@ -40,8 +39,11 @@ def generate_launch_description():
             description='Which airframe to spawn: reads config/config-<agent_name>.yaml.'),
         DeclareLaunchArgument(
             'phase', default_value='1',
-            description='Competition phase. 3 and 4 fly the Kopis and spin a '
-                        'depth camera to simulate its Livox Mid-360; 1 and 2 '
-                        'fly the Holybro and spin nothing.'),
+            description='Competition phase. 3 and 4 fly the Kopis and its '
+                        'Mid-360; 1 and 2 fly the Holybro.'),
+        DeclareLaunchArgument(
+            'stamp_clock', default_value='wall',
+            description="'sim' stamps sensors with simulation time (anchored "
+                        "at start), 'wall' with now()."),
         ardubridge_node
     ])

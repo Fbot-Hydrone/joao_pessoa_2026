@@ -1,3 +1,4 @@
+from rclpy.time import Time
 import biguasim
 import json
 import yaml
@@ -45,6 +46,10 @@ class BiguaSimInterface():
 
         #TODO: Make a parameter to use the system time
         self.system_time = True
+        # When set (ns), stamps become anchor + simulation time instead of the
+        # wall clock. Needed by anything that integrates over stamps (an IMU
+        # into a LIO) while the sim runs slower than real time.
+        self.sim_clock_anchor_ns = None
         
         self.r2b = str.maketrans('_', '-')
         self.b2r = str.maketrans('-', '_')
@@ -214,17 +219,18 @@ class BiguaSimInterface():
 
     def publish_sensor_data(self, state : dict):
         self._state = state.copy()
+        # one stamp per tick, so every sensor of the same tick agrees
+        if self.sim_clock_anchor_ns is not None and 't' in state:
+            stamp = Time(nanoseconds=self.sim_clock_anchor_ns + int(state['t'] * 1e9)).to_msg()
+        elif self.system_time:
+            stamp = self.node.get_clock().now().to_msg()
+        else:
+            stamp = Time(nanoseconds=int(state['t'] * 1e9)).to_msg()
         for sensor in self.sensors:
             try:
                 agent_name, idx = sensor.agent_name.split('_id')
                 msg = sensor.encode(state[agent_name][int(idx)][sensor.state_name])
-
-                # Header
-                if self.system_time:
-                    msg.header.stamp = self.node.get_clock().now().to_msg()
-                else:
-                    msg.header.stamp.sec = int(state['t'])  # Set seconds part from state['t']
-                    msg.header.stamp.nanosec = int((state['t'] - msg.header.stamp.sec) * 1e9)
+                msg.header.stamp = stamp
 
                 sensor.publisher.publish(msg)
             except KeyError:

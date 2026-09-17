@@ -94,6 +94,12 @@ RUN . /opt/ros/humble/setup.sh && \
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+# 4b. Phase 4 LIO deps (FAST-LIO needs pcl_ros). Placed here, not up with the
+#     other apt layers, so adding it didn't throw away the ArduPilot build cache.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ros-humble-pcl-ros \
+    && rm -rf /var/lib/apt/lists/*
+
 # 5. Project packages — LAST, so a source edit replays only this build.
 #    `--symlink-install` chains install/ -> build/ -> src/, which is what makes
 #    docker-compose.dev.yml's bind mounts live without any rebuild at all.
@@ -102,7 +108,7 @@ RUN . /opt/ros/humble/setup.sh && \
     colcon build --symlink-install \
       --packages-select hydrone_msgs biguasim_interfaces biguasim_main \
         hydrone_bringup hydrone_vision hydrone_controller hydrone_nav \
-        hydrone_mission
+        hydrone_mission livox_ros_driver2 fast_lio hydrone_lio
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["ros2", "launch", "hydrone_bringup", "hydrone_sim.launch.py"]

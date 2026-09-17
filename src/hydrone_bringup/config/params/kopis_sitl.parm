@@ -28,3 +28,11 @@ EK3_RNG_USE_HGT -1
 # MOT_THST_HOVER and every rate gain are wrong for it, and the first hover will
 # be twitchy or worse. Nothing in phase 4 commands the vehicle, so this is a
 # note rather than a guess: measure a hover before writing numbers here.
+
+# Yaw from the LIO, not the compass. The LIO's odom frame starts at the spawn
+# heading, so a compass yaw would disagree with its positions by a fixed angle
+# and the EKF would fly sideways. Indoors a magnetometer is a liar anyway.
+EK3_SRC1_YAW    6
+COMPASS_USE     0
+COMPASS_USE2    0
+COMPASS_USE3    0

@@ -15,6 +15,7 @@
   <!-- vision_odom_bridge subscribes to /mavros/home_position/home to confirm
        the EKF origin took before it stops resending it. -->
   <exec_depend>mavros_msgs</exec_depend>
+  <exec_depend>livox_ros_driver2</exec_depend>
   <exec_depend>geographic_msgs</exec_depend>
 
   <export>

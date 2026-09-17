@@ -50,3 +50,6 @@ docker/ZED_SDK_*.run
 # setup.py/libusb patches in scripts/build_pyzed.sh. Losing it costs an hour;
 # storing it costs 3.7 MB.
 !docker/pyzed-*.whl
+
+# ─── Phase 4 saved maps (lio_map_node) ───────────────────────────
+maps/

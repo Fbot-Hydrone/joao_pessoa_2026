@@ -29,11 +29,34 @@
               ros_publish: true
             - sensor_type: VelocitySensor
               ros_publish: true
-            - sensor_type: DepthCamera
+            # The bridge builds this one for ArduPilot; listing it here only
+            # turns on its ROS topic, which livox_mimic republishes as the
+            # Mid-360's own IMU.
+            - sensor_type: IMUSensor
               ros_publish: true
-              Hz: 100
+            # The Livox Mid-360: real engine raycasts. 40 rings, 200k pts/s,
+            # 10 Hz head. FOV is the real -7..52 minus the bridge's +-3 deg
+            # wobble, which is what breaks up the fixed rings.
+            # Points come back in the body frame, not the sensor's.
+            - sensor_type: RaycastLidar
+              sensor_name: Mid360
+              ros_publish: true
               location: [0, 0, 0.5]
-              configuration: {CaptureWidth: 182, CaptureHeight: 182, FOV: 60}
+              configuration:
+                Channels: 40
+                Range: 70
+                PointsPerSecond: 200000
+                RotationFrequency: 10
+                UpperFovLimit: 49
+                LowerFovLimit: -4
+                HorizontalFov: 360
+                # attenuation is per cm in the engine; 0 keeps intensity sane
+                AtmospAttenRate: 0.0
+                NoiseStdDev: 0.0
+                DropOffGenRate: 0.0
+                DropOffIntensityLimit: 1.0
+                DropOffAtZeroIntensity: 0.0
+                ShowDebugPoints: false
           dynamics:
             batch_size : 1
           control_abstraction : 'accel'

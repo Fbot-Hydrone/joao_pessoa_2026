@@ -18,19 +18,12 @@
 #                     sim bring-up. See docs/Phase 1 Mission.md.
 #   --landing-sites   run the earlier landing-site mission (fly forward and land
 #                     on whatever the belly camera sees). See docs/Landing Sites.md.
-#   --phase4          bring up the OTHER AIRCRAFT: the Kopis X8 carrying a Livox
-#                     Mid-360 (config-KopisX8.yaml), simulated as a depth camera
-#                     the bridge rotates. Sources only -- the lidar's topics, a
-#                     vehicle that holds position on ground truth, and no
-#                     autonomy of any kind. Shares nothing above SITL/MAVROS
-#                     with the Holybro missions above: no ZED, no belly camera,
-#                     no rangefinder, no mission node. --ground-truth and
-#                     --no-odom-print do not apply to it (there is no estimator
-#                     to choose between yet, and no drift to log against).
-#                     The bridge spins the depth camera and reports the angle;
-#                     pass phase:=3 for the phase 3 aircraft, or anything else
-#                     to hold the sensor still and look at one wedge.
-#                     See phase4_sim.launch.py.
+#   --phase4          bring up the OTHER AIRCRAFT: the Kopis X8 flying on its
+#                     Livox Mid-360 (config-KopisX8.yaml, an engine raycast
+#                     lidar). FAST-LIO odometry is the EKF's external nav; the
+#                     persistent map node runs too. Local simulator only.
+#                     --ground-truth and --no-odom-print don't apply.
+#                     See phase4_sim.launch.py and docs/LIO Odometry.md.
 #   --ground-truth    fly the EKF on BiguaSim ground truth instead of the real
 #                     visual odometry (odom_source:=ground_truth). A DEBUGGING
 #                     AID for separating autonomy bugs from localization bugs —
@@ -207,10 +200,9 @@ if [ -n "$HYDRONE_LAUNCH_ARGS" ]; then
     echo "Launch args  : $HYDRONE_LAUNCH_ARGS"
 fi
 if [ -z "$HYDRONE_ODOM_ARGS" ]; then
-    echo "Aircraft     : Kopis X8 + Livox Mid-360 (sources only, no autonomy)"
-    echo "Nav          : BiguaSim ground truth as external nav — a SCAFFOLD so"
-    echo "               the vehicle holds position while the lidar pipeline is"
-    echo "               built. Nothing here navigates on the Mid-360."
+    echo "Aircraft     : Kopis X8 + Livox Mid-360"
+    echo "Nav          : FAST-LIO on the Mid-360 as external nav (ground truth"
+    echo "               only feeds the drift log). See docs/LIO Odometry.md."
 else
     echo "Odom source  : $ODOM_SOURCE$([ "$ODOM_SOURCE" = ground_truth ] && echo ' (DEBUGGING AID — proves nothing about the real drone)')"
     echo "VO drift print: $ODOM_ERROR_PRINT (CSV is written either way)"

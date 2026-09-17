@@ -29,6 +29,8 @@ services:
       # Reuse the worlds/packages already downloaded on the host (the
       # entrypoint drops to the unprivileged 'hydrone' user, uid 1000)
       - ${HOME}/.local/share/biguasim:/home/hydrone/.local/share/biguasim
+      # Phase 4 persistent maps (lio_map_node), kept across container runs
+      - ./maps:/ws/maps
     devices:
       # GPU access for the UE5 binary (Intel/AMD via mesa). For NVIDIA install
       # nvidia-container-toolkit and add:  gpus: all
