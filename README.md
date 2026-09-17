@@ -36,6 +36,7 @@ project: it starts the BiguaSim⇄ArduPilot physics bridge and ArduPilot SITL
 | `deps.repos` | Pinned source dependencies (ArduPilot, micro-ROS agent/msgs, XRCE-Gen) |
 | `docker/`, `Dockerfile`, `docker-compose.yml` | Reproducible containerized bringup |
 | `docker-compose.dev.yml` | Dev override: bind-mounts `src/` so code edits need no image rebuild (`docker_up.sh --dev`) |
+| `scripts/` | Entry points and tooling — sim, drone, viewers, calibration. See [`SCRIPTS.md`](docs/SCRIPTS.md) |
 | `docs/` | Onboarding notes and historical docs. Start with [`PHASE1-MISSION.md`](docs/PHASE1-MISSION.md), [`LANDING-SITES.md`](docs/LANDING-SITES.md) and [`DEVELOP-PIPELINES.md`](docs/DEVELOP-PIPELINES.md) |
 
 Third-party sources (`src/ardupilot`, `src/micro_ros_agent`, `src/micro_ros_msgs`,

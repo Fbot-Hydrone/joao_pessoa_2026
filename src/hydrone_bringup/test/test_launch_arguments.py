@@ -254,11 +254,23 @@ LAUNCH_FILES = [
     "landing_sites_sim.launch.py",
     "hydrone_sim.launch.py",
     "hydrone_bringup.launch.py",
+    # The Kopis/Livox airframe. Shares only the bridge, SITL and MAVROS with
+    # everything above it, which is why it is one entry and not a pair.
+    "phase4_sim.launch.py",
 ]
 
 
-def _nodes_of(description: LaunchDescription):
-    """Every Node in a description, including inside group/conditional actions."""
+def _nodes_of(description: LaunchDescription, context: LaunchContext = None):
+    """Every Node in a description, including inside group/conditional actions.
+
+    OpaqueFunctions are EXECUTED when a `context` is given, because a launch
+    file that builds its nodes inside one (sources_sim.launch.py does, so that
+    `agent_name` is resolved before the biguasim config is read) otherwise
+    presents an entity list with no Node in it at all — and every check below
+    would pass by finding nothing. Without a context they are skipped: running
+    one needs the declared arguments to already carry their defaults.
+    """
+    from launch.actions import OpaqueFunction
     from launch_ros.actions import Node
 
     seen = []
@@ -267,6 +279,8 @@ def _nodes_of(description: LaunchDescription):
         for entity in entities:
             if isinstance(entity, Node):
                 seen.append(entity)
+            if context is not None and isinstance(entity, OpaqueFunction):
+                walk(entity.execute(context) or [])
             # GroupAction and friends hold their children in different
             # attributes; try the two that matter and ignore the rest.
             for attr in ("entities", "_GroupAction__actions"):
@@ -305,7 +319,11 @@ def test_every_node_parameter_evaluates(launch_file):
         if default is not None:
             context.launch_configurations[name] = default
 
-    for node in _nodes_of(description):
+    try:
+        nodes = _nodes_of(description, context)
+    except PackageNotFoundError as exc:
+        pytest.skip(f"{launch_file} needs a package absent from this image: {exc}")
+    for node in nodes:
         for entry in (node._Node__parameters or []):
             if not isinstance(entry, dict):
                 continue          # a YAML path; nothing to type-check
@@ -388,7 +406,7 @@ def test_dry_run_reaches_the_mission_node():
         if default is not None:
             context.launch_configurations[name] = default
 
-    mission = [n for n in _nodes_of(description)
+    mission = [n for n in _nodes_of(description, context)
                if n._Node__node_executable == "phase1_mission_node"]
     assert mission, "phase1.launch.py no longer starts phase1_mission_node."
 

@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 
 import threading
+from collections import deque
+
 import rclpy
 from rclpy.node import Node
+from geometry_msgs.msg import Vector3Stamped
 from std_msgs.msg import Float64MultiArray
 
 from biguasim.ardubridge.bridge import ArduPilotBridge
@@ -10,6 +13,13 @@ from biguasim.ardubridge import ArduBiguaSimRunner, VEHICLE_REGISTRY
 from biguasim_main.interface import BiguaSimInterface
 
 GPS_ORIGIN = (33.810313, -118.393867)
+
+# Which competition phases fly the KopisX8, whose Livox Mid-360 is simulated by
+# spinning a depth camera. Phases 1 and 2 fly the HolybroX500, whose config
+# declares a DepthCamera too -- the ZED's -- so the spin has to be gated on
+# something. Rotating that one would corrupt the depth stream feeding
+# zed_mimic, the ZED point cloud and the visual odometry, silently.
+SPINNING_PHASES = (3, 4)
 # Fallbacks only — package_name/world come from config.yaml (biguasim_scenario).
 DEFAULT_PACKAGE_NAME = "Competition"
 DEFAULT_WORLD = "CompetionMap"
@@ -91,11 +101,114 @@ class ArduBridgeNode(Node):
         # 5. Cria publishers e subscribers ROS2
         self._sensor_publisher_create()
         self._control_subscribers_create()
+        self._spin_setup(agent_cfg)
 
         self.get_logger().info(f"ArduBridge pronto: {agent_type} | {len(self.interface.sensors)} sensores")
 
         # 6. Roda bridge em thread separada
         threading.Thread(target=self._run_bridge, daemon=True).start()
+
+    def _spin_setup(self, agent_cfg):
+        """Prepare to turn a sensor between simulation steps, or don't.
+
+        The Mid-360 is simulated by spinning a depth camera (see
+        hydrone_bringup's livox_mimic_node), which is a phase 3/4 thing: the
+        HolybroX500 flown in phases 1 and 2 has a DepthCamera of its own, the
+        ZED's, and turning THAT would quietly rotate the depth behind
+        zed_mimic, the point cloud and the visual odometry. So the phase says
+        whether to spin at all, and nothing happens unless it is one that flies
+        the Kopis.
+        """
+        self._spin_sensor = None
+        self._spin_pub = None
+
+        self.declare_parameter('phase', 1)
+        self.declare_parameter('spin_sensor', 'DepthCamera')
+        self.declare_parameter('spin_step_deg', 60.0)
+        # sensors.py: "It will be applied in approximately three ticks." The
+        # yaw a frame was RENDERED at is therefore the one commanded a few
+        # steps earlier, and that -- not the one commanded now -- is what gets
+        # published for the mimic to rotate by.
+        self.declare_parameter('spin_apply_ticks', 3)
+
+        phase = int(self.get_parameter('phase').value)
+        if phase not in SPINNING_PHASES:
+            self.get_logger().info(
+                f"phase {phase}: no sensor spin (phases "
+                f"{SPINNING_PHASES} fly the spinning-lidar airframe)")
+            return
+
+        name = self.get_parameter('spin_sensor').value
+        # env.agents is keyed by the BATCH name ('uav0-id0'); the ROS topics
+        # use the underscored one. Try both rather than hardcode either.
+        base = agent_cfg['agent_name']
+        env = self.runner._env
+        key = next((k for k in (f"{base}-id0", base) if k in env.agents), None)
+        if key is None:
+            self.get_logger().error(
+                f"phase {phase} wants to spin '{name}' but no agent matching "
+                f"'{base}' is in the environment ({list(env.agents)}); "
+                "flying without the spin")
+            return
+        sensor = env.agents[key].sensors.get(name)
+        if sensor is None:
+            self.get_logger().error(
+                f"phase {phase} wants to spin '{name}' but agent '{key}' has "
+                f"no such sensor ({list(env.agents[key].sensors)}); flying "
+                "without the spin")
+            return
+
+        self._spin_sensor = sensor
+        self._spin_step = float(self.get_parameter('spin_step_deg').value)
+        # A pipeline of commanded yaws: what comes out is what was commanded
+        # `spin_apply_ticks` steps ago, i.e. what the sensor is actually at
+        # now. Pre-filled with 0 because that is where it starts.
+        depth = max(1, int(self.get_parameter('spin_apply_ticks').value))
+        self._spin_pending = deque([0.0] * depth, maxlen=depth)
+        self._spin_yaw = 0.0
+
+        # Alongside the sensor's own topics: /biguasim/<agent>/<sensor>/spin,
+        # the same shape as the /camera_info companion. The prefix is taken
+        # from the sensor's OWN publisher rather than rebuilt, so the spin
+        # topic cannot land somewhere the depth topic is not.
+        prefix = next((s.agent_name for s in self.interface.sensors
+                       if s.name == name), None)
+        if prefix is None:
+            self.get_logger().error(
+                f"'{name}' publishes no ROS topic (ros_publish false?), so a "
+                "spin report would have nothing to sit beside; flying without "
+                "the spin")
+            return
+        topic = f"{prefix}/{name}/spin"
+        self._spin_pub = self.create_publisher(Vector3Stamped, topic, 10)
+        self.get_logger().info(
+            f"phase {phase}: spinning '{name}' {self._spin_step:g} deg/step, "
+            f"reporting it on {topic} ({depth}-tick apply delay)")
+
+    def _spin_step_and_publish(self):
+        """Turn the sensor one step and say where it actually is.
+
+        Called once per SIMULATION STEP, not once per loop iteration: a pass
+        where no PWM arrived advances no time and must not advance the sweep.
+
+        Published BEFORE the sensors of the same step, deliberately. The mimic
+        pairs a frame with the last spin sample at or before the frame's own
+        stamp, so the sample has to be the earlier of the two or every frame
+        would be matched to the previous step's pose.
+        """
+        if self._spin_sensor is None:
+            return
+
+        effective = self._spin_pending[0]
+        msg = Vector3Stamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = 'base_link'
+        msg.vector.z = effective          # [roll, pitch, yaw], degrees
+        self._spin_pub.publish(msg)
+
+        self._spin_yaw = (self._spin_yaw + self._spin_step) % 360.0
+        self._spin_pending.append(self._spin_yaw)
+        self._spin_sensor.rotate([0.0, 0.0, self._spin_yaw])
 
     def _run_bridge(self):
         """Roda o loop do ArduPilot e publica no ROS2 a cada frame."""
@@ -111,6 +224,7 @@ class ArduBridgeNode(Node):
         sim_time = 0.0
 
         self.get_logger().info("Bridge UDP iniciada, aguardando ArduPilot...")
+
         try:
             while True:
                 frame, pwm = bridge.receive_pwm()
@@ -118,6 +232,9 @@ class ArduBridgeNode(Node):
                     continue
 
                 motor_cmds = bridge.pwm_to_motor_cmds(pwm, frame)
+
+                self._spin_step_and_publish()
+
                 raw = env.step(motor_cmds)
                 sim_time += dt
 

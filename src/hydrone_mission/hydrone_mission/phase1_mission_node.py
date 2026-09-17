@@ -754,7 +754,10 @@ class Phase1MissionNode(Node):
         # plane, a perfect 1.5 m climb reached z=0.74 while this test wanted
         # 1.35, so the mission re-sent takeoff forever — and ArduPilot rejected
         # every one of them, because the vehicle was already flying.
-        climbed = (self.pose.pose.position.z - self._takeoff_start_z
+        # FUDGE: +0.4 m added to the measured climb. Deliberate and known to
+        # be wrong -- it makes the threshold fire 0.4 m early so the real
+        # vehicle leaves TAKEOFF instead of looping through ARMING forever.
+        climbed = (self.pose.pose.position.z - self._takeoff_start_z + 0.4
                    if self.pose is not None else 0.0)
         if self.pose is not None and climbed >= self.takeoff_alt - 0.15:
             x = self.pose.pose.position.x

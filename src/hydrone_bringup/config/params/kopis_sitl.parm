@@ -1,0 +1,30 @@
+# kopis_sitl.parm — SITL overlay for the Kopis X8 / Livox airframe.
+#
+# An OVERLAY, not a param set: phase4_sim.launch.py passes
+#   holybro_sitl.parm , dds_udp.parm , kopis_sitl.parm
+# and ArduPilot applies them in order, so everything here wins over the shared
+# file and everything not mentioned is inherited from it. That keeps the EKF /
+# external-nav / scheduler block in ONE place instead of forking 200 lines that
+# would then drift.
+#
+# What is inherited and load-bearing (holybro_sitl.parm):
+#   GPS1_TYPE 0, VISO_TYPE 1, EK3_SRC1_POSXY/VELXY 6 — GPS-denied flight on
+#   external nav, which is what phase4_sim feeds from BiguaSim ground truth.
+
+# No rangefinder on this airframe. The shared file turns on a MAVLink
+# rangefinder (RNGFND1_TYPE 10) because the Holybro carries a VL53L1X and the
+# sim feeds it through MAVROS. The Kopis carries the Mid-360 and nothing else,
+# so leaving the driver enabled would have ArduPilot waiting on a sensor that
+# will never report — a prearm complaint about hardware that does not exist.
+RNGFND1_TYPE    0
+EK3_RNG_USE_HGT -1
+
+# NOT SET HERE, and this is the open question when this airframe first flies:
+# frame class/type and the whole tuning block are still the Holybro's, and as of
+# config-KopisX8.yaml declaring `agent_type: KopisX8` they no longer describe
+# what is being flown. BiguaSim models the KopisX8 as a plain QuadCopterX
+# (agents.py: only the four top rotors of the X8 are simulated) but with a far
+# stronger motor — thruster max 2950 against the X500's 592.4 — so the inherited
+# MOT_THST_HOVER and every rate gain are wrong for it, and the first hover will
+# be twitchy or worse. Nothing in phase 4 commands the vehicle, so this is a
+# note rather than a guess: measure a hover before writing numbers here.

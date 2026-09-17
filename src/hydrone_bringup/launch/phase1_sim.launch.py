@@ -74,6 +74,7 @@ def generate_launch_description():
     # on THIS file lists only the arguments below; run it against
     # phase1.launch.py to see the mission's.
     args = [
+        DeclareLaunchArgument("agent_name", default_value="HolybroX500"),
         # The real visual odometry flies the vehicle, as it will on the drone.
         # odom_source:=ground_truth swaps in BiguaSim dynamics, but only as a
         # debugging tool — see sources_sim.launch.py and LANDING-SITES.md §10.
@@ -95,6 +96,7 @@ def generate_launch_description():
             "odom_error": LaunchConfiguration("odom_error"),
             "odom_error_print": LaunchConfiguration("odom_error_print"),
             "odom_error_dir": LaunchConfiguration("odom_error_dir"),
+            "agent_name": LaunchConfiguration("agent_name"),
         }.items(),
     )
 

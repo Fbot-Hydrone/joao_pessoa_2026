@@ -75,7 +75,7 @@ DOWN_DETECTIONS = "/hydrone/pads/down/detections"
 def generate_launch_description():
     args = [
         DeclareLaunchArgument(
-            "takeoff_alt", default_value="1.5",
+            "takeoff_alt", default_value="2.3",
             description="Altitude for everything: takeoff, turning, travelling "
                         "and the confirmation hover, m above the top of the "
                         "base the drone starts on. Low on purpose — this is "
@@ -104,7 +104,7 @@ def generate_launch_description():
                         "or explained. phase1_real.launch.py sets this; see "
                         "docs/LANDING-SITES.md."),
         DeclareLaunchArgument(
-            "target_bases", default_value="2",
+            "target_bases", default_value="3",
             description="How many landing sites to visit before returning to "
                         "the takeoff base. The takeoff base is not one of "
                         "them. ONE while the mission has never been flown: the "

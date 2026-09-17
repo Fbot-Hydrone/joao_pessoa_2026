@@ -20,8 +20,9 @@
 #   ./scripts/jetson_up.sh takeoff_alt:=1.0 target_bases:=1
 #   ./scripts/jetson_up.sh --rebuild                # after a .msg/setup.py edit
 #   ./scripts/jetson_up.sh --build                  # rebuild the image first
-#   ./scripts/jetson_up.sh --wifi                   # publish over wifi instead
-#                                                   # of the direct cable
+#   ./scripts/jetson_up.sh --wifi                   # force the wifi; the link
+#                                                   # is chosen for you by
+#                                                   # default (see below)
 #
 # ── --dry: REHEARSING THE MISSION WITH NOBODY IN DANGER ─────────────────────
 # Everything the normal run starts — both cameras, MAVROS, both detectors, the
@@ -93,22 +94,30 @@
 # the wifi the drone is also flying MAVLink on -- ~110 Mbit/s for one 640x480
 # BGR stream at 15 Hz.
 #
-#   --cable  (default)  pin DDS to the direct cable, leaving the wifi for
-#                       MAVLink. Match it with view_remote.sh / rviz_remote.sh,
-#                       which default to --cable too.
-#   --wifi              pin DDS to wlan0. Use when the cable is unplugged --
-#                       e.g. an actual flight with nothing tethered.
+#   --auto  (default)   use the cable if it is plugged in and carrying a link,
+#                       otherwise the wifi. view_remote.sh and rviz_remote.sh
+#                       default to --auto too, and carrier is a property of the
+#                       CABLE rather than of either host, so both ends measure
+#                       the same fact and agree without being told -- even
+#                       though this one starts long before they do.
+#   --cable             insist on the direct cable, leaving the wifi for
+#                       MAVLink. Fails loudly if it is not there.
+#   --wifi              insist on wlan0. An actual flight with nothing
+#                       tethered, or a cable you want ignored.
 #   --any               no pinning; whatever DDS negotiates (old behaviour).
 #
-# IMPORTANT: --cable with the cable unplugged fails loudly here, but --cable on
-# one end and --wifi on the other does NOT. That combination looks exactly like
-# a domain-id mismatch: the viewer sits there with an empty window, no error.
+# IMPORTANT, AND THE REASON --auto EXISTS: --cable with the cable unplugged
+# fails loudly here, but --cable on one end and --wifi on the other does NOT.
+# That combination looks exactly like a domain-id mismatch -- the viewer sits
+# there with an empty window and no error. Two humans typing matching flags on
+# two machines is the failure mode; --auto removes the typing. It still cannot
+# save you from --cable HERE and --wifi THERE, typed deliberately.
 #
 # Shared memory is kept in all modes, so nodes inside this container still talk
 # to each other over SHM rather than the network stack. Only the OFF-BOARD path
 # is pinned. See scripts/dds_iface.sh.
 #
-# Overridable by environment: IMAGE, CONTAINER, FCU_URL, CABLE_SUBNET.
+# Overridable by environment: IMAGE, CONTAINER, FCU_URL, CABLE_SUBNET, CABLE_PEER.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 . "$(dirname "$0")/dds_iface.sh"
@@ -124,7 +133,7 @@ CALIBRATE=false
 NO_DEV=false
 DRY=false
 WANT_MAP=false
-MODE=cable
+MODE=auto
 launch_args=()
 
 # The belly camera's ChArUco target. Defaults are the calib.io board in use
@@ -148,20 +157,23 @@ for arg in "$@"; do
         --build)         DO_BUILD=true ;;
         --rebuild)       DO_REBUILD=true ;;
         --no-dev)        NO_DEV=true ;;
+        --auto)          MODE=auto ;;
         --cable)         MODE=cable ;;
         --wifi)          MODE=wifi ;;
         --any)           MODE=any ;;
         *:=*)            launch_args+=("$arg") ;;
-        -h|--help)       sed -n '2,111p' "$0"; exit 0 ;;
+        -h|--help)       sed -n '2,120p' "$0"; exit 0 ;;
         *) echo "unknown argument: $arg" >&2; exit 2 ;;
     esac
 done
 
 dds_iface_setup "$MODE"
-if [ -n "$DDS_PROFILE" ]; then
-    echo "link: $MODE  ($DDS_IFACE $DDS_ADDR)  -- viewers must match"
+# The trailing note is not decoration: with --auto the viewers work the link
+# out for themselves, and with anything else somebody has to be told.
+if [ "$DDS_REQUESTED" = auto ]; then
+    dds_iface_report "-- viewers pick the same link on their own"
 else
-    echo "link: any (DDS picks; may use the wifi)"
+    dds_iface_report "-- viewers must be told to match"
 fi
 
 # ── Preflight ───────────────────────────────────────────────────────────────

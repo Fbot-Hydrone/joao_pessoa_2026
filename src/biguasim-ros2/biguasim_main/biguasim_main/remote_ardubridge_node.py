@@ -28,6 +28,7 @@ from std_msgs.msg import Float64MultiArray
 
 from biguasim.ardubridge import VEHICLE_REGISTRY, RemoteArduRunner
 
+from biguasim_main.ardubridge_node import SPINNING_PHASES
 from biguasim_main.interface import BiguaSimInterface
 
 GPS_ORIGIN = (33.810313, -118.393867)
@@ -69,6 +70,22 @@ class RemoteArduBridgeNode(Node):
         self.declare_parameter('instance', 0)
         self.declare_parameter('stream_backlog', 256)
         self.declare_parameter('report_every', 0)
+        self.declare_parameter('phase', 1)
+
+        # Phases 3 and 4 simulate a Livox Mid-360 by spinning a depth camera
+        # between steps (see ardubridge_node._spin_setup). That is impossible
+        # from here: the sensor lives in the world process, RemoteArduRunner
+        # holds only a socket to it, and the protocol has no command to rotate
+        # anything. Saying so beats a lidar that quietly never sweeps -- the
+        # mimic degrades to a single wedge, which looks like a broken sensor.
+        phase = int(self.get_parameter('phase').value)
+        if phase in SPINNING_PHASES:
+            self.get_logger().warn(
+                f"phase {phase} expects a spinning sensor, which a REMOTE "
+                "world cannot provide: the world process owns the sensor and "
+                "there is no rotate command in the protocol. The lidar mimic "
+                "will publish a single fixed wedge. Run the simulator locally "
+                "(drop --world) for a full sweep.")
 
         file_path = self.get_parameter('params_file').get_parameter_value().string_value
         if not file_path:

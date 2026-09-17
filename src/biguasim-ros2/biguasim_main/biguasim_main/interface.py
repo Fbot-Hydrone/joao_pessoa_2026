@@ -71,9 +71,46 @@ class BiguaSimInterface():
         control_abstraction = self.env._dynamics_dict[agent_name].control_abstraction
         
         if control_abstraction == 'cmd_motor_speeds' or control_abstraction == 'cmd_motor_speed':
-            return MOTOR_SPEEDS[agent_type]
+            return self._num_motors(agent_type)
             
         return COMMAND_MAP[control_abstraction]
+
+    @staticmethod
+    def _num_motors(agent_type):
+        """How many motor commands this airframe takes.
+
+        MOTOR_SPEEDS above is a local table, and it goes stale every time
+        BiguaSim gains an airframe: an agent_type it does not list arrives here
+        as a bare `KeyError: '<type>'` raised from inside sensor-list
+        construction, which reads like a broken scenario file rather than a
+        missing row (measured on KopisX8, 2026-09-04).
+
+        BiguaSim already knows the answer — ardubridge_node matches the same
+        agent_type against VEHICLE_REGISTRY to pick the vehicle profile, and
+        that profile carries num_motors. So ask the registry before giving up.
+        The table is kept, and consulted FIRST, so an airframe whose registry
+        entry is wrong can still be overridden here.
+
+        The import is local and guarded because this module is also used by
+        biguasim_node, which has nothing to do with ArduPilot and should not
+        start needing the ardubridge package to import.
+        """
+        if agent_type in MOTOR_SPEEDS:
+            return MOTOR_SPEEDS[agent_type]
+
+        try:
+            from biguasim.ardubridge import VEHICLE_REGISTRY
+        except ImportError:
+            VEHICLE_REGISTRY = {}
+        match = next((k for k in VEHICLE_REGISTRY
+                      if k.upper() == agent_type.upper()), None)
+        if match is not None:
+            return VEHICLE_REGISTRY[match].num_motors
+
+        raise RuntimeError(
+            f"no motor count for agent_type '{agent_type}': it is in neither "
+            f"MOTOR_SPEEDS ({', '.join(sorted(MOTOR_SPEEDS))}) nor biguasim's "
+            "VEHICLE_REGISTRY. Add it to whichever one describes the airframe.")
 
 
     def parse_scenario(self, path):

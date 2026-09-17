@@ -2,7 +2,7 @@
 # Bring up the full simulation stack in Docker.
 #
 # Usage: scripts/docker_up.sh [--dev] [--no-build] [--phase1] [--landing-sites]
-#                             [--ground-truth] [--no-odom-print]
+#                             [--phase4] [--ground-truth] [--no-odom-print]
 #                             [--world HOST[:PORT]] [--world-port PORT]
 #                             [name:=value ...] [docker compose up args...]
 #   --dev             mount the project packages from the host into the
@@ -18,6 +18,19 @@
 #                     sim bring-up. See docs/PHASE1-MISSION.md.
 #   --landing-sites   run the earlier landing-site mission (fly forward and land
 #                     on whatever the belly camera sees). See docs/LANDING-SITES.md.
+#   --phase4          bring up the OTHER AIRCRAFT: the Kopis X8 carrying a Livox
+#                     Mid-360 (config-KopisX8.yaml), simulated as a depth camera
+#                     the bridge rotates. Sources only -- the lidar's topics, a
+#                     vehicle that holds position on ground truth, and no
+#                     autonomy of any kind. Shares nothing above SITL/MAVROS
+#                     with the Holybro missions above: no ZED, no belly camera,
+#                     no rangefinder, no mission node. --ground-truth and
+#                     --no-odom-print do not apply to it (there is no estimator
+#                     to choose between yet, and no drift to log against).
+#                     The bridge spins the depth camera and reports the angle;
+#                     pass phase:=3 for the phase 3 aircraft, or anything else
+#                     to hold the sensor still and look at one wedge.
+#                     See phase4_sim.launch.py.
 #   --ground-truth    fly the EKF on BiguaSim ground truth instead of the real
 #                     visual odometry (odom_source:=ground_truth). A DEBUGGING
 #                     AID for separating autonomy bugs from localization bugs —
@@ -51,7 +64,8 @@
 #
 #   scripts/docker_up.sh --phase1 target_bases:=2 takeoff_alt:=1.5
 #
-# --phase1 and --landing-sites are mutually exclusive; the last one given wins.
+# --phase1, --landing-sites and --phase4 all pick the launch file, so they are
+# mutually exclusive; the last one given wins.
 # Anything else is forwarded untouched to `docker compose up` (-d, --force-recreate, ...).
 set -e
 cd "$(dirname "$0")/.."
@@ -96,6 +110,7 @@ for arg in "$@"; do
         --world-port)    want_value=world-port ;;
         --phase1)        HYDRONE_LAUNCH=phase1_sim.launch.py ;;
         --landing-sites) HYDRONE_LAUNCH=landing_sites_sim.launch.py ;;
+        --phase4)        HYDRONE_LAUNCH=phase4_sim.launch.py ;;
         --ground-truth)  ODOM_SOURCE=ground_truth ;;
         --dev)           DEV_MODE=true; DO_BUILD=false ;;
         --no-build)      DO_BUILD=false ;;
@@ -111,9 +126,20 @@ done
 # STRING and then splits it shell-style. That also means a launch argument whose
 # value contains a space would not survive; none of ours do.
 HYDRONE_LAUNCH_ARGS="${launch_args[*]}"
-export ODOM_ERROR_PRINT     # interpolated into `command:` in docker-compose.yml
-export HYDRONE_LAUNCH       # ditto — selects which launch file the container runs
-export ODOM_SOURCE          # ditto — what the EKF navigates on (vo|ground_truth)
+
+# odom_source and odom_error_print belong to the Holybro launches, which choose
+# between two estimators and measure one against the other. phase4_sim declares
+# neither: that aircraft carries one sensor and has no estimator yet. Launch
+# accepts an undeclared argument silently (it just becomes a launch
+# configuration nobody reads), so passing them would not error — it would only
+# leave the command line, and this script's summary, describing a vehicle this
+# is not. Empty for phase 4, and UNSET is what docker-compose.yml falls back on
+# for a plain `docker compose up`.
+HYDRONE_ODOM_ARGS="odom_error_print:=$ODOM_ERROR_PRINT odom_source:=$ODOM_SOURCE"
+[ "$HYDRONE_LAUNCH" = phase4_sim.launch.py ] && HYDRONE_ODOM_ARGS=
+
+export HYDRONE_LAUNCH       # interpolated into `command:` in docker-compose.yml
+export HYDRONE_ODOM_ARGS    # ditto — the odom pair above, or empty for phase 4
 export HYDRONE_LAUNCH_ARGS  # ditto — extra name:=value pairs, possibly empty
 export WORLD_ADDRESS        # empty = simulate here; set = use a world elsewhere
 export WORLD_PORT           # its request port; state is published on PORT+1
@@ -180,8 +206,15 @@ echo "Launch file  : $HYDRONE_LAUNCH"
 if [ -n "$HYDRONE_LAUNCH_ARGS" ]; then
     echo "Launch args  : $HYDRONE_LAUNCH_ARGS"
 fi
-echo "Odom source  : $ODOM_SOURCE$([ "$ODOM_SOURCE" = ground_truth ] && echo ' (DEBUGGING AID — proves nothing about the real drone)')"
-echo "VO drift print: $ODOM_ERROR_PRINT (CSV is written either way)"
+if [ -z "$HYDRONE_ODOM_ARGS" ]; then
+    echo "Aircraft     : Kopis X8 + Livox Mid-360 (sources only, no autonomy)"
+    echo "Nav          : BiguaSim ground truth as external nav — a SCAFFOLD so"
+    echo "               the vehicle holds position while the lidar pipeline is"
+    echo "               built. Nothing here navigates on the Mid-360."
+else
+    echo "Odom source  : $ODOM_SOURCE$([ "$ODOM_SOURCE" = ground_truth ] && echo ' (DEBUGGING AID — proves nothing about the real drone)')"
+    echo "VO drift print: $ODOM_ERROR_PRINT (CSV is written either way)"
+fi
 
 build_arg=(--build)
 [ "$DO_BUILD" = true ] || build_arg=()

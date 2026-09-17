@@ -3,7 +3,7 @@
 #
 #   ./scripts/view_remote.sh /hydrone/pads/down/debug_image
 #   ./scripts/view_remote.sh /down_cam/image_raw
-#   ./scripts/view_remote.sh --wifi /down_cam/image_raw    # if the cable is out
+#   ./scripts/view_remote.sh --wifi /down_cam/image_raw    # force the wifi
 #
 # Not `docker exec` into the drone's container: exec cannot add mounts or
 # devices to something already running (`unknown shorthand flag: 'v'`), so the
@@ -22,34 +22,40 @@
 # MAVLink the drone is flying on, which is why this script used to carry a "do
 # not leave it open during a flight" warning.
 #
-#   --cable   (default)  pin DDS to the direct cable. The wifi is left alone
-#                        for MAVLink and you can watch images during a flight.
-#   --wifi               pin DDS to the wireless interface. For when the cable
-#                        is unplugged -- the old behaviour, old caveat.
+#   --auto    (default)  the cable if it is plugged in and carrying a link,
+#                        the wifi otherwise. jetson_up.sh defaults to --auto as
+#                        well and tests the same physical fact, so both ends
+#                        agree without anyone typing a flag.
+#   --cable              insist on the direct cable. The wifi is left alone for
+#                        MAVLink and you can watch images during a flight.
+#   --wifi               insist on the wireless interface -- the old behaviour,
+#                        and the old "not during a flight" caveat.
 #   --any                no pinning at all; whatever DDS negotiates.
 #
-# --cable needs jetson_up.sh to have been started with --cable too, or there is
-# nothing publishing on that link. Mismatch looks like an empty window with no
-# error, exactly like a domain mismatch does.
+# An explicit --cable needs jetson_up.sh started with --cable too, or there is
+# nothing publishing on that link. That mismatch looks like an empty window
+# with no error, exactly like a domain mismatch does -- which is why the
+# default is measured rather than typed. See scripts/dds_iface.sh.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 . "$(dirname "$0")/dds_iface.sh"
 
-MODE=cable
+MODE=auto
 TOPIC=""
 extra=()
 while [ $# -gt 0 ]; do
     case "$1" in
+        --auto)  MODE=auto;  shift ;;
         --cable) MODE=cable; shift ;;
         --wifi)  MODE=wifi;  shift ;;
         --any)   MODE=any;   shift ;;
-        -h|--help) sed -n '2,36p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,38p' "$0"; exit 0 ;;
         *)
             if [ -z "$TOPIC" ]; then TOPIC="$1"; else extra+=("$1"); fi
             shift ;;
     esac
 done
-[ -n "$TOPIC" ] || { echo "usage: view_remote.sh [--cable|--wifi|--any] <topic> [--scale N]" >&2; exit 2; }
+[ -n "$TOPIC" ] || { echo "usage: view_remote.sh [--auto|--cable|--wifi|--any] <topic> [--scale N]" >&2; exit 2; }
 [ -n "${DISPLAY:-}" ] || { echo "DISPLAY is not set" >&2; exit 1; }
 xhost +local: >/dev/null 2>&1 || true
 
@@ -68,10 +74,8 @@ xa="${XAUTHORITY:-$HOME/.Xauthority}"
 if [ -n "$DDS_PROFILE" ]; then
     args+=(-v "$DDS_PROFILE:/tmp/dds_profile.xml:ro"
            -e FASTRTPS_DEFAULT_PROFILES_FILE=/tmp/dds_profile.xml)
-    echo "link: $MODE  ($DDS_IFACE $DDS_ADDR)"
-else
-    echo "link: any (DDS picks; may use the wifi)"
 fi
+dds_iface_report
 
 echo "viewing $TOPIC on domain ${ROS_DOMAIN_ID:-0}  (q quits, s saves)"
 exec docker run "${args[@]}" "${IMAGE:-joao_pessoa_2026-hydrone:latest}" \
