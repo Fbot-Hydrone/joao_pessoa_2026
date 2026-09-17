@@ -208,31 +208,24 @@ WP_ACC          0.6
 # fast enough to smear the visual odometry through the whole step. 25 deg/s
 # makes it ~1.8 s, and the mission's settle pause then has something already
 # nearly stationary to wait on.
-ATC_RATE_WPY_MAX 15
+ATC_RATE_WPY_MAX 30
 #
 # NOT touched, on purpose: WP_SPD_UP / WP_SPD_DN and PILOT_SPEED_UP. The climb
 # is the one part of the flight that already behaves, and GUIDED takeoff takes
 # its rate from those.
 
-# ── Descida do pouso ─────────────────────────────────────────────────────────
-# ESTE PARAMETRO NAO E O FREIO. Fica aqui explicito, no valor do proprio
-# default, para registrar um resultado NEGATIVO e poupar a proxima pessoa de
-# repetir a tentativa.
+# ── A DESCIDA NAO ACELERA POR PARAMETRO. Resultado negativo, 2026-09-16.
 #
-# MEDIDO 2026-09-15 no ground truth: a descida roda a 0,15 m/s e o estado LAND
-# custa 18,3 s por base — 110 s dos 600 de uma rodada, com seis bases. O
-# default deste build ja e 0,5 m/s (LAND_SPD_MS_DEFAULT em ArduCopter/
-# config.h), ou seja tres vezes o observado, entao algo mais freia.
+# MEDIDO: a descida roda a 0,15-0,18 m/s e o estado LAND custa 18,3 s por base
+# — 110 s dos 600 de uma rodada. Quatro parametros foram testados, um a um, com
+# uma corrida completa cada, e NENHUM moveu o numero:
 #
-# MEDIDO 2026-09-16 com ele fixado em 0,5 e uma corrida completa: a descida
-# sustentada mais rapida foi 0,18 m/s contra 0,15. Ruido. O freio esta em
-# outro lugar — candidatos por ordem: o flare por rangefinder do modo LAND (as
-# bases tem 0,8-1,4 m e o sensor ve o topo cedo), PILOT_SPD_DN, e o limite de
-# aceleracao vertical do controlador de posicao.
+#   LAND_SPD_MS 0.5   ja era o default; o observado e 3x menor
+#   WP_SPD_DN   1.0   a descida antes do trecho final
+#   SURFTRAK_MODE 0   desliga o rastreio de solo por rangefinder
+#   WP_ACC_Z    1.5   aceleracao vertical
 #
-# E VALE INSISTIR, porque aqui acelerar NAO troca precisao por tempo: a missao
-# entrega o veiculo ao modo LAND e PARA de mandar setpoint (_begin_landing), e
-# nao ha precision landing configurado. Os 17 s de descida sao MALHA ABERTA —
-# ninguem corrige deriva nesse trecho. Menos tempo no ar e menos tempo para
-# derivar.
-LAND_SPD_MS     0.5
+# Todos revertidos: mudar parametro que nao mede ganho so adiciona risco. O
+# freio esta noutro lugar — o detector de pouso, a maquina de estados do modo
+# LAND, ou a propria lag de atuacao do BiguaSim. Quem for atras: instrumentar a
+# taxa de descida comandada contra a realizada antes de mexer em mais numeros.

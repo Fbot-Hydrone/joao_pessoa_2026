@@ -120,7 +120,7 @@ from rclpy.node import Node
 from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
                        ReliabilityPolicy)
 
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, TwistStamped
 from nav_msgs.msg import Path
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
@@ -514,6 +514,26 @@ class Phase1MissionNode(Node):
 
         # ── Landing, and the plumbing ───────────────────────────────────────
         self.declare_parameter("dwell_s", 4.0)
+        # SETTLE ends on EVIDENCE that the estimate stopped moving, not on a
+        # stopwatch. `settle_s` stays the ceiling.
+        #
+        # MEASURED 2026-09-16 over the perimeter: the vehicle is STATIONARY for
+        # 159 of its 300 s — 53% — and covers 28.3 m that would take 47 s at
+        # cruise. SETTLE is nine of those pauses at the full 5 s each. What it
+        # waits for is observable in the EKF's own velocity, so waiting the
+        # whole 5 s when the vehicle stopped in 1 is pure loss.
+        #
+        # The EKF's velocity and not a pose difference, for the reason
+        # pad_map_node gives where it reads the same topic: at 30 Hz a
+        # centimetre of pose noise is a large made-up speed.
+        #
+        # FAILS CLOSED: no velocity message means no evidence, and no evidence
+        # means the full wait. Losing time is recoverable; a detection taken
+        # mid-slew is projected through a moving pose and poisons the map.
+        self.declare_parameter("settle_still_speed", 0.15)
+        self.declare_parameter("settle_still_yaw_rate_deg", 8.0)
+        self.declare_parameter("velocity_topic",
+                               "/mavros/local_position/velocity_local")
         self.declare_parameter("land_timeout_s", 60.0)
         self.declare_parameter("land_settle_s", 2.0)
         # Touchdown = the reported altitude STOPS CHANGING. How much movement
@@ -610,6 +630,10 @@ class Phase1MissionNode(Node):
         p = lambda n: self.get_parameter(n).value
         self.takeoff_alt = float(p("takeoff_alt"))
         self.target_bases = int(p("target_bases"))
+        self.settle_still_speed = float(p("settle_still_speed"))
+        self.settle_still_yaw_rate = math.radians(
+            float(p("settle_still_yaw_rate_deg")))
+        self._vel = None
         self.mission_budget_s = float(p("mission_budget_s"))
         self.return_reserve_s = float(p("return_reserve_s"))
         self._mission_t0 = None
@@ -764,6 +788,10 @@ class Phase1MissionNode(Node):
         self.create_subscription(State, "/mavros/state", self._cb_state, 10)
         self.create_subscription(PoseStamped, "/mavros/local_position/pose",
                                  self._cb_pose, sensor_qos)
+        if self.settle_still_speed > 0.0:
+            self.create_subscription(
+                TwistStamped, self.get_parameter("velocity_topic").value,
+                self._cb_vel, sensor_qos)
         self.create_subscription(PadMap, "/hydrone/pads/map", self._cb_map, 10)
         if self.search_mode == "map_sweep":
             self.create_subscription(
@@ -853,6 +881,9 @@ class Phase1MissionNode(Node):
 
     def _cb_state(self, msg: State):
         self.mav_state = msg
+
+    def _cb_vel(self, msg: TwistStamped):
+        self._vel = msg
 
     def _cb_pose(self, msg: PoseStamped):
         self.pose = msg
@@ -1511,7 +1542,7 @@ class Phase1MissionNode(Node):
            landing is eliminatory.
         """
         self._hold()
-        if self._since_entered() < self.settle_s:
+        if not self._settled():
             return
 
         # ── 1. the circuit ──────────────────────────────────────────────────
@@ -2288,6 +2319,23 @@ class Phase1MissionNode(Node):
             if int(pad.id) == int(self.target_id):
                 return (pad.position.x, pad.position.y)
         return None
+
+    def _settled(self) -> bool:
+        """Has the settle pause done its job yet? See settle_still_speed."""
+        waited = self._since_entered()
+        if waited >= self.settle_s:
+            return True
+        if self.settle_still_speed <= 0.0 or self._vel is None:
+            return False
+        # A floor, because the vehicle ARRIVES here still carrying the speed
+        # this state exists to bleed off: sampling on entry would call it
+        # settled before it has begun to slow.
+        if waited < 0.5:
+            return False
+        lin = self._vel.twist.linear
+        speed = math.sqrt(lin.x * lin.x + lin.y * lin.y + lin.z * lin.z)
+        return (speed <= self.settle_still_speed
+                and abs(self._vel.twist.angular.z) <= self.settle_still_yaw_rate)
 
     def _target_uv_now(self):
         """Where the pad must sit in the image for the VEHICLE to be over it.
