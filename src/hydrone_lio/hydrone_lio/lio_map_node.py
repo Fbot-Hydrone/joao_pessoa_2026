@@ -122,7 +122,7 @@ class LioMapNode(Node):
         dp('in_cloud', '/cloud_registered')
         dp('in_odom', '/hydrone/lio/odom_raw')
         dp('frame', 'odom')
-        dp('mount_xyz', [0.0, 0.0, 0.5])
+        dp('mount_xyz', [0.0, 0.0, 0.1])
         dp('mount_rpy_deg', [0.0, 0.0, 0.0])
         dp('voxel_size', 0.05)
         dp('dedup_size', 0.02)

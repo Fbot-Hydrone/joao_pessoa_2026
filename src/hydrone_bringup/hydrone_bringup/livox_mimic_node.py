@@ -67,7 +67,7 @@ class LivoxMimicNode(Node):
         # the unit sends ~20k pts per message; keep at most this many
         dp('max_points', 20000)
         dp('reflectivity', 100)
-        dp('mount_xyz', [0.0, 0.0, 0.5])
+        dp('mount_xyz', [0.0, 0.0, 0.1])
         dp('mount_rpy_deg', [0.0, 0.0, 0.0])
         # BiguaSim spawns the drone above the ground and it falls for ~0.2 s.
         # FAST-LIO takes gravity from its first ~10 IMU samples, so a start in

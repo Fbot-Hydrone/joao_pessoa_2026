@@ -22,8 +22,8 @@
         preprocess:
             lidar_type: 1
             scan_line:  4
-            # the Kopis's own frame and props sit inside ~0.35 m of the unit
-            blind: 0.35
+            # the Kopis is <= 330 mm across, so its own props sit inside ~0.25 m
+            blind: 0.25
             timestamp_unit: 3
             scan_rate: 10
 

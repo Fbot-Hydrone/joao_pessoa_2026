@@ -47,7 +47,7 @@ class LioOdomAdapter(Node):
         dp('odom_frame', 'odom')
         dp('base_frame', 'base_link')
         # base_link -> livox_frame, same numbers livox_mimic / the real mount use
-        dp('mount_xyz', [0.0, 0.0, 0.5])
+        dp('mount_xyz', [0.0, 0.0, 0.1])
         dp('mount_rpy_deg', [0.0, 0.0, 0.0])
         dp('publish_tf', True)
         dp('gate_enabled', True)

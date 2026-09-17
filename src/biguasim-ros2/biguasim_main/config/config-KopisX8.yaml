@@ -38,10 +38,12 @@
             # 10 Hz head. FOV is the real -7..52 minus the bridge's +-3 deg
             # wobble, which is what breaks up the fixed rings.
             # Points come back in the body frame, not the sensor's.
+            # Mounted like the real drone: centered on top of the ~11 cm
+            # frame, a little above it (was 0.5 m, a pole nobody would fly).
             - sensor_type: RaycastLidar
               sensor_name: Mid360
               ros_publish: true
-              location: [0, 0, 0.5]
+              location: [0, 0, 0.1]
               configuration:
                 Channels: 40
                 Range: 70
