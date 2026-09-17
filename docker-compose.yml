@@ -28,11 +28,6 @@ services:
       # SWEEP needs no rebuild between runs. Empty = whatever config.yaml says.
       # scripts/seed_sweep.sh is what sets it.
       - BASES_SEED=${BASES_SEED:-}
-      # Extra ArduPilot parameter file, applied AFTER holybro_sitl.parm so it
-      # overrides it. Same door as BASES_SEED and for the same reason: a
-      # parameter sweep varies it per run with no rebuild. Empty = base params
-      # only. See src/hydrone_bringup/config/params/overlays/.
-      - SITL_PARAMS_OVERLAY=${SITL_PARAMS_OVERLAY:-}
     volumes:
       # Where runs write their logs. odom_error_node's drift CSV lands here,
       # and it is the ONLY record of how far the VO wanders — without this

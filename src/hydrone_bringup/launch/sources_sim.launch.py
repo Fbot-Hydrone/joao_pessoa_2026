@@ -237,32 +237,6 @@ def generate_launch_description():
     dds_udp_parm = os.path.join(
         sitl_pkg, 'config', 'default_params', 'dds_udp.parm')
 
-    # BENCHMARK OVERLAY. `defaults` is an ORDERED comma-separated list and
-    # ArduPilot lets the last file to name a parameter win, so an overlay
-    # appended here overrides holybro_sitl.parm without duplicating a line of
-    # it. Empty unless asked for, so an ordinary run is byte-identical.
-    #
-    # An environment variable and not a launch argument, deliberately: this is
-    # the same door BASES_SEED uses, because it is wanted for the same reason —
-    # a sweep varies it per run with no rebuild and no edit in between, and
-    # docker-compose.yml already forwards it. See scripts/param_sweep.sh.
-    #
-    # Give it a bare name (`fast`) and it resolves inside the installed
-    # overlays directory; give it a path and it is used as is.
-    sitl_defaults = f'{holybro_parm},{dds_udp_parm}'
-    overlay = os.environ.get('SITL_PARAMS_OVERLAY', '').strip()
-    if overlay:
-        if not os.path.isabs(overlay):
-            overlay = os.path.join(bringup_pkg, 'config', 'params',
-                                   'overlays', f'{overlay}.parm')
-        if not os.path.exists(overlay):
-            raise RuntimeError(
-                f'SITL_PARAMS_OVERLAY points at {overlay!r}, which does not '
-                'exist. A silent miss here would fly the BASE parameters and '
-                'score the run as if the variant had been applied.')
-        sitl_defaults = f'{sitl_defaults},{overlay}'
-        print(f'[sitl] parameter overlay: {overlay}')
-
     ardubridge = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(get_package_share_directory('biguasim_main'),
@@ -288,7 +262,7 @@ def generate_launch_description():
             'speedup': '1',
             'slave': '0',
             'instance': '0',
-            'defaults': sitl_defaults,
+            'defaults': f'{holybro_parm},{dds_udp_parm}',
             'sim_address': '127.0.0.1',
             'master': 'tcp:127.0.0.1:5760',
             'sitl': '127.0.0.1:5501',

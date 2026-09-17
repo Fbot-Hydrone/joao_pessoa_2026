@@ -573,6 +573,74 @@ def test_the_budget_is_centimetres_on_the_ground_not_pixels(node):
     assert near < node.land_centre_max_cm < far
 
 
+# ── The competition clock ────────────────────────────────────────────────────
+#
+# A round is 10 minutes and returning to the takeoff base DOUBLES the score, so
+# a mission that searches until it runs out of ideas throws away half its
+# points. See docs/FASE1-REGRAS.md.
+
+def _armed_and_flying(node, elapsed):
+    """Put the node mid-search with `elapsed` seconds already spent."""
+    node.mission_budget_s = 600.0
+    node.return_reserve_s = 60.0
+    node.home = (0.0, 0.0)
+    set_map(node, pad(0, 0.0, 0.0, takeoff_base=True), pad(4, 3.0, 0.0))
+    enter(node, node.SELECT)
+    node._mission_t0 = node._now() - elapsed
+    node._budget_called = False
+
+
+def test_the_clock_lets_the_search_run_while_there_is_time(node):
+    _armed_and_flying(node, elapsed=100.0)
+    node._check_budget()
+    assert not node._budget_called
+    assert node.landing_for != node.LAND_FINAL
+
+
+def test_the_clock_heads_home_with_the_reserve_left(node):
+    """600 s budget, 60 s reserved: the decision must come at 540, not at 600.
+
+    Deciding at the deadline is deciding too late — the flight home still has
+    to happen, and crossing the line mid-arena means landing off-base, which
+    the rules make eliminatory.
+    """
+    _armed_and_flying(node, elapsed=545.0)
+    node._check_budget()
+    assert node._budget_called
+    assert node.landing_for == node.LAND_FINAL
+    assert node.state == node.TRAVEL
+
+
+def test_the_clock_does_not_interrupt_a_landing(node):
+    """Seconds from the ground is the one place where stopping costs more.
+
+    An abandoned descent leaves the vehicle over a pad it has not committed to,
+    which is exactly the state the reserve exists to never be caught in.
+    """
+    _armed_and_flying(node, elapsed=545.0)
+    enter(node, node.LAND)
+    node._check_budget()
+    assert not node._budget_called
+
+
+def test_without_a_budget_the_clock_never_fires(node):
+    """0 is off, and off must be what every run before the clock existed did."""
+    _armed_and_flying(node, elapsed=5000.0)
+    node.mission_budget_s = 0.0
+    node._check_budget()
+    assert not node._budget_called
+
+
+def test_the_clock_speaks_once(node):
+    """After it has spoken the vehicle is already flying home; re-deciding at
+    10 Hz would re-issue the setpoint forever."""
+    _armed_and_flying(node, elapsed=545.0)
+    node._check_budget()
+    node.state = node.SELECT          # pretend something else moved us
+    node._check_budget()
+    assert node.state == node.SELECT  # not re-entered TRAVEL
+
+
 def test_a_budget_of_zero_turns_the_gate_off_rather_than_vetoing_everything(node):
     """`land_centre_max_cm:=0` must mean OFF, not "zero tolerance".
 

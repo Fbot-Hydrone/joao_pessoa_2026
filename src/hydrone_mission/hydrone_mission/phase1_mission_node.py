@@ -120,7 +120,7 @@ from rclpy.node import Node
 from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
                        ReliabilityPolicy)
 
-from geometry_msgs.msg import PoseStamped, TwistStamped
+from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Path
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
@@ -408,22 +408,6 @@ class Phase1MissionNode(Node):
         # whole — that sweep is what stops the mission chasing its first
         # sighting.
         self.declare_parameter("land_during_survey", True)
-        # The level from which `land_during_survey` is allowed to interrupt.
-        # 2 keeps the barrier where the comment above puts it: level 1 is flown
-        # WHOLE, and that is what stops the mission chasing its first sighting.
-        #
-        # 1 is the other strategy — land on the first thing confirmed, and let
-        # the later levels go back for whatever is left. It trades map for
-        # time, and BOTH halves of that trade are measured: level 1 is what
-        # fills the octomap the belly camera projects into, and a pad placed
-        # from a thin map lands off-centre. MEASURED across seeds 1-6 on
-        # 2026-09-02, with the full sweep, the map already placed pads 0.31 to
-        # 0.47 m out on a 1 m pad, and `pousos_validos` was below `pousos` in
-        # four of six runs. Landing earlier starts from less than that.
-        #
-        # Which is why it is a number and not an edit: scripts/param_sweep.sh
-        # flies both over the same seeds and the answer is a table.
-        self.declare_parameter("land_during_survey_min_level", 2)
         self.declare_parameter("unreachable_tries", 3)
         # Seconds a refused pad must wait before another refusal counts against
         # it. Long enough for the search to fly somewhere else and put new rays
@@ -512,24 +496,6 @@ class Phase1MissionNode(Node):
 
         # ── Landing, and the plumbing ───────────────────────────────────────
         self.declare_parameter("dwell_s", 4.0)
-        # SETTLE by MEASUREMENT instead of by clock. `settle_s` stays as the
-        # ceiling; this is the speed below which the vehicle counts as already
-        # still, so the state can end as soon as it is true instead of always
-        # paying the full wait.
-        #
-        # 0.0 keeps the pure timer, which is the behaviour every earlier run
-        # was tuned against. MEASURED 2026-09-14: SETTLE cost 46 s of a 526 s
-        # mission across 9 visits, all of them the full 5 s, and the state's
-        # own docstring says what it is waiting FOR — "let the estimate stop
-        # moving" — which is a thing that can be observed rather than assumed.
-        #
-        # The EKF's velocity and not a pose difference, for the reason
-        # pad_map_node gives where it reads the same topic: at 30 Hz a
-        # centimetre of pose noise is a large made-up speed.
-        self.declare_parameter("settle_still_speed", 0.0)
-        self.declare_parameter("settle_still_yaw_rate_deg", 8.0)
-        self.declare_parameter("velocity_topic",
-                               "/mavros/local_position/velocity_local")
         self.declare_parameter("land_timeout_s", 60.0)
         self.declare_parameter("land_settle_s", 2.0)
         # Touchdown = the reported altitude STOPS CHANGING. How much movement
@@ -658,16 +624,10 @@ class Phase1MissionNode(Node):
         self.u_side_x_m = float(p("u_side_x_m"))
         self.u_side_y_m = float(p("u_side_y_m"))
         self.land_during_survey = bool(p("land_during_survey"))
-        self.land_during_survey_min_level = int(
-            p("land_during_survey_min_level"))
         self.retarget_tol_m = float(p("retarget_tol_m"))
         self.max_search_level = int(p("max_search_level"))
         self.centre_on_pad = bool(p("centre_on_pad"))
         self.land_centre_max_cm = float(p("land_centre_max_cm"))
-        self.settle_still_speed = float(p("settle_still_speed"))
-        self.settle_still_yaw_rate = math.radians(
-            float(p("settle_still_yaw_rate_deg")))
-        self._vel = None
         t = [float(v) for v in p("pad_target_uv")]
         self._servo = servo.VisualServo(target_uv=(t[0], t[1]))
         self._level = 1
@@ -785,12 +745,6 @@ class Phase1MissionNode(Node):
         self.create_subscription(State, "/mavros/state", self._cb_state, 10)
         self.create_subscription(PoseStamped, "/mavros/local_position/pose",
                                  self._cb_pose, sensor_qos)
-        # Only when SETTLE is measured rather than timed — an unused
-        # subscription is a topic that looks required when it is not.
-        if self.settle_still_speed > 0.0:
-            self.create_subscription(
-                TwistStamped, self.get_parameter("velocity_topic").value,
-                self._cb_vel, sensor_qos)
         self.create_subscription(PadMap, "/hydrone/pads/map", self._cb_map, 10)
         if self.search_mode == "map_sweep":
             self.create_subscription(
@@ -880,9 +834,6 @@ class Phase1MissionNode(Node):
 
     def _cb_state(self, msg: State):
         self.mav_state = msg
-
-    def _cb_vel(self, msg: TwistStamped):
-        self._vel = msg
 
     def _cb_pose(self, msg: PoseStamped):
         self.pose = msg
@@ -1541,7 +1492,7 @@ class Phase1MissionNode(Node):
            landing is eliminatory.
         """
         self._hold()
-        if not self._settled():
+        if self._since_entered() < self.settle_s:
             return
 
         # ── 1. the circuit ──────────────────────────────────────────────────
@@ -1597,8 +1548,7 @@ class Phase1MissionNode(Node):
             # sighting — and from level 2 on, a confirmed pad is worth landing
             # on NOW. The level resumes afterwards: `_survey_path` is not
             # cleared, so the remaining points are still flown.
-            if (self.land_during_survey
-                    and self._level >= self.land_during_survey_min_level
+            if (self.land_during_survey and self._level >= 2
                     and self.landed_count < self.target_bases
                     and self._best_candidate() is not None):
                 self.get_logger().info(
@@ -2319,39 +2269,6 @@ class Phase1MissionNode(Node):
             if int(pad.id) == int(self.target_id):
                 return (pad.position.x, pad.position.y)
         return None
-
-    def _settled(self) -> bool:
-        """Has the settle pause done its job yet?
-
-        `settle_s` is always the ceiling. With `settle_still_speed` at 0 that
-        ceiling is the ONLY rule and this is the pure timer every earlier run
-        was tuned against.
-
-        Above 0, the state may end early — but only on EVIDENCE that the thing
-        it is waiting for has happened. What it waits for is the estimate to
-        stop moving, so that a detection taken here is projected through a pose
-        that is not mid-slew; that is observable in the EKF's own velocity.
-
-        FAILS OPEN, deliberately and the same way pad_map's speed gate does: no
-        velocity message yet means no evidence, and no evidence must mean the
-        full wait rather than a free pass. A missing topic then costs time,
-        which is recoverable, instead of costing map accuracy, which is not.
-        """
-        waited = self._since_entered()
-        if waited >= self.settle_s:
-            return True
-        if self.settle_still_speed <= 0.0 or self._vel is None:
-            return False
-        # A floor, because the vehicle ARRIVES here still carrying the speed
-        # this state exists to bleed off: sampling once on entry would call it
-        # settled before it has begun to slow.
-        if waited < 0.5:
-            return False
-        lin = self._vel.twist.linear
-        speed = math.sqrt(lin.x * lin.x + lin.y * lin.y + lin.z * lin.z)
-        yaw_rate = abs(self._vel.twist.angular.z)
-        return (speed <= self.settle_still_speed
-                and yaw_rate <= self.settle_still_yaw_rate)
 
     def _centre_offset_px(self, det):
         """How far the pad is from where it should sit in the image, in px."""

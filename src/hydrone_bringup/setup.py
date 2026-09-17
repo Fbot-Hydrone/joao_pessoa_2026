@@ -18,8 +18,6 @@ setup(
             glob('config/*.yaml')),
         (os.path.join('share', package_name, 'config', 'params'),
             glob('config/params/*.parm')),
-        (os.path.join('share', package_name, 'config', 'params', 'overlays'),
-            glob('config/params/overlays/*.parm')),
         (os.path.join('share', package_name, 'rviz'),
             glob('rviz/*.rviz')),
     ],
