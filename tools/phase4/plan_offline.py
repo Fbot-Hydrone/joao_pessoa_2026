@@ -10,7 +10,7 @@ import numpy as np
 sys.path.insert(0, '/ws/src/hydrone_lio')
 sys.path.insert(0, '/ws/src/hydrone_mission')
 from hydrone_lio.lio_map_node import read_pcd  # noqa: E402
-from hydrone_mission.phase4_maze_node import astar, inflate  # noqa: E402
+from hydrone_mission.phase4_maze_node import astar, inflate, nearest_free  # noqa: E402
 
 d, out = sys.argv[1], sys.argv[2]
 start = [float(v) for v in sys.argv[3].split(',')]
@@ -36,7 +36,7 @@ blocked = inflate(np.pad(occ, cells + 1), cells)[cells + 1:-cells - 1, cells + 1
 cell = lambda xy: (int(np.clip(round((xy[0] - x0) / res), 0, h - 1)), int(np.clip(round((xy[1] - y0) / res), 0, w - 1)))  # noqa: E731
 s, g = cell(start), cell(goal)
 print('start blocked', blocked[s], 'goal blocked', blocked[g])
-blocked[s] = blocked[g] = False
+s, g = nearest_free(blocked, s), nearest_free(blocked, g)
 path = astar(blocked, s, g)
 print('path', None if path is None else f'{len(path)} cells, {len(path) * res:.1f} m')
 fig, ax = plt.subplots(figsize=(16, 7))

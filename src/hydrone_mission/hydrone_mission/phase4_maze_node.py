@@ -9,7 +9,8 @@ Minimal on purpose (docs/Phase 4 Maze Mission.md):
   MAZE      replan every replan_s: A* on a 2D grid cut from the live voxel map
             between fly_z - below and fly_z + above, obstacles inflated by
             radius. Unknown cells are free: the path gets corrected as the
-            lidar sees round each corner. Planning is fenced to the structure's
+            lidar sees round each corner. When the known map walls the exit
+            off, fly to the reachable cell nearest it and look again. Planning is fenced to the structure's
             footprint (plus the entry and exit aprons) so the shortest path
             can't simply go round the outside.
   EXIT      out through the exit gap to exit_xy at fly_z, then climb
@@ -78,6 +79,41 @@ def astar(blocked, start, goal):
     return None
 
 
+def closest_reachable(blocked, start, goal):
+    """Flood fill from start; the reachable cell nearest the goal.
+
+    When the goal is walled off in the known map, going there lets the lidar
+    see round the next corner, and the next plan knows more.
+    """
+    h, w = blocked.shape
+    seen = np.zeros_like(blocked)
+    seen[start] = True
+    stack = [start]
+    best, best_d = start, math.hypot(start[0] - goal[0], start[1] - goal[1])
+    while stack:
+        i, j = stack.pop()
+        d = math.hypot(i - goal[0], j - goal[1])
+        if d < best_d:
+            best, best_d = (i, j), d
+        for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            n = (i + di, j + dj)
+            if 0 <= n[0] < h and 0 <= n[1] < w and not seen[n] and not blocked[n]:
+                seen[n] = True
+                stack.append(n)
+    return best
+
+
+def nearest_free(blocked, c):
+    """The free cell closest to c (c itself if free), or None."""
+    if not blocked[c]:
+        return c
+    free = np.argwhere(~blocked)
+    if not len(free):
+        return None
+    k = int(np.argmin(((free - np.array(c)) ** 2).sum(axis=1)))
+    return tuple(int(v) for v in free[k])
+
+
 def inflate(occ, cells):
     """Dilate a bool grid by a disc of `cells` radius (numpy only)."""
     if cells <= 0:
@@ -103,12 +139,13 @@ class MazeNode(Node):
         dp('fly_z', 0.2)               # odom z inside the maze
         dp('below', 0.55)              # obstacle slice under base_link (floor excluded)
         dp('above', 0.6)               # and over it (roof excluded)
-        dp('radius', 0.3)              # inflation, m
+        dp('radius', 0.2)              # inflation, m (caged 5" Kopis ~0.3 m wide)
         dp('resolution', 0.1)
-        # Front-face gaps seen on the saved map (tools/phase4/slice_map.py),
-        # 0.55 m outside the front wall at x = 1.35.
-        dp('entry_xy', [1.9, -2.45])
-        dp('exit_xy', [1.9, -6.5])
+        # From a clean map of the structure (tools/phase4/plan_offline.py): the
+        # entrance is a ~0.6 m gap in the front wall (x = 1.35) at y ~ -2.5;
+        # the open side is the far end, past y ~ -7.1. entry is outside the gap.
+        dp('entry_xy', [1.9, -2.55])
+        dp('exit_xy', [0.0, -7.7])
         dp('approach_y', 0.0)          # spawn side, clear of the structure
         # planning fence [x_min, x_max, y_min, y_max]: inside the structure, so
         # the shortest path can't go round the outside
@@ -119,6 +156,9 @@ class MazeNode(Node):
         dp('lookahead', 0.5)
         dp('reach_tol', 0.25)
         dp('leg_timeout_s', 300.0)
+        # the maze itself gets longer: unknown-is-free replanning walks into
+        # dead ends before it learns they are dead ends
+        dp('maze_timeout_s', 900.0)
         p = lambda n: self.get_parameter(n).value  # noqa: E731
         self.p = p
 
@@ -219,9 +259,13 @@ class MazeNode(Node):
         blocked = inflate(big, int(math.ceil(float(self.p('radius')) / res)))[pad:-pad, pad:-pad]
         cell = lambda xy: (int(np.clip(round((xy[0] - x0) / res), 0, h - 1)),  # noqa: E731
                            int(np.clip(round((xy[1] - y0) / res), 0, w - 1)))
-        s, g = cell(start_xy), cell(goal_xy)
-        blocked[s] = blocked[g] = False
+        s, g = nearest_free(blocked, cell(start_xy)), nearest_free(blocked, cell(goal_xy))
+        if s is None or g is None:
+            return None
         path = astar(blocked, s, g)
+        if path is None:
+            # walled off as far as we know: explore toward it instead
+            path = astar(blocked, s, closest_reachable(blocked, s, g))
         if path is None:
             return None
         return [(x0 + i * res, y0 + j * res) for i, j in path]
@@ -253,7 +297,8 @@ class MazeNode(Node):
             return
         alt, fz = float(self.p('takeoff_alt')), float(self.p('fly_z'))
         entry, exit_ = np.array(self.p('entry_xy')), np.array(self.p('exit_xy'))
-        if self.phase != 'TAKEOFF' and self.now() - self.t_phase > float(self.p('leg_timeout_s')) \
+        limit = float(self.p('maze_timeout_s' if self.phase == 'MAZE' else 'leg_timeout_s'))
+        if self.phase != 'TAKEOFF' and self.now() - self.t_phase > limit \
                 and self.phase not in ('LAND', 'DONE'):
             self.get_logger().error(f'{self.phase} timed out, landing where we are')
             self.go('LAND')
