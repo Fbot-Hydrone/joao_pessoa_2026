@@ -171,8 +171,12 @@ def _launch_setup(context, *args, **kwargs):
     )
 
     mavros_share = get_package_share_directory('mavros')
+    # respawn: under the slow sim MAVROS sometimes dies at startup with
+    # "std::future_error: Promise already satisfied" (command retry race while
+    # timesync RTT is seconds); a restart comes up fine
     mavros = Node(
         package='mavros', executable='mavros_node', output='screen',
+        respawn=True, respawn_delay=3.0,
         parameters=[
             # apm_pluginlists minus vision_speed_estimate, which the LIO velocity needs
             os.path.join(lio_pkg, 'config', 'mavros_pluginlists_phase4.yaml'),

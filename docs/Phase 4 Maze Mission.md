@@ -1,61 +1,56 @@
 ---
-tags: [hydrone, phase4, plan]
+tags: [hydrone, phase4, mission]
 ---
 # Phase 4 Maze Mission
 
-Back to [[Hydrone]]. The Phase 4 mission goal and a minimal approach to it. See
-[[Phase 4 Pipeline]] for the odometry/mapping stack this depends on — this is
-the stretch goal (step 4) that sits on top of it.
+Back to [[Hydrone]]. Stretch goal on top of [[LIO Odometry]] and [[Persistent Map]]: enter the small structure right of spawn and leave through the other end without colliding. Node: `hydrone_mission/phase4_maze_node.py`, run with `scripts/docker_up.sh --dev --phase4 mission:=maze map_name:=<fresh>`.
 
-## Goal
+## Status (2026-09-17)
+**Built, not yet flown through.** The node reaches the entrance, but position-control accuracy (±0.5–1 m overshoot on long legs) is larger than the 0.6 m entrance gap. The LIO is not the blocker: it stayed within 5–15 cm of ground truth in every attempt, right up to each impact.
 
-To the right of the drone's spawn point there is a small 3D "maze" structure.
-The drone must enter it and exit at the other end without colliding, flying on
-its own sensing (see [[Phase 4 Pipeline]] — never on ground truth).
+## The structure (measured from the saved map)
+Odom frame: takeoff point, x forward, y left.
 
-## A minimal approach
+| Thing | Where |
+|---|---|
+| Footprint | x −0.8 … 1.35, y −1 … −7.1 (against the enclosure's back wall) |
+| Floor / roof | z −0.62 / +0.92 (≈1.55 m inside) |
+| Front wall | x = 1.35, **one gap at y −2.25 … −2.85 (~0.6 m)**. The "gap" at y ≈ −6.5 seen on the first merged map was noise from earlier flights |
+| Interior walls | y ≈ −2.1, −3.0, −4.05, −6, −7 and x ≈ −0.6, 0.35. Corridors ~0.8–1 m |
+| Kopis clearance | base_link rests 0.6 m above the floor (the collision body hangs that far down) and the lidar is +0.5 m, so fly at **z 0.1–0.3** inside |
 
-1. **Take off on LIO.** Requires [[LIO Odometry]] closed-loop and validated —
-   nothing here works before that exists.
-2. **Approach the entrance.** Fly toward the known (or roughly known) entrance
-   heading from spawn; refine against the lidar's own view of the structure as
-   it comes into range.
-3. **Plan through the voxel map, inflated by drone radius.** Use the
-   [[Persistent Map]]'s voxel grid, inflated by the drone's physical radius
-   (plus a safety margin) as an obstacle map, and plan a corridor-following or
-   simple free-space path through it — this does not need a general-purpose
-   planner for a small, mostly-corridor structure.
-4. **Exit and land.** Continue the plan through to the far opening, then land
-   once clear of the structure.
+Tools: `tools/phase4/plot_map.py` (top view), `slice_map.py` (height slices), `plan_offline.py` (runs the node's planner on a saved map and draws the grid and path).
 
-This deliberately mirrors the "smallest thing that flies a full cycle"
-philosophy already used for [[Landing Sites]] and [[Phase 1 Mission]]: no
-search, no retry logic, no dynamic replanning beyond following the map — get
-one clean traversal working before adding robustness.
+## How the node works
+1. **TAKEOFF**: GUIDED, arm, climb to 1 m.
+2. **APPROACH_HIGH → LOW → SIDE**: forward along y = 0 (clear of the structure), down to fly_z, then sideways along the front face to `entry_xy` (1.9, −2.55). Never diagonal over the roof: the first attempt clipped the roof corner that way.
+3. **MAZE**: at 1 Hz, A* (8-connected, no corner cutting) on a 10 cm grid.
+   - The grid is cut from the live voxel map between fly_z − 0.55 and fly_z + 0.6 (floor and roof excluded), voxels with <2 hits dropped, obstacles inflated by 0.2 m.
+   - Unknown counts as free, and the grid is fenced to the footprint so the path can't go round the outside.
+   - If the exit is walled off in the known map, it flies to the reachable cell nearest the exit to see more.
+   - It follows a 0.5 m carrot.
+4. **EXIT_LOW → EXIT → LAND**: out to `exit_xy` (0.0, −7.7) past the far end, climb, land.
 
-## Open questions
+## Attempts
+| # | Change | Result |
+|---|---|---|
+| 1 | first try, no LIO velocity to the EKF | crashed on the approach: diagonal over the roof corner plus ~1 m overshoot |
+| 2 | LIO velocity → EKF, approach around the structure, WP_SPD 0.7 | reached the gap cleanly; **no path**: inflated gap closed and the wrong exit guess |
+| 3 | radius 0.2, far-end exit, explore-toward-exit fallback | sideways approach overshot 1.2 m into the wall edge at the gap, slid onto the roof, crashed |
 
-- **How narrow is the maze, relative to the Kopis X8's frame + prop guards?**
-  Drives how much inflation margin is affordable versus how tight the planned
-  path has to hug the walls.
-- **Is the structure geometry known ahead of time** (a CAD/measured model), or
-  must the drone build the map of it purely from its own first pass? If known,
-  a pre-loaded map could seed [[Persistent Map]] and simplify this considerably.
-- **What happens on a [[Degraded Sensing]] event inside the maze?** Corridors
-  are exactly the degenerate geometry LIO struggles with (see
-  [[Degraded Sensing]]), and the maze is the one place in the mission where that matters
-  most, with the least room to recover from a bad estimate.
-- **Collision margin vs. mission time.** A wide margin is safer but may not fit
-  through a tight maze section; this needs a real measurement of the structure
-  before it can be tuned rather than guessed.
-- **Does RGB help here specifically?** The maze's walls may be more
-  textured than the open arena — worth checking once
-  [[RGB Camera Enhancement]] exists, since loop closure/relocalization inside a maze is a
-  plausible high-value case for it.
+## Position-loop step tests (LIO nav, 1.5 m forward/back)
+| Gains | Overshoot | Lateral wander | Peak speed |
+|---|---|---|---|
+| firmware defaults (PSC_NE_POS_P 1, VEL_P 2, VEL_I 1) | +0.61 / −0.57 m | 0.83 m | 1.97 m/s |
+| POS_P 0.8, VEL_I 0.4 (the VEL_P 1.2 set failed: MAVROS param node not up yet) | +0.63 / −0.57 m | 0.59 m | 2.14 m/s |
 
-## Status
+- `WP_SPD 0.7` is loaded (read back), yet the vehicle reaches ~2 m/s on a MAVROS position target. Check whether this 4.8-dev GUIDED path really takes its limit from `WP_SPD` before tuning further.
+- Not continued: tuning the position loop against BiguaSim's actuation lag is its own job.
 
-Not started. Depends on [[LIO Odometry]] and [[Persistent Map]] both being
-validated first; this is the last step in [[Phase 4 Pipeline]] and explicitly
-a stretch goal, not a prerequisite for the rest of Phase 4 to be considered
-working.
+## What's needed next (in order)
+1. **Position-loop accuracy.** Tune the PSC gains against BiguaSim's actuation lag (see [[LIO Odometry]]). A 0.6 m gap needs ±0.15 m.
+2. **Slow, short approach into the gap:** stop 1 m out, align y, then creep in.
+3. **Verify the real layout from inside** (hover in the entrance room) before trusting the exit side.
+4. Only then does the planner's exploration get a fair test.
+
+Open questions from the plan that still stand: degeneracy of LIO inside narrow corridors (not seen yet; it tracked fine at the gap), and whether RGB helps inside ([[RGB Camera Enhancement]]).

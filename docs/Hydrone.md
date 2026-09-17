@@ -57,8 +57,14 @@ sensing, no GPS, no ground truth in the loop.
   measure drift.
 - Compute target for Phase 4 is the Jetson Nano, or at worst a Raspberry Pi 5 —
   the pipeline must be CPU-light throughout.
-- Adopt an existing LIO core (FAST-LIO2 expected) and add team-specific hooks,
-  rather than writing scan registration from scratch.
+- Adopt an existing LIO core and add team-specific hooks, rather than writing
+  scan registration from scratch. Chosen: FAST-LIO2 ROS 2 branch, vendored
+  ([[LIO Selection]]).
+- The simulated Mid-360 is BiguaSim's engine RaycastLidar, wobbled ±3° per tick
+  so scans don't repeat, instead of spinning depth cameras
+  ([[Livox Mid-360 Sim]]).
+- The real drone's ESCs report RPM; in sim the bridge publishes the same
+  `mavros_msgs/ESCTelemetry` because ArduPilot's JSON SITL has no RPM input.
 - Both IMUs are used: the Mid-360's internal IMU feeds the LIO core; the
   Pixhawk's IMU + ESC RPM feed the motor physics prior.
 - The persistent map is a voxel map plus a deduplicated plain point cloud (not
