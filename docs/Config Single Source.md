@@ -1,15 +1,17 @@
-# Config as single source of truth — sim wiring (2026-08-04)
+---
+tags: [hydrone, config, sim]
+---
+# Config Single Source
 
-Audit of hardcoded values in the ROS 2 packages that duplicate — or silently
-override — data that already lives in
-[`src/biguasim-ros2/biguasim_main/config/config.yaml`](../src/biguasim-ros2/biguasim_main/config/config.yaml),
-plus the changes that removed the duplication.
+Back to [[Hydrone]]. Audit (2026-08-04) of hardcoded values in the ROS 2
+packages that duplicate — or silently override — data that already lives in
+`src/biguasim-ros2/biguasim_main/config/config.yaml`, plus the changes that
+removed the duplication.
 
 Scope: `hydrone_*` and `biguasim-ros2`. Vendored trees (`ardupilot/`,
 `micro_ros_agent/`) were not touched.
 
-> Related: [`SENSOR-CONFIG.md`](SENSOR-CONFIG.md) (sensor spec),
-> [`RANGEFINDER-SIM.md`](RANGEFINDER-SIM.md) (rangefinder chain).
+Related: [[Sensor Config]] (sensor spec), [[Rangefinder Sim]] (rangefinder chain).
 
 ---
 

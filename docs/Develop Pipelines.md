@@ -1,6 +1,11 @@
-# `develop-pipelines` — GPS-denied flight on ZED visual odometry
+---
+tags: [hydrone, phase1, ekf, vio]
+---
+# Develop Pipelines
 
-What this branch adds **on top of `develop`**, why, and how to use it.
+Back to [[Hydrone]]. What the `develop-pipelines` branch adds **on top of
+`develop`** for GPS-denied flight on ZED visual odometry — why, and how to use
+it.
 
 **Goal:** the CBR 2026 arena bans GPS, so the drone must localize from the ZED's
 **visual odometry (VIO)** instead. This branch makes ArduPilot SITL fly with **GPS

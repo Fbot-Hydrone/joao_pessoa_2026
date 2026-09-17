@@ -37,7 +37,7 @@ hardware arguments and phase1.launch.py for the mission's.
         takeoff_alt:=1.0 target_bases:=1 down_cam_calibrated:=true \\
         down_cam_fx:=... down_cam_fy:=... down_cam_cx:=... down_cam_cy:=...
 
-BEFORE THE FIRST FLIGHT — read docs/JETSON-REAL-STACK.md
+BEFORE THE FIRST FLIGHT — read docs/Jetson Real Stack.md
 --------------------------------------------------------
   * The belly camera must be calibrated. Uncalibrated, its camera_info is a
     nominal pinhole and the pad positions it produces carry that error straight

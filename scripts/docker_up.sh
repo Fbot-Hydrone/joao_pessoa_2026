@@ -15,9 +15,9 @@
 #   --phase1          run the Phase 1 mission (take off, turn on the spot until
 #                     a landing base is found, fly over it, confirm it on the
 #                     belly camera, land, repeat, come home) instead of the bare
-#                     sim bring-up. See docs/PHASE1-MISSION.md.
+#                     sim bring-up. See docs/Phase 1 Mission.md.
 #   --landing-sites   run the earlier landing-site mission (fly forward and land
-#                     on whatever the belly camera sees). See docs/LANDING-SITES.md.
+#                     on whatever the belly camera sees). See docs/Landing Sites.md.
 #   --phase4          bring up the OTHER AIRCRAFT: the Kopis X8 carrying a Livox
 #                     Mid-360 (config-KopisX8.yaml), simulated as a depth camera
 #                     the bridge rotates. Sources only -- the lidar's topics, a
@@ -35,7 +35,7 @@
 #                     visual odometry (odom_source:=ground_truth). A DEBUGGING
 #                     AID for separating autonomy bugs from localization bugs —
 #                     a green run on ground truth proves nothing about the real
-#                     drone, which has none. See docs/LANDING-SITES.md §10.
+#                     drone, which has none. See docs/Landing Sites.md.
 #   --no-odom-print   silence odom_error_node's 1 Hz VO-drift line (the CSV is
 #                     still written either way). On by default.
 #   --world HOST[:PORT]

@@ -36,8 +36,8 @@ project: it starts the BiguaSim⇄ArduPilot physics bridge and ArduPilot SITL
 | `deps.repos` | Pinned source dependencies (ArduPilot, micro-ROS agent/msgs, XRCE-Gen) |
 | `docker/`, `Dockerfile`, `docker-compose.yml` | Reproducible containerized bringup |
 | `docker-compose.dev.yml` | Dev override: bind-mounts `src/` so code edits need no image rebuild (`docker_up.sh --dev`) |
-| `scripts/` | Entry points and tooling — sim, drone, viewers, calibration. See [`SCRIPTS.md`](docs/SCRIPTS.md) |
-| `docs/` | Onboarding notes and historical docs. Start with [`PHASE1-MISSION.md`](docs/PHASE1-MISSION.md), [`LANDING-SITES.md`](docs/LANDING-SITES.md) and [`DEVELOP-PIPELINES.md`](docs/DEVELOP-PIPELINES.md) |
+| `scripts/` | Entry points and tooling — sim, drone, viewers, calibration. See [`Scripts.md`](docs/Scripts.md) |
+| `docs/` | An Obsidian vault — open this repo as the vault root. Start at [`Hydrone.md`](docs/Hydrone.md), or [`Phase 1 Mission.md`](docs/Phase%201%20Mission.md), [`Landing Sites.md`](docs/Landing%20Sites.md) and [`Develop Pipelines.md`](docs/Develop%20Pipelines.md) |
 
 Third-party sources (`src/ardupilot`, `src/micro_ros_agent`, `src/micro_ros_msgs`,
 `tools/Micro-XRCE-DDS-Gen`) are **not committed** — they are pinned in
@@ -59,9 +59,9 @@ anywhere else, point `BS_SIM_DIR` at it).
 # sim repo in a custom location:
 BS_SIM_DIR=~/Documents/bs-drone-competition ./scripts/docker_up.sh
 # Phase 1 mission (turn until a base is found, confirm it, land, come home):
-./scripts/docker_up.sh --phase1             # docs/PHASE1-MISSION.md
+./scripts/docker_up.sh --phase1             # docs/Phase 1 Mission.md
 # the earlier landing-site mission (fly forward, land on what you see):
-./scripts/docker_up.sh --landing-sites      # docs/LANDING-SITES.md
+./scripts/docker_up.sh --landing-sites      # docs/Landing Sites.md
 # any name:=value argument is forwarded to the launch:
 ./scripts/docker_up.sh --phase1 target_bases:=2 takeoff_alt:=1.5
 ```
@@ -137,7 +137,7 @@ installer, `docker/ZED_SDK_Tegra_L4T32.7_v4.0.8.zstd.run` (84 MB, download
 *ZED SDK for JetPack 4.6.X (L4T 32.7) 4.0.8* from stereolabs.com). The pyzed
 wheel beside it **is** committed, because unlike the installer it cannot be
 re-fetched from a URL — it is a from-source build against that exact SDK patch
-and numpy 1.21. Details in [`docs/JETSON-REAL-STACK.md`](docs/JETSON-REAL-STACK.md) §3.
+and numpy 1.21. Details in [`docs/Jetson Real Stack.md`](docs/Jetson%20Real%20Stack.md) §3.
 
 Nothing is needed to *run* an image that already exists: both files are build
 inputs only.
@@ -222,7 +222,7 @@ ros2 launch hydrone_bringup phase1_sim.launch.py     # or: docker_up.sh --phase1
 
 `target_bases` defaults to **1** while the mission has never been flown; the
 competition number is 2. Full description, tuning and what has not been flown
-yet in [`docs/PHASE1-MISSION.md`](docs/PHASE1-MISSION.md).
+yet in [`docs/Phase 1 Mission.md`](docs/Phase%201%20Mission.md).
 
 **Landing-site mission** — the earlier, simpler behaviour: fly forward and land
 on whatever the belly camera sees.
@@ -234,7 +234,7 @@ ros2 launch hydrone_bringup landing_sites_sim.launch.py
 These and `hydrone.launch.py` are **alternatives**, not additions: each carries a
 mission node, they all publish position setpoints, and two of them running at
 once fight over the vehicle. Full description, tuning and limitations in
-[`docs/LANDING-SITES.md`](docs/LANDING-SITES.md).
+[`docs/Landing Sites.md`](docs/Landing%20Sites.md).
 
 ### Start a mission
 

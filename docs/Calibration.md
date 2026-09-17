@@ -1,6 +1,10 @@
-# Calibrating the belly camera
+---
+tags: [hydrone, calibration, vision]
+---
+# Calibration
 
-The belly camera is the one that decides **where the drone lands**. It has no
+Back to [[Hydrone]]. How to calibrate the belly camera — the one that decides
+**where the drone lands**. It has no
 depth: `pad_map_node` turns a pad's pixel position into a place in the world by
 projecting through the `camera_info` this camera publishes. Until it is
 calibrated that `camera_info` is a *guess* — a nominal 60° pinhole with zero
@@ -12,13 +16,13 @@ document is how to make it stop.
 
 ---
 
-## 1. What you need
+## What you need
 
 | | |
 |---|---|
 | target | a **ChArUco** board — a chessboard with an ArUco marker in each white square. `camera_calibration` supports chessboard, circles, acircles and charuco; it does **not** support a plain ArUco grid |
 | the board's four numbers | squares across × down, checker size, marker size, dictionary. A calib.io board prints all four along its bottom edge |
-| a flat mount | see §5 — this is the largest error source and the easiest to get wrong |
+| a flat mount | see [[Calibration#Flatness, and the error nobody looks for|§5]] — this is the largest error source and the easiest to get wrong |
 | a display | the calibrator is a GUI. Use the Jetson's own monitor, or `ssh -X` |
 
 The board in use here reads:
@@ -41,7 +45,7 @@ detected — no error, no warning, the GUI just never registers a sample and it
 looks like a camera or lighting fault.
 
 Note also that the printed `11x9` is rows × columns, while `--size` is
-**columns × rows**. Run the probe (§2) rather than trusting either the label or
+**columns × rows**. Run the probe ([[Calibration#Check the numbers before you spend twenty minutes waving a board|§2]]) rather than trusting either the label or
 your own counting.
 
 ### `--aruco_dict` has its own spelling
@@ -53,7 +57,7 @@ because OpenCV's predefined dictionaries are nested — the first 50 markers of
 
 ---
 
-## 2. Check the numbers before you spend twenty minutes waving a board
+## Check the numbers before you spend twenty minutes waving a board
 
 ```bash
 # hold the board in front of the belly camera, then:
@@ -84,7 +88,7 @@ python3 scripts/charuco_probe.py --image /tmp/synth.png
 
 ---
 
-## 3. Run it
+## Run it
 
 ```bash
 ./scripts/jetson_up.sh --calibrate
@@ -123,7 +127,7 @@ machine owns the display.
 `--no-service-check` because `down_cam_usb_node` takes its intrinsics as ROS
 **parameters** and offers no `set_camera_info` service. The calibrator's
 **COMMIT** button therefore does nothing useful here; use **SAVE**, which
-writes `/tmp/calibrationdata.tar.gz`, and copy the numbers out by hand (§4).
+writes `/tmp/calibrationdata.tar.gz`, and copy the numbers out by hand ([[Calibration#Feeding the numbers back|§4]]).
 
 That file is written **inside the container**, which runs with `--rm`. Copy it
 out from a second terminal *before* stopping the GUI:
@@ -159,7 +163,7 @@ Aim for 40+ samples spread over the frame, not 40 of the same pose.
 
 ---
 
-## 3b. The fast route: capture here, solve there
+## The fast route: capture here, solve there
 
 The GUI does capture and solve in one process on the machine holding the
 camera, and on a Tegra X1 the solve is the problem. Measured 2026-08-22: **26+
@@ -241,7 +245,7 @@ even dimension. `calibrate_offline.py` scores both regardless.
 
 ---
 
-## 4. Feeding the numbers back
+## Feeding the numbers back
 
 The calibrator prints a YAML block. What matters:
 
@@ -305,11 +309,11 @@ The cure is coverage, not more frames of the same:
 thing to watch. The rejected calibration above had `position 4/9`.
 
 A good result has reprojection error below ~0.5 px at 640×480 **and** passes
-the sanity check. Above ~1.0 px, something else is wrong — usually §5.
+the sanity check. Above ~1.0 px, something else is wrong — usually [[Calibration#Flatness, and the error nobody looks for|§5]].
 
 ---
 
-## 5. Flatness, and the error nobody looks for
+## Flatness, and the error nobody looks for
 
 A calibration target is assumed to be **perfectly planar**. Paper is not. A
 sheet taped at the corners bows in the middle by a few millimetres, which on a
@@ -329,7 +333,7 @@ but do not redo a calibration over it.
 
 ---
 
-## 6. Checking it afterwards
+## Checking it afterwards
 
 ```bash
 ros2 run camera_calibration cameracheck --size 9x11 --square 0.022 \
@@ -341,4 +345,4 @@ on the floor, hover over it, and compare what `pad_map_node` publishes on
 `/hydrone/pads/markers` against a tape measure. Intrinsics that look good and a
 mount transform that is wrong produce a confident, repeatable, wrong answer —
 and `down_cam_mount_xyz` / `down_cam_mount_rpy_deg` are still at BiguaSim's
-virtual airframe values. See [`JETSON-REAL-STACK.md`](JETSON-REAL-STACK.md) §9.
+virtual airframe values. See [[Jetson Real Stack#Not ready yet — read before flying|§9]].

@@ -1,16 +1,20 @@
-# Running the stack on the drone — legacy Jetson, ZED 1, USB belly camera
+---
+tags: [hydrone, jetson, hardware]
+---
+# Jetson Real Stack
 
-How the autonomy stack runs on real hardware: what the hardware is, why the
-software combination is awkward, how the image is built, what publishes what,
-and everything that is not ready yet.
+Back to [[Hydrone]]. How the autonomy stack runs on real hardware — legacy
+Jetson, ZED 1, USB belly camera: what the hardware is, why the software
+combination is awkward, how the image is built, what publishes what, and
+everything that is not ready yet.
 
-Companion to [`PHASE1-MISSION.md`](PHASE1-MISSION.md), which documents the
-mission itself. **Nothing in the mission changes between sim and drone** — that
-is the whole design, and this document is about the layer underneath it.
+Companion to [[Phase 1 Mission]], which documents the mission itself. **Nothing
+in the mission changes between sim and drone** — that is the whole design, and
+this document is about the layer underneath it.
 
 ---
 
-## 1. The hardware
+## The hardware
 
 | | what | notes |
 |---|---|---|
@@ -32,7 +36,7 @@ at.
 
 ---
 
-## 2. The version problem, and why it is solvable
+## The version problem, and why it is solvable
 
 ROS 2 Humble requires **Ubuntu 22.04**. The ZED SDK for L4T 32.7 is built for
 **Ubuntu 18.04/20.04 with CUDA 10.2**. Those do not obviously go together, and
@@ -54,7 +58,7 @@ libturbojpeg.so.0 => not found
 ```
 
 Three libraries, all ordinary jammy apt packages. Everything CUDA-related
-resolved. That is what makes the image in §3 possible.
+resolved. That is what makes the image in [[Jetson Real Stack#The image|§3]] possible.
 
 **The image must be run with `--runtime nvidia`.** Without it the injection does
 not happen and the SDK fails at `dlopen` with a message about `libcuda` that
@@ -84,7 +88,7 @@ at `docker/ZED_SDK_Tegra_L4T32.7_v4.0.8.zstd.run` before building.
 `~/cbr2026/build/build_pyzed.sh` on the Jetson builds the binding **from source**
 against the SDK and numpy installed in the image, which removes both version
 skews by construction. **The image uses its output**, because Stereolabs' own
-cp310 wheel is compiled against numpy 2 and this image needs numpy 1 — see §7.
+cp310 wheel is compiled against numpy 2 and this image needs numpy 1 — see [[Jetson Real Stack#Performance, on a Tegra X1|§7]].
 
 Five things in that script are non-obvious, each of which failed a build first:
 
@@ -103,7 +107,7 @@ Five things in that script are non-obvious, each of which failed a build first:
 
 ---
 
-## 3. The image
+## The image
 
 ```bash
 # on the Jetson, in the repo root, with the .run in docker/
@@ -130,18 +134,18 @@ plain download, so it stays out.
 
 **Neither file is needed to RUN anything.** Both are `COPY`ed into the image at
 build time; a container started from an existing image needs neither, and
-neither does the dev loop in §4.
+neither does the dev loop in [[Jetson Real Stack#Running it|§4]].
 
 Built `FROM ros2-jetson:humble`. What it adds, and why:
 
 | addition | why |
 |---|---|
-| `libegl1 libgles2 libturbojpeg libusb-1.0-0` | the four the SDK needs and jammy lacks — from `ldd`, §2 |
+| `libegl1 libgles2 libturbojpeg libusb-1.0-0` | the four the SDK needs and jammy lacks — from `ldd`, [[Jetson Real Stack#The version problem, and why it is solvable|§2]] |
 | `ros-humble-mavros`, `-msgs`, `-extras` | the stack **imports** `mavros_msgs`: `phase1_mission_node` for `/mavros/state` and the arm/mode/takeoff services, `pad_map_node` for the pre-arm mapping gate. Without it both fail at import, which is what the base image did |
 | `install_geographiclib_datasets.sh` | not optional for ArduPilot — MAVROS converts AMSL to ellipsoid height with GeographicLib's geoid grid and throws at startup without the dataset |
 | ZED SDK 4.0.8, `skip_cuda skip_tools skip_python skip_od_module skip_hub` | CUDA comes from the host; the tools are GUI programs; the binding is installed explicitly below. The installer WARNS and ignores an unknown flag rather than failing, so check the build log for `unknown parameter` |
 | a stubbed `/etc/nv_tegra_release` | the installer probes it to decide it is on a Jetson, and it is a host file absent during `docker build` |
-| a **locally built** `pyzed-4.0-cp310` wheel, `numpy<2` | Stereolabs' wheel is built against numpy 2 and fails on numpy 1 with `ndarray size changed ... Expected 96, got 88`; numpy 1 is required because the image's cv2 is compiled against it, and that mismatch is silent at import and fatal at first use ([`LANDING-SITES.md`](LANDING-SITES.md) §9). `--no-deps` plus an assertion keeps pip from quietly reinstating numpy 2 |
+| a **locally built** `pyzed-4.0-cp310` wheel, `numpy<2` | Stereolabs' wheel is built against numpy 2 and fails on numpy 1 with `ndarray size changed ... Expected 96, got 88`; numpy 1 is required because the image's cv2 is compiled against it, and that mismatch is silent at import and fatal at first use ([[Landing Sites#A bug this work turned up in the container|§9]]). `--no-deps` plus an assertion keeps pip from quietly reinstating numpy 2 |
 | the workspace, `--symlink-install` | so the dev bind mount can put the host working tree at the end of the `install/ → build/ → src/` chain, exactly as on x86 |
 
 CUDA is deliberately **not** baked. It must match the host driver, and it
@@ -149,7 +153,7 @@ already exists on the host.
 
 ---
 
-## 4. Running it
+## Running it
 
 ```bash
 ./scripts/jetson_up.sh                    # the phase 1 mission
@@ -236,7 +240,7 @@ a code change invalidates only the colcon layer and those stay cached.
 what should fly: it is the only mode where the running code cannot be changed
 by editing a file on disk.
 
-Useful arguments — all of them inherited straight through the wrapper, see §6:
+Useful arguments — all of them inherited straight through the wrapper, see [[Jetson Real Stack#Arguments: one file owns each default|§6]]:
 
 ```bash
 ./scripts/jetson_up.sh \
@@ -261,7 +265,7 @@ docker exec -it hydrone-jetson bash -lc \
 
 ---
 
-## 5. What produces the contract
+## What produces the contract
 
 | bus | sim | drone |
 |---|---|---|
@@ -296,7 +300,7 @@ different things is a corrupt tree).
 
 ---
 
-## 6. Arguments: one file owns each default
+## Arguments: one file owns each default
 
 `phase1_real.launch.py` declares **nothing**. Hardware arguments are declared by
 `sources_real.launch.py`, mission arguments by `phase1.launch.py`, and both
@@ -316,7 +320,7 @@ Cost: `ros2 launch -s phase1_real.launch.py` lists nothing. Run it against
 
 ---
 
-## 7. Performance, on a Tegra X1
+## Performance, on a Tegra X1
 
 Everything here is sized for a 4 GB Nano/TX1-class board, not for the ZED 2i +
 Orin the code was drafted against.
@@ -370,7 +374,7 @@ still in `SEARCHING`. Warm up before believing a rate.
 
 ---
 
-## 8. What the first real launch found
+## What the first real launch found
 
 Everything before this section was validated by starting the nodes
 **individually**. The first run of `sources_real.launch.py` as a launch file —
@@ -404,7 +408,7 @@ matter how many of its nodes have been.
 
 ---
 
-## 9. Not ready yet — read before flying
+## Not ready yet — read before flying
 
 Ordered by how much damage each does.
 
@@ -430,8 +434,9 @@ Ordered by how much damage each does.
    FCU is actually running; nothing in this stack constrains the real vehicle's
    speed.
 4. **The ZED 1's tracking is visual-only.** No IMU means no stereo-inertial
-   fusion, and the arena is texture-poor ([`LANDING-SITES.md`](LANDING-SITES.md)
-   §10). Watch `/zed/zed_node/odom` against reality on the bench, moving the
+   fusion, and the arena is texture-poor
+   ([[Landing Sites#Localization: the mission does not fly yet, and why|§10]]).
+   Watch `/zed/zed_node/odom` against reality on the bench, moving the
    drone by hand, before letting the EKF fly on it.
 5. **None of this has been flown.** The image builds and the nodes publish; that
    is all that has been demonstrated. Bench first: cameras only, then the map,

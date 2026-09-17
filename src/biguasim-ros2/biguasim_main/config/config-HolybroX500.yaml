@@ -82,7 +82,7 @@
             # rotation is [roll, pitch, yaw] in DEGREES. VERIFIED IN UE
             # 2026-08-18: pitch +90 aims the lens at the ground (checked by
             # eye on /down_cam/image_raw — the camera sees the pad below, per
-            # docs/LANDING-SITES.md §8's one-time check). BiguaSim's docs read
+            # docs/Landing Sites.md's one-time check). BiguaSim's docs read
             # pitch as rotation about the RIGHT axis (right-handed), which is
             # why the sign is opposite to the nose-up-positive guess.
             # down_cam_mimic_node derives the ROS mount TF from this same

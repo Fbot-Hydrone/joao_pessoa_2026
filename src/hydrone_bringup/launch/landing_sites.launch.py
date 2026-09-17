@@ -123,7 +123,7 @@ def generate_launch_description():
     # ring coverage is 1.0, arms 4, concentricity offset 0.005.
     #
     # SIM VALUES. The library defaults and its tests are unchanged; retune
-    # against the real arena lighting per docs/LANDING-SITES.md §3.
+    # against the real arena lighting per docs/Pad Detector.md.
     blue_hsv_low = [95, 30, 50]
     yellow_hsv_low = [18, 30, 90]
 

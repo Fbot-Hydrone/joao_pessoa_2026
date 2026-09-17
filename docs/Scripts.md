@@ -1,7 +1,10 @@
-# `scripts/` — what each one is for
+---
+tags: [hydrone, scripts, infra]
+---
+# Scripts
 
-Everything in `scripts/` is a wrapper around something you would otherwise type
-wrong. There are three entry points (`docker_up.sh` for the simulator,
+Back to [[Hydrone]]. What each script in `scripts/` is for. Everything there
+is a wrapper around something you would otherwise type wrong. There are three entry points (`docker_up.sh` for the simulator,
 `jetson_up.sh` for the drone, `host_setup.sh`+`env.sh` for a native host build)
 and the rest either support those or answer one specific question.
 
@@ -48,7 +51,7 @@ containing `:=` is forwarded to `ros2 launch`; anything else goes to
 `docker compose up`.
 
 `--landing-sites` is the **earlier** mission, kept working but no longer the one
-being developed — `--phase1` is. See `PHASE1-MISSION.md` and `LANDING-SITES.md`.
+being developed — `--phase1` is. See [[Phase 1 Mission]] and [[Landing Sites]].
 
 `--phase4` is not a mission on the same aircraft: it brings up the **Kopis X8
 with a Livox Mid-360** (`phase4_sim.launch.py`), which shares nothing above
@@ -197,8 +200,8 @@ black frame. `q`/`Esc` quit, `s` saves to `/tmp`.
 
 ## Camera calibration
 
-Full write-up in [`CALIBRATION.md`](CALIBRATION.md). The current route is
-**capture on the drone, solve on a desktop** (§3b).
+Full write-up in [[Calibration]]. The current route is
+**capture on the drone, solve on a desktop** ([[Calibration#The fast route: capture here, solve there|§3b]]).
 
 ### `charuco_probe.py`
 Detects the board and reports which dictionary matches and how many squares it
@@ -233,7 +236,7 @@ the mouse callback on the `imshow` thread. Measured 2026-08-22 on the Tegra X1:
 desktop i7: 0.9 s. Splitting them also *keeps the images* — a directory of
 frames can be re-solved as often as you like.
 
-**`jetson_up.sh --calibrate` still starts the GUI**, and `CALIBRATION.md` §3
+**`jetson_up.sh --calibrate` still starts the GUI**, and [[Calibration#Run it|Calibration §3]]
 still documents it. It works; it is just the slow route.
 
 ### `gen.py`

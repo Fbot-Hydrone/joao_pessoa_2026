@@ -1,11 +1,15 @@
-# Rangefinder no simulador — como funciona (e por que é sim-only)
+---
+tags: [hydrone, rangefinder, sim]
+---
+# Rangefinder Sim
 
-Como o rangefinder nadir (altímetro descendente) é injetado no ArduPilot **dentro
-da simulação**, por que ele é um componente **SIM-ONLY**, e os dois bugs que
-resolvemos pra ele funcionar de ponta a ponta (ROS → MAVLink → FCU).
+Back to [[Hydrone]]. Como o rangefinder nadir (altímetro descendente) é
+injetado no ArduPilot **dentro da simulação**, por que ele é um componente
+**SIM-ONLY**, e os dois bugs que resolvemos pra ele funcionar de ponta a ponta
+(ROS → MAVLink → FCU).
 
-> Contexto maior: [`SENSOR-CONFIG.md`](SENSOR-CONFIG.md) (spec Fase 1&2, EKF3,
-> montagem física do VL53L1X) e a separação sim/real em `hydrone_bringup.launch.py`.
+Contexto maior: [[Sensor Config]] (spec Fase 1&2, EKF3, montagem física do
+VL53L1X) e a separação sim/real em `hydrone_bringup.launch.py`.
 
 ---
 

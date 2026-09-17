@@ -158,7 +158,7 @@ a pad by appearance in a single frame:
 For the first two the discriminator is geometry, not appearance -- both are off
 the floor plane or lack a cross -- and the forward camera already has depth. A
 ground-plane gate on the back-projected point in pad_detector_node is the right
-place for it. NOT IMPLEMENTED. docs/LANDING-SITES.md 3 has the measurements.
+place for it. NOT IMPLEMENTED. docs/Pad Detector.md has the measurements.
 
 This module is deliberately ROS-free: it takes a BGR ndarray and returns
 dataclasses. pad_detector_node.py wraps it; test_pad_detector.py exercises it

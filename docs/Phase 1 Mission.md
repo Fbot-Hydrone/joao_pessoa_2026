@@ -1,8 +1,12 @@
-# Phase 1 — take off, turn until you see a base, land on it, come home
+---
+tags: [hydrone, phase1, mission]
+---
+# Phase 1 Mission
 
-The Phase 1 flight for the 5×5 m arena. Everything about it: what it does, why
-it does it that way, what changed elsewhere in the stack to make it possible,
-how to run it, and what has and has not been observed.
+Back to [[Hydrone]]. Take off, turn until you see a base, land on it, come
+home — the Phase 1 flight for the 5×5 m arena. Everything about it: what it
+does, why it does it that way, what changed elsewhere in the stack to make it
+possible, how to run it, and what has and has not been observed.
 
 **One-line summary:** the drone arms, declares the base it is standing on as
 off-limits, climbs to 1 m, turns on the spot in 45° steps until a landing base
@@ -17,14 +21,14 @@ only adds a leg on an estimate that has already been through a landing and a
 takeoff, and it doubles the time before the run tells you anything. Raise it
 with `target_bases:=2` once one cycle has been watched end to end.
 
-This is an **alternative** to [`LANDING-SITES.md`](LANDING-SITES.md)'s
-`pad_mission_node`, not a replacement for the machinery under it. The detector,
-the projection and the pad map are the same code, tuned the same way. What
-differs is the flight.
+This is an **alternative** to [[Landing Sites]]'s `pad_mission_node`, not a
+replacement for the machinery under it. The detector, the projection and the
+pad map are the same code, tuned the same way — see [[Pad Detector]] and
+[[Pad Map]]. What differs is the flight.
 
 ---
 
-## 1. Run it
+## Run it
 
 ```bash
 scripts/docker_up.sh --phase1                         # sim, from a cold host
@@ -74,12 +78,12 @@ again.
 
 **Give it ~30 s before expecting movement.** With GPS disabled the EKF needs the
 vision pose and a global origin before it accepts a takeoff (see
-[`DEVELOP-PIPELINES.md`](DEVELOP-PIPELINES.md)). `phase1_mission_node` waits for
+[[Develop Pipelines]]). `phase1_mission_node` waits for
 exactly that and logs what it is waiting for.
 
 | argument | default | what it does |
 |---|---|---|
-| `takeoff_alt` | `1.0` | altitude for **everything** — takeoff, turning, travelling, confirming. See §6. |
+| `takeoff_alt` | `1.0` | altitude for **everything** — takeoff, turning, travelling, confirming. See [[Phase 1 Mission#Altitude: 1 m, for everything\|§6]]. |
 | `target_bases` | `1` | landing sites to visit before going home. The takeoff base is not one of them. **1 until a full cycle has been flown; the competition number is 2.** |
 | `rotation_step_deg` | `45.0` | size of each search turn, clockwise |
 | `max_rotations` | `8` | turns before the fallback fires. 8 × 45° is one full circle. |
@@ -88,10 +92,10 @@ exactly that and logs what it is waiting for.
 | `confirm_confidence` | `0.60` | confidence that counts as a look |
 | `confirm_timeout_s` | `25.0` | hover budget over a candidate before blacklisting it |
 | `require_armed` | `true` | `pad_map` maps nothing until the vehicle first arms |
-| `ground_z` | `0.0` | height of the arena **floor** above the takeoff plane — see §7 |
+| `ground_z` | `0.0` | height of the arena **floor** above the takeoff plane — see [[Phase 1 Mission#`ground_z`, and the assumption underneath the belly camera\|§7]] |
 | `auto_start` | `true` | `false` holds until `/hydrone/mission/start` is called |
 | `debug_images`, `feature_map`, `map_odom_tf` | | as in `landing_sites.launch.py` |
-| `odom_source` | `vo` | sim only. `ground_truth` is a debugging aid, never a pass — LANDING-SITES §10. |
+| `odom_source` | `vo` | sim only. `ground_truth` is a debugging aid, never a pass — [[Landing Sites#Localization: the mission does not fly yet, and why|Landing Sites §10]]. |
 
 Watching it:
 
@@ -111,7 +115,7 @@ it lands where it is.
 
 ---
 
-## 2. The flight
+## The flight
 
 ```
 WAIT_FCU -> ARMING -> REGISTER -> TAKEOFF -> SELECT -+-> TRAVEL -> CONFIRM
@@ -145,13 +149,13 @@ stream and hand the vehicle to the FCU's failsafe.
 
 ---
 
-## 3. Why the search is a turn, not a pattern
+## Why the search is a turn, not a pattern
 
 `pad_mission_node` flies forward and lands on what it finds. That works in an
 open field. In a 5×5 m arena it is the wrong shape of search, for one reason:
 
 **every metre flown is visual-odometry drift.** The arena is texture-poor — ORB
-finds ~46 keypoints in a whole frame, and LANDING-SITES §10 documents the VO
+finds ~46 keypoints in a whole frame, and [[Landing Sites#Localization: the mission does not fly yet, and why|Landing Sites §10]] documents the VO
 walking 0.39 m and 8.6° in 78 s while the drone sat still on the ground. A
 search that translates spends its position estimate to buy coverage.
 
@@ -180,7 +184,7 @@ let the estimate stop moving and no longer.
 
 ---
 
-## 4. Why the takeoff base is declared instead of detected
+## Why the takeoff base is declared instead of detected
 
 The drone always starts standing **on** a base, and that base is not one of the
 sites it must land on. It is a rectangle with a circular hole rather than the
@@ -236,7 +240,7 @@ case is a takeoff base that RViz draws as an ordinary pad.
 
 ---
 
-## 5. Both cameras, and the two-stage decision
+## Both cameras, and the two-stage decision
 
 `pad_mission_node` threw away every forward-camera detection: it had no phase to
 fly to a distant lead with, so acting on one only complicated the path. This
@@ -246,7 +250,7 @@ jobs:
 - **The forward ZED identifies.** It sees across the whole arena. At those
   ranges the ring and the cross are a handful of pixels, so the detector's
   structure checks cannot resolve them and confidence is capped by design at
-  0.75 (LANDING-SITES §3). Enough to fly to, never enough to land on.
+  0.75 ([[Pad Detector#Confidence, and the 0.75 line|Pad Detector §3]]). Enough to fly to, never enough to land on.
 - **The belly camera validates.** From directly above at 1 m the same structure
   is hundreds of pixels across. This is the look that decides.
 
@@ -271,7 +275,7 @@ judgement, so the mission keeps it.
 
 ---
 
-## 6. Altitude: 1 m, for everything
+## Altitude: 1 m, for everything
 
 `landing_sites` cruises at 2.5 m to clear the arena's 1.5 m structure. Phase 1
 flies at 1 m, and that is a deliberate trade with two consequences worth knowing
@@ -296,7 +300,7 @@ constraint: at 1 m a 1 m base spans ~160 px, against the detector's ~18 px floor
 
 ---
 
-## 7. `ground_z`, and the assumption underneath the belly camera
+## `ground_z`, and the assumption underneath the belly camera
 
 The belly camera has no depth. It projects a pixel by intersecting its ray with
 a horizontal plane at `ground_z` — and `ground_z` is measured **from the takeoff
@@ -310,14 +314,14 @@ belly-camera projection is biased by that offset. The argument is exposed on
 both launch files for exactly that day.
 
 Elevated **landing** sites additionally need the rangefinder height refinement
-already in `pad_map_node` (LANDING-SITES §5), which this mission does not
+already in `pad_map_node` ([[Pad Map#How the elevated base gets its height|Pad Map §5]]), which this mission does not
 currently use for its descent: `LAND` is handed to the FCU whole, and the FCU
 flares on its own rangefinder. That is fine at ground level and will need
 revisiting for Phase 2.
 
 ---
 
-## 8. Speed: FCU limits, not setpoint stepping
+## Speed: FCU limits, not setpoint stepping
 
 `pad_mission_node` walks the setpoint forward in 1 m steps so the position error
 the FCU sees never exceeds one step. This mission does not: **one setpoint per
@@ -370,7 +374,7 @@ counter-clockwise from east.
 
 ---
 
-## 9. The fallback
+## The fallback
 
 Eight turns with nothing new in the map means the search has stopped producing.
 The fallback is deliberately the dullest thing available: **land where you are,
@@ -388,7 +392,7 @@ hover — we registered that base ourselves, there is nothing to prove.
 
 ---
 
-## 10. What changed elsewhere in the stack
+## What changed elsewhere in the stack
 
 Everything below is a change made *for* this mission, in files that other things
 also use.
@@ -398,7 +402,7 @@ also use.
 | `hydrone_msgs/msg/Pad.msg` | **+ `bool is_takeoff_base`** | the map has to be able to say "this one is not a landing site". Appended at the end, so the field order of everything before it is unchanged |
 | `hydrone_msgs/srv/RegisterTakeoffBase.srv` | **new** | declare the base under the drone at arm time |
 | `hydrone_msgs/CMakeLists.txt` | registers the new service | |
-| `hydrone_nav/pad_map_node.py` | `require_armed` gate; `RegisterTakeoffBase` service; `takeoff_base_radius`; ratio-based association; takeoff base exempt from pruning and from rangefinder height refinement; orange marker + `takeoff-base` label | §4 |
+| `hydrone_nav/pad_map_node.py` | `require_armed` gate; `RegisterTakeoffBase` service; `takeoff_base_radius`; ratio-based association; takeoff base exempt from pruning and from rangefinder height refinement; orange marker + `takeoff-base` label | [[Phase 1 Mission#Why the takeoff base is declared instead of detected\|§4]] |
 | `hydrone_nav/package.xml` | **+ `mavros_msgs`** | the node now subscribes to `/mavros/state` |
 | `hydrone_mission/phase1_mission_node.py` | **new** | the mission |
 | `hydrone_mission/setup.py` | registers the entry point | |
@@ -408,7 +412,7 @@ also use.
 | `docker-compose.yml` | the `command:` gains `${HYDRONE_LAUNCH_ARGS:-}` | how those pairs reach `ros2 launch`. Deliberately unquoted — compose splits the interpolated string shell-style, which is what turns several pairs into several arguments and an empty value into nothing |
 | `hydrone_bringup/launch/landing_sites_sim.launch.py` | stopped re-declaring and forwarding the mission's arguments | the identical shadowing defect. Its mirrored defaults happened to match `landing_sites.launch.py`'s exactly, so this changes nothing today and unbreaks every future edit |
 | `hydrone_bringup/test/test_launch_arguments.py` | **new** (4 tests) | a sim wrapper must not re-declare, or forward, an argument its autonomy layer declares. Both pairs checked |
-| `hydrone_bringup/config/params/holybro_sitl.parm` | `WP_SPD`, `WP_ACC`, `ATC_RATE_WPY_MAX` | §8 |
+| `hydrone_bringup/config/params/holybro_sitl.parm` | `WP_SPD`, `WP_ACC`, `ATC_RATE_WPY_MAX` | [[Phase 1 Mission#Speed: FCU limits, not setpoint stepping\|§8]] |
 | `hydrone_nav/test/test_pad_pipeline.py` | its `FakeSim` now publishes `/mavros/state` armed | it stands in for MAVROS, and with the arm gate a stack that never arms maps nothing. Five tests failed on this and now pass for the right reason |
 
 **Nothing about the detector changed.** The HSV thresholds in
@@ -423,7 +427,7 @@ made here.
 
 ### A naming error found on the way
 
-`docs/PARAMS-DIFF-SITL.md` §1 lists the removed tuning block's speed limits as
+[[Params Diff SITL#Flight-tuning block — added (this is the part that changes how it flies)|Params Diff SITL §1]] lists the removed tuning block's speed limits as
 `WPNAV_SPD` and `WPNAV_ACC`. Neither is a real parameter in this firmware: the
 group prefix is `WP_` (`ArduCopter/Parameters.cpp:369`), so the names are
 `WP_SPD` and `WP_ACC`. If that block is ever re-applied verbatim, those two lines
@@ -432,7 +436,7 @@ not recognise.
 
 ---
 
-## 11. Tests
+## Tests
 
 69 new tests, none needing UE5 or a flight:
 
@@ -457,7 +461,7 @@ vehicle. They are exercised by flying the sim.
 
 ---
 
-## 12. "The detector sees it, the map does not"
+## "The detector sees it, the map does not"
 
 There is **no distance cap anywhere near the size of the arena.** Every gate a
 detection passes, and the value it is checked against:
@@ -544,7 +548,7 @@ missing.
 
 ---
 
-## 13. What to watch on the first flight
+## What to watch on the first flight
 
 Nothing in this document has been observed in the air. The state machine, the
 map changes and the selection logic are tested; the flight is not. In rough
@@ -558,7 +562,7 @@ order of how likely each is to be the thing that bites:
    round to flying to them, and the search needs re-anchoring (a re-detection
    pass on arrival, not a bigger tolerance).
 2. **`CONFIRM` timing out on real bases.** The ~2 m footprint at 1 m altitude is
-   the tight constraint (§6). Symptom: good bases blacklisted one after another.
+   the tight constraint ([[Phase 1 Mission#Altitude: 1 m, for everything|§6]]). Symptom: good bases blacklisted one after another.
    First remedy: raise `takeoff_alt`.
 3. **The `provisional_ttl_s` / wall-clock trap.** BiguaSim runs 5–8× below real
    time and every timeout here is wall-clock. `pad_map`'s TTL is already raised
@@ -567,7 +571,7 @@ order of how likely each is to be the thing that bites:
 4. **`WP_SPD 0.5` against the actuation lag.** The speed cap is new and untested
    in flight. If the vehicle oscillates on a leg, that is the position
    controller and the lag, not the mission — and it is the parameter to move,
-   not the attitude gains (§8).
+   not the attitude gains ([[Phase 1 Mission#Speed: FCU limits, not setpoint stepping|§8]]).
 5. **Whether the forward camera actually finds bases across the arena.** The
    geometry says yes comfortably (a 1 m base at 4 m spans ~80 px against an
    ~18 px floor), and detection is partially validated, but it has been

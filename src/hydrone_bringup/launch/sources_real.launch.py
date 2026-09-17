@@ -46,7 +46,7 @@ Why zed_sdk_node and not zed_wrapper
 contract above is deliberately the wrapper's topic names so that swapping it in
 is a one-line change here. This drone cannot run it today: the board is a Tegra
 X1 on L4T R32.6.1, so the ZED SDK is 4.0.1 against CUDA 10.2, while ROS 2 Humble
-needs Ubuntu 22.04. See zed_sdk_node's docstring and docs/JETSON-REAL-STACK.md.
+needs Ubuntu 22.04. See zed_sdk_node's docstring and docs/Jetson Real Stack.md.
 
 Two things zed_wrapper gets wrong for this stack if it is ever used here:
   - the point cloud must be ON — feature_map_node has no other geometry source;
@@ -147,13 +147,13 @@ def generate_launch_description():
 
         # Measured 2026-08-22 with the C270 on a desktop, ChArUco 9x11,
         # 22 mm squares, 16 mm markers, DICT_4X4_250; 18 views, reprojection
-        # error 0.4283 px. See docs/CALIBRATION.md.
+        # error 0.4283 px. See docs/Calibration.md.
         #
         # The sanity check these passed matters as much as the error: fx 814.6
         # implies a 52 deg DIAGONAL field of view, which is what a C270 has.
         # Earlier attempts on thin coverage returned fx from 1085 to 1599 --
         # a 40 deg lens and narrower -- at reprojection errors as low as
-        # 0.4866 px. Low error does not mean correct; see CALIBRATION.md 4.
+        # 0.4866 px. Low error does not mean correct; see docs/Calibration.md.
         DeclareLaunchArgument("down_cam_fx", default_value="814.643"),
         DeclareLaunchArgument("down_cam_fy", default_value="818.604"),
         DeclareLaunchArgument("down_cam_cx", default_value="299.707"),

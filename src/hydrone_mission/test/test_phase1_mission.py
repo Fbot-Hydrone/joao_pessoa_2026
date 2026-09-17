@@ -5,7 +5,7 @@ decide where the vehicle goes.
 
 The flight states themselves (arming, takeoff, landing) are NOT covered here —
 they are conversations with ArduPilot, and mocking one proves nothing about the
-real vehicle. They are exercised by flying the sim; see docs/PHASE1-MISSION.md.
+real vehicle. They are exercised by flying the sim; see docs/Phase 1 Mission.md.
 
 What IS worth pinning is the handful of decisions whose failure is silent and
 expensive:

@@ -10,7 +10,7 @@
 #   ValueError: numpy.ndarray size changed ... Expected 96 from C header, got 88
 # and numpy 1.x is not negotiable here: the image's cv2 (4.5.4, from apt) is
 # built against it, and the numpy-2 mismatch is silent at import and SEGFAULTS
-# at the first array conversion (docs/LANDING-SITES.md §9). Building the binding
+# at the first array conversion (docs/Landing Sites.md). Building the binding
 # against the numpy and the SDK actually installed removes both skews at once.
 #
 # WHY THIS IS NOT A DOCKERFILE STEP

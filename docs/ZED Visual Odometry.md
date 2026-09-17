@@ -1,11 +1,15 @@
-# ZED visual odometry — real VO estimate vs. ground truth
+---
+tags: [hydrone, vio, phase1]
+---
+# ZED Visual Odometry
 
-How the drone now gets its GPS-denied position estimate from the ZED, and how the
-two odometry streams (`/zed/zed_node/odom` and `/zed/zed_node/odom_GT`) relate.
+Back to [[Hydrone]]. Real VO estimate vs. ground truth: how the drone gets its
+GPS-denied position estimate from the ZED, and how the two odometry streams
+(`/zed/zed_node/odom` and `/zed/zed_node/odom_GT`) relate.
 
-> Context: the CBR 2026 arena bans GPS, so ArduPilot flies on **external-nav**
-> (VISION_POSITION_ESTIMATE) instead. See [`DEVELOP-PIPELINES.md`](DEVELOP-PIPELINES.md)
-> for the GPS-denied flight plumbing this builds on.
+Context: the CBR 2026 arena bans GPS, so ArduPilot flies on **external-nav**
+(VISION_POSITION_ESTIMATE) instead. See [[Develop Pipelines]] for the
+GPS-denied flight plumbing this builds on.
 
 ---
 

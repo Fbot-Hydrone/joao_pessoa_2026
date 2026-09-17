@@ -36,8 +36,8 @@ services:
     # HYDRONE_LAUNCH picks what runs. Default is the bare sim bring-up (sensors
     # + SITL + MAVROS, no autonomy) so `docker_up.sh` still gives a vehicle you
     # fly yourself from QGC. `docker_up.sh --phase1` sets it to
-    # phase1_sim.launch.py (docs/PHASE1-MISSION.md) and `--landing-sites` to
-    # landing_sites_sim.launch.py (docs/LANDING-SITES.md); both add the pad
+    # phase1_sim.launch.py (docs/Phase 1 Mission.md) and `--landing-sites` to
+    # landing_sites_sim.launch.py (docs/Landing Sites.md); both add the pad
     # detectors, the maps and a mission on top.
     #
     # HYDRONE_LAUNCH_ARGS is whatever `name:=value` pairs were passed to

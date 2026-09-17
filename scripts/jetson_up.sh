@@ -140,7 +140,7 @@ launch_args=()
 # here, whose own footer reads "11x9 | Checker 22 mm | Marker 16 mm | DICT_4X4".
 # Note --size is COLUMNS x ROWS and counts SQUARES, not interior corners, which
 # is the opposite of what -p chessboard wants; scripts/charuco_probe.py checks
-# it against the camera. docs/CALIBRATION.md has the why.
+# it against the camera. docs/Calibration.md has the why.
 CAL_SIZE="${CAL_SIZE:-9x11}"
 CAL_SQUARE="${CAL_SQUARE:-0.022}"
 CAL_MARKER="${CAL_MARKER:-0.016}"
@@ -200,7 +200,7 @@ if [ "$DO_BUILD" = true ]; then
         echo "  It is deliberately not committed (84 MB, and Stereolabs no" >&2
         echo "  longer serves it to a plain GET). Download 'ZED SDK for" >&2
         echo "  JetPack 4.6.X (L4T 32.7) 4.0.8' from stereolabs.com/developers" >&2
-        echo "  and drop it in docker/.  See docs/JETSON-REAL-STACK.md §3." >&2
+        echo "  and drop it in docker/.  See docs/Jetson Real Stack.md §3." >&2
         exit 1
     fi
     docker build -f docker/Dockerfile.jetson -t "$IMAGE" .

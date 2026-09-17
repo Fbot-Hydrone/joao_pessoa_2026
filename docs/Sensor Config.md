@@ -1,11 +1,15 @@
-# Pipeline 1 — Sensor configuration (Phases 1 & 2)
+---
+tags: [hydrone, sensors, phase1]
+---
+# Sensor Config
 
-ArduPilot on Pixhawk + Jetson, GPS-denied. This is the authoritative sensor spec:
-**physical mounting** (real drone build guidance), the **EKF3 source setup**, and
-**how each piece is represented in the BiguaSim simulation**.
+Back to [[Hydrone]]. Pipeline 1 sensor configuration for Phases 1 & 2:
+ArduPilot on Pixhawk + Jetson, GPS-denied. This is the authoritative sensor
+spec: **physical mounting** (real drone build guidance), the **EKF3 source
+setup**, and **how each piece is represented in the BiguaSim simulation**.
 
-> Related: [`ZED-VISUAL-ODOMETRY.md`](ZED-VISUAL-ODOMETRY.md) (the VIO source) and
-> [`DEVELOP-PIPELINES.md`](DEVELOP-PIPELINES.md) (GPS-denied flight plumbing).
+Related: [[ZED Visual Odometry]] (the VIO source) and [[Develop Pipelines]]
+(GPS-denied flight plumbing).
 
 ---
 

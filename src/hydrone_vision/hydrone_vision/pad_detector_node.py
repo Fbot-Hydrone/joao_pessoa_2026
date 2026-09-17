@@ -143,7 +143,7 @@ class PadDetectorNode(Node):
         # one, which lies on foam of its OWN hue and whose paint the ZED
         # renders green and washed out; it is found by local contrast instead,
         # and the HSV bands below do not apply to it at all.
-        # docs/LANDING-SITES.md 3.
+        # docs/Pad Detector.md.
         self.declare_parameter("field_mode", "blue")
         self.declare_parameter("yellow_hsv_low", [18, 110, 90])
         self.declare_parameter("yellow_hsv_high", [38, 255, 255])

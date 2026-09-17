@@ -1,8 +1,11 @@
-# Archive of branch `chore/gitignore-build-artifacts`
+---
+tags: [hydrone, history, git]
+---
+# Chore Branch Archive
 
-This branch was deleted on 2026-06-30. It held two commits that never made it
-onto `develop_bridge_ros2` or `main`. They are recorded here so the work can be
-redone if needed.
+Back to [[Hydrone]]. Archive of branch `chore/gitignore-build-artifacts`, deleted
+on 2026-06-30. It held two commits that never made it onto `develop_bridge_ros2`
+or `main`. They are recorded here so the work can be redone if needed.
 
 ---
 

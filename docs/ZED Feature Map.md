@@ -1,26 +1,30 @@
-# ZED feature map — how the world map and the coverage grid are built
+---
+tags: [hydrone, mapping, zed]
+---
+# ZED Feature Map
 
-What `feature_map_node` does with the ZED's point cloud, where the map lands, and
+Back to [[Hydrone]]. How the world map and the coverage grid are built: what
+`feature_map_node` does with the ZED's point cloud, where the map lands, and
 what to set in RViz to actually see it.
 
-> **2026-08-21.** This node no longer back-projects depth itself. The ZED
-> publishes `point_cloud/cloud_registered` natively, so the camera's own product
-> is what this node consumes — `zed_mimic_node` produces it in sim, `zed_wrapper`
-> on the drone. What stays here is what no camera provides: the accumulation into
-> a persistent map, and the coverage grid. Sections marked *(historic)* below
-> describe the ORB-keypoint version this replaced and are kept for the reasoning,
-> not as a description of the code.
+**2026-08-21.** This node no longer back-projects depth itself. The ZED
+publishes `point_cloud/cloud_registered` natively, so the camera's own product
+is what this node consumes — `zed_mimic_node` produces it in sim, `zed_wrapper`
+on the drone. What stays here is what no camera provides: the accumulation into
+a persistent map, and the coverage grid. Sections marked *(historic)* below
+describe the ORB-keypoint version this replaced and are kept for the reasoning,
+not as a description of the code.
 
-> Sibling documents: [`ZED-VISUAL-ODOMETRY.md`](ZED-VISUAL-ODOMETRY.md) covers the
-> node that estimates *where the drone is*. This one covers the node that records
-> *what the drone has seen*. They read the same camera topics and are otherwise
-> unrelated — see [§6](#6-why-this-is-not-in-the-vo-node).
+Sibling documents: [[ZED Visual Odometry]] covers the node that estimates
+*where the drone is*. This one covers the node that records *what the drone has
+seen*. They read the same camera topics and are otherwise unrelated — see
+[[ZED Feature Map#Why this is not in the VO node|§6]].
 
 Source: `src/hydrone_nav/hydrone_nav/feature_map_node.py`.
 
 ---
 
-## 1. What it produces
+## What it produces
 
 | Topic | Type | Rate | Frame | Contents |
 |---|---|---|---|---|
@@ -34,7 +38,7 @@ accumulated map is ours.
 
 Both are **whole-map snapshots**, republished in full on every tick — not
 incremental updates. Both QoS profiles are RELIABLE + **VOLATILE**, depth 1.
-That volatility matters in RViz; see [§7](#7-seeing-it-in-rviz).
+That volatility matters in RViz; see [[ZED Feature Map#Seeing it in RViz|§7]].
 
 Neither is an obstacle map. The cloud is a sparse landmark cloud (ORB corners
 only, not dense depth) and the grid stores *observation counts*, not occupancy.
@@ -42,7 +46,7 @@ Nothing in the stack plans around either of them today.
 
 ---
 
-## 2. Inputs
+## Inputs
 
 ```
 /zed/zed_node/point_cloud/cloud_registered ─┐  organized XYZRGB, NaN = no return
@@ -90,7 +94,7 @@ the rest of the node only ever sees float32 metres with NaN holes.
 
 ---
 
-## 3. The per-frame pipeline
+## The per-frame pipeline
 
 Every cloud that survives the rate gate runs these steps. Steps 1–3 used to live
 here and now happen inside the camera; they are kept *(historic)* because the
@@ -120,7 +124,7 @@ descriptor stage removes the most expensive part of ORB.
 The consequence is that the map has **no notion of feature identity**. It cannot
 tell one corner seen ten times from ten different corners — which is exactly why
 accumulation is done by voxel hashing rather than by tracking landmarks
-([§4](#4-accumulation)).
+([[ZED Feature Map#Accumulation|§4]]).
 
 `max_features` is 400 here versus 1000 in the VO node. The VO needs a large pool
 so enough survive ratio-test matching; the map keeps every keypoint it finds.
@@ -214,7 +218,7 @@ from inside this node:
   degenerates to a back-projected depth snapshot centred on the origin, rotated
   by whatever attitude is available. This is the expected symptom while
   GPS-denied localization is unhealthy — which, per
-  [`LANDING-SITES.md`](LANDING-SITES.md) §11, is the stack's current blocking
+  [[Landing Sites#Tests|Landing Sites §11]], is the stack's current blocking
   problem.
 - **The drone never moved.** A vehicle that sits on the pad or hovers in one spot
   builds its map from a single viewpoint, which at a glance is indistinguishable
@@ -235,7 +239,7 @@ The world points are folded into the two hashes described next.
 
 ---
 
-## 4. Accumulation
+## Accumulation
 
 Two dictionaries, both keyed by integer cell index, both storing a **hit count**:
 
@@ -256,7 +260,7 @@ not known when the node starts. A dense grid would have to guess a bounding box
 and would be almost entirely zeros; the hash grows only where something was
 actually seen, and needs no origin chosen in advance.
 
-**Why hit counts.** With no feature identity ([§3](#step-1--detect-features)),
+**Why hit counts.** With no feature identity ([[ZED Feature Map#Step 1 — detect features *(historic — the ZED's cloud replaced this)*|§3]]),
 repeated observation is the only evidence of durability available. A voxel hit
 once may be a depth artefact; a voxel hit fifty times is a real corner. The cloud
 does not currently expose the count as a channel — it is used only by the
@@ -278,7 +282,7 @@ before `max_voxels`, since memory scales with cell count either way.
 
 ---
 
-## 5. Publishing
+## Publishing
 
 A timer at `publish_hz` (1 Hz) does both. It **returns immediately if `voxels` is
 empty**, so a node that never got past the TF wait publishes literally nothing —
@@ -295,7 +299,7 @@ Cloud size is bounded by the number of occupied voxels, not by flight duration �
 hovering in place adds hit counts, not points.
 
 There are **no intensity or rgb fields**, only x/y/z. That matters for the RViz
-colour transformer ([§7](#7-seeing-it-in-rviz)).
+colour transformer ([[ZED Feature Map#Seeing it in RViz|§7]]).
 
 ### The coverage grid
 
@@ -321,7 +325,7 @@ encoders avoid.
 
 ---
 
-## 6. Why this is not in the VO node
+## Why this is not in the VO node
 
 Both nodes run ORB over the same RGB stream and back-project through the same
 depth, so merging them would save one ORB pass. It is deliberately not done.
@@ -340,7 +344,7 @@ for twelve lines of algebra.
 
 ---
 
-## 7. Seeing it in RViz
+## Seeing it in RViz
 
 ### The frame situation
 
@@ -418,7 +422,7 @@ In order of likelihood:
 And if it renders but looks wrong rather than absent — the cloud appearing to
 sit on the drone instead of spread across the arena — that is the `p_base`
 question, not a frame or transform question. See
-[Is the placement actually global?](#is-the-placement-actually-global).
+[[ZED Feature Map#Is the placement actually global?|Is the placement actually global?]]
 
 Once it is up, the health check is `ros2 topic hz /hydrone/map/cloud` — it
 should read 1.0 Hz — and `ros2 topic echo --once --field width
@@ -426,7 +430,7 @@ should read 1.0 Hz — and `ros2 topic echo --once --field width
 
 ---
 
-## 8. Parameters
+## Parameters
 
 | Param | Default | Meaning |
 |---|---|---|
@@ -453,7 +457,7 @@ still display it in `map`.
 
 ---
 
-## 9. What it is not
+## What it is not
 
 - **Not SLAM.** There is no loop closure, no pose graph, no bundle adjustment,
   and no feedback into localization. The map inherits every metre of VO drift
@@ -469,7 +473,7 @@ still display it in `map`.
   `pad_mission_node` flies a fixed bounded spiral and never reads it. Wiring it in
   (skip a well-seen leg, re-fly a poorly-seen one) is the natural next step and is
   deliberately deferred until the fixed pattern has been flown end to end. See
-  [`LANDING-SITES.md`](LANDING-SITES.md) §11.
+  [[Landing Sites#Tests|Landing Sites §11]].
 - **Not flown.** As of 2026-08-19 the mapper has been observed publishing in sim
   (767 voxels, a 52×36 coverage grid at 0.5 m) but the closed-loop mission has
   never got airborne, so no map has been built over a real trajectory.

@@ -1,5 +1,9 @@
-# Remote install debrief — `nautec` machine (10.228.249.136)
+---
+tags: [hydrone, infra, install]
+---
+# Remote Install Nautec
 
+Back to [[Hydrone]]. Debrief for the `nautec` machine (10.228.249.136).
 Diagnosis of the problems hit while installing the **refactored**
 `refactor/workspace-cleanup` branch of `joao_pessoa_2026` on the lab desktop
 `nautec@10.228.249.136` (reached over SSH / AnyDesk), and how to fix them.

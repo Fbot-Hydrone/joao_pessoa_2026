@@ -27,7 +27,7 @@ the sources side: make the sim produce what the real drone produces.
 
 Give it ~30 s after start before expecting movement. With GPS disabled the EKF
 needs the vision pose and a global origin before it will accept a takeoff — see
-docs/DEVELOP-PIPELINES.md. phase1_mission waits for exactly that on its own and
+docs/Develop Pipelines.md. phase1_mission waits for exactly that on its own and
 logs what it is waiting for.
 
 Tuning lives in phase1.launch.py — edit a default there, or pass it on the
@@ -35,7 +35,7 @@ command line, and it reaches the mission either way:
 
     ros2 launch hydrone_bringup phase1_sim.launch.py takeoff_alt:=4.0
 
-Read docs/PHASE1-MISSION.md before the first run — in particular §"What to watch
+Read docs/Phase 1 Mission.md before the first run — in particular "What to watch
 on the first flight", which lists what has and has not been observed.
 """
 
@@ -77,7 +77,7 @@ def generate_launch_description():
         DeclareLaunchArgument("agent_name", default_value="HolybroX500"),
         # The real visual odometry flies the vehicle, as it will on the drone.
         # odom_source:=ground_truth swaps in BiguaSim dynamics, but only as a
-        # debugging tool — see sources_sim.launch.py and LANDING-SITES.md §10.
+        # debugging tool — see sources_sim.launch.py and docs/Landing Sites.md.
         # It never demonstrates that anything works.
         DeclareLaunchArgument("odom_source", default_value="vo"),
         # Sim-only VO drift logger; see sources_sim.launch.py. Worth leaving on

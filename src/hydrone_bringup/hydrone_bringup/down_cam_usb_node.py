@@ -39,7 +39,7 @@ Rolling shutter and exposure
 A cheap webcam auto-exposes, and over a dark floor it will hunt — which changes
 the pad's apparent saturation frame to frame, which is exactly the axis the HSV
 thresholds are tuned on. `exposure_auto` is exposed so it can be pinned once the
-arena's lighting is known; see docs/LANDING-SITES.md §3 for why saturation is
+arena's lighting is known; see docs/Pad Detector.md for why saturation is
 the fragile part of the detector.
 """
 

@@ -12,7 +12,7 @@ then flies on this instead of GPS.
 Frame: the input is NWU, so we rotate +90deg about Z to ENU (see _cb); MAVROS's
 vision_pose plugin then does ENU->NED for the FCU. NOTE sim->real contract risk:
 the real zed_wrapper publishes odom already in ENU (REP-103), so that +90deg must
-be dropped when running on hardware — see docs/SENSOR-CONFIG.md contract checklist.
+be dropped when running on hardware — see docs/Sensor Config.md contract checklist.
 """
 
 import rclpy

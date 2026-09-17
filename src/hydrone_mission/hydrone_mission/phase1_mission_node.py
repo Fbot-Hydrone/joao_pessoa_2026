@@ -34,7 +34,7 @@ State machine
 Why turning instead of flying a pattern
 ---------------------------------------
 Every metre flown is visual-odometry drift, and the arena gives the VO very
-little to work with (docs/LANDING-SITES.md §10, and the ORB survey that found 46
+little to work with (docs/Landing Sites.md, and the ORB survey that found 46
 keypoints in a whole frame). A 5x5 m square is small enough that a camera at
 1 m sees all of it from one spot given enough headings, so the cheapest search
 is the one that does not move the vehicle: turn, look, turn. The only
@@ -60,7 +60,7 @@ alone it would become a map candidate, and ruling it out would cost a travel leg
 and a confirmation hover — drift spent on a question already answered. So the
 instant the vehicle arms, its own position is registered as the takeoff base
 (`RegisterTakeoffBase`), and pad_map_node refuses to map anything at all before
-that arm. See docs/PHASE1-MISSION.md.
+that arm. See docs/Phase 1 Mission.md.
 
 Speed
 -----
@@ -796,7 +796,7 @@ class Phase1MissionNode(Node):
             if self._takeoff_tries > 3:
                 self.get_logger().error(
                     "takeoff refused three times — check EKF origin/home "
-                    "(see docs/DEVELOP-PIPELINES.md: no origin -> no home -> "
+                    "(see docs/Develop Pipelines.md: no origin -> no home -> "
                     "NAV_TAKEOFF fails). Aborting.")
                 self._enter(self.ABORTED)
                 return
@@ -999,7 +999,7 @@ class Phase1MissionNode(Node):
 
         The forward camera found it across the arena, where the ring and the
         cross are a handful of pixels and the detector's confidence is capped by
-        design (docs/LANDING-SITES.md §3). From directly above at 1 m the same
+        design (docs/Pad Detector.md). From directly above at 1 m the same
         structure is hundreds of pixels across, so this is the look that decides.
         `confirm_detections` separate frames must clear `confirm_confidence` —
         one frame can be a glint on something blue.

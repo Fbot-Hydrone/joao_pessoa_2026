@@ -29,7 +29,7 @@ The mount rotation
 ------------------
 `camera_rpy_deg` is the sensor's mounting rotation as written in BiguaSim's
 config.yaml — [roll, pitch, yaw] in degrees. VERIFIED against a running UE5
-render (2026-08-18, docs/LANDING-SITES.md §8's one-time check): pitch +90 aims
+render (2026-08-18, docs/Landing Sites.md's one-time check): pitch +90 aims
 the lens at the GROUND. That is rotation about the body's RIGHT axis with the
 right-hand rule — exactly how ROS RPY's pitch about +Y (left) moves the +X
 axis: R_y(+90)·x̂ = -ẑ, straight down. The two conventions agree, so the value

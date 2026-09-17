@@ -1,9 +1,13 @@
-# `holybro_sitl.parm`: remote `develop-pipelines` vs. what is running now
+---
+tags: [hydrone, ardupilot, tuning]
+---
+# Params Diff SITL
 
-Written 2026-08-19. Scope: every difference between the params file as committed
-on `origin/develop-pipelines` and the file the SITL actually boots with today.
+Back to [[Hydrone]]. Written 2026-08-19. Every difference between
+`holybro_sitl.parm` as committed on `origin/develop-pipelines` and the file the
+SITL actually boots with today.
 
-## 0. Where the file comes from, and is the working copy really the one in use?
+## Where the file comes from, and is the working copy really the one in use?
 
 Yes. Verified:
 
@@ -27,7 +31,7 @@ Diff size: `92 ++-` (85 insertions, 7 deletions), of which ~55 lines are comment
 
 ---
 
-## 1. Flight-tuning block — ADDED (this is the part that changes how it flies)
+## Flight-tuning block — added (this is the part that changes how it flies)
 
 Inserted after `ARSPD_BUS 2`. None of these parameters existed in the remote
 file, so before this edit each one sat at the firmware default.
@@ -54,7 +58,7 @@ Unchanged and pre-existing on the remote: `ATC_RAT_YAW_P 0.3`, `ATC_RAT_YAW_I 0.
 Untouched by the edit (still at firmware default): all `ATC_RAT_*_FLTD/FLTT`
 (20 Hz), `ATC_ACC_*_MAX`, `ATC_ANG_YAW_P`, `ATC_ANGLE_MAX`, `PSC_*` gains.
 
-### 1a. Things that check out
+### Things that check out
 
 - The **units and suffixes** are right for this build: `AC_WPNav.cpp` defines
   `SPD` (m/s), `SPD_UP`, `SPD_DN`, `ACC` (m/s²), `JERK`. The old `WPNAV_SPEED`
@@ -62,42 +66,43 @@ Untouched by the edit (still at firmware default): all `ATC_RAT_*_FLTD/FLTT`
   nothing. So the claim that old-name lines were being silently dropped is
   right.
 
-> ### CORRECTION (2026-08-21): the **prefix** is wrong too
->
-> `WPNAV_SPD` and `WPNAV_ACC`, used in the table above and in the verbatim block
-> in §5, are **not parameter names in this build either**. The group prefix is
-> `WP_`, not `WPNAV_`:
->
-> ```
-> ArduCopter/Parameters.cpp:369:    GOBJECTPTR(wp_nav, "WP_", AC_WPNav),
-> ```
->
-> and `grep -rn '"WPNAV_"' ArduCopter/` returns nothing. The real names are
-> **`WP_SPD`, `WP_ACC`, `WP_SPD_UP`, `WP_SPD_DN`, `WP_JERK`**. `PSC_ANGLE_MAX`
-> and every `ATC_*` above are correct as written.
->
-> This is the *same* failure the 2026-08-18 note describes catching — a defaults
-> line with an unknown name is silently ignored — caught once, fixed to a second
-> name that is also unknown, and not re-verified. Two consequences:
->
-> 1. **Anyone re-applying the §5 block verbatim gets the attitude softening and
->    `PSC_ANGLE_MAX` but none of the five speed/accel caps.** Fix the names
->    first.
-> 2. **The bisect's conclusion is narrower than it reads.** §1b argues that four
->    stacked softenings caused the bad handling. If the speed and acceleration
->    caps never loaded, then what was actually flown was the *attitude* softening
->    plus a 10° lean cap at firmware-default speeds — which is a worse
->    combination than the block was meant to be, and it makes the case against
->    the attitude half stronger, not weaker. **The speed caps have never actually
->    been flown.** Check a dataflash `PARM` dump against the `WP_*` names before
->    drawing any conclusion about them.
->
-> `docs/PHASE1-MISSION.md` §8 uses the corrected names.
+### Correction (2026-08-21): the prefix is wrong too
+
+`WPNAV_SPD` and `WPNAV_ACC`, used in the table above and in the verbatim block
+in [[Params Diff SITL#Appendix — the removed tuning block, verbatim|§6]], are
+**not parameter names in this build either**. The group prefix is `WP_`, not
+`WPNAV_`:
+
+```
+ArduCopter/Parameters.cpp:369:    GOBJECTPTR(wp_nav, "WP_", AC_WPNav),
+```
+
+and `grep -rn '"WPNAV_"' ArduCopter/` returns nothing. The real names are
+**`WP_SPD`, `WP_ACC`, `WP_SPD_UP`, `WP_SPD_DN`, `WP_JERK`**. `PSC_ANGLE_MAX`
+and every `ATC_*` above are correct as written.
+
+This is the *same* failure the 2026-08-18 note describes catching — a defaults
+line with an unknown name is silently ignored — caught once, fixed to a second
+name that is also unknown, and not re-verified. Two consequences:
+
+1. **Anyone re-applying the [[Params Diff SITL#Appendix — the removed tuning block, verbatim|§6]] block verbatim gets the attitude softening and
+   `PSC_ANGLE_MAX` but none of the five speed/accel caps.** Fix the names
+   first.
+2. **The bisect's conclusion is narrower than it reads.** [[Params Diff SITL#Things that are suspicious — the likely cause of the bad handling|§1b]] argues that four
+   stacked softenings caused the bad handling. If the speed and acceleration
+   caps never loaded, then what was actually flown was the *attitude* softening
+   plus a 10° lean cap at firmware-default speeds — which is a worse
+   combination than the block was meant to be, and it makes the case against
+   the attitude half stronger, not weaker. **The speed caps have never actually
+   been flown.** Check a dataflash `PARM` dump against the `WP_*` names before
+   drawing any conclusion about them.
+
+[[Phase 1 Mission#Speed: FCU limits, not setpoint stepping|Phase 1 Mission §8]] uses the corrected names.
 - `PSC_ANGLE_MAX` really is degrees, and `0` means "use `ATC_ANGLE_MAX`".
 - No duplicate keys in the file (checked: `uniq -d` over all keys is empty), so
   nothing later in the file quietly overrides these.
 
-### 1b. Things that are suspicious — the likely cause of the bad handling
+### Things that are suspicious — the likely cause of the bad handling
 
 **Four independent softenings are stacked on the same loop.** The rate-loop
 reduction (-41 %) is defensible on its own for a laggy plant. What is layered on
@@ -141,7 +146,7 @@ now in `holybro_sitl.parm` at the rate loop and 3x at the angle loop.
 
 ---
 
-## 2. IMU / arming block — CHANGED
+## IMU / arming block — changed
 
 | Parameter | Remote | Now | Note |
 |---|---|---|---|
@@ -172,7 +177,7 @@ in sim.
 
 ---
 
-## 3. Comment-only changes
+## Comment-only changes
 
 The `# we need small INS_ACC offsets ...` one-liner was replaced by a ~30-line
 explanation of the arming hold-down timer, and a ~13-line rationale block was
@@ -180,7 +185,7 @@ added above the tuning parameters. No behavioural effect.
 
 ---
 
-## 4. Not changed (rules these out as causes)
+## Not changed (rules these out as causes)
 
 Byte-identical to the remote: `EK3_SRC1_POSXY/VELXY/POSZ/VELZ/YAW`, `VISO_TYPE`,
 `GPS1_TYPE`, `RNGFND1_*`, `EK3_RNG_USE_HGT`, `SCHED_LOOP_RATE 100`, `FRAME_CLASS/TYPE`,
@@ -203,7 +208,7 @@ softening may no longer be needed at all.
 
 ---
 
-## 5. Suggested way to bisect this (smallest step first)
+## Suggested way to bisect this (smallest step first)
 
 1. Revert only the tuning block, keep the IMU/arming block:
    `git diff origin/develop-pipelines -- <file>` shows the two hunks separately;
@@ -219,7 +224,7 @@ softening may no longer be needed at all.
 
 ---
 
-## 6. Appendix — the removed tuning block, verbatim
+## Appendix — the removed tuning block, verbatim
 
 Removed from `holybro_sitl.parm` on 2026-08-19 as bisect step 1. It was never
 committed, so this appendix is the only copy. Re-apply by pasting it back after
@@ -265,10 +270,10 @@ ATC_RAT_PIT_D   0.002
 
 ---
 
-## 7. ADDED 2026-08-21: the Phase 1 speed limits
+## Added 2026-08-21: the Phase 1 speed limits
 
 Appended at the end of `holybro_sitl.parm` for `phase1_mission_node`
-(`docs/PHASE1-MISSION.md` §8). Three lines, using the **corrected** names:
+([[Phase 1 Mission#Speed: FCU limits, not setpoint stepping|Phase 1 Mission §8]]). Three lines, using the **corrected** names:
 
 ```
 WP_SPD          0.5
@@ -289,7 +294,7 @@ takes its horizontal limits from exactly these two — `ModeGuided::pos_control_
 calls `NE_set_max_speed_accel_m(wp_nav->get_default_speed_NE_ms(),
 wp_nav->get_wp_acceleration_mss())` (`ArduCopter/mode_guided.cpp:255`).
 
-Per §1a's correction, the speed caps in the removed block were probably never
+Per [[Params Diff SITL#Things that check out|§1a]]'s correction, the speed caps in the removed block were probably never
 loaded, so 0.5 m/s at default attitude gains is genuinely untested. If the
 vehicle oscillates on a horizontal leg under Phase 1, `WP_SPD` and `WP_ACC` are
 the parameters to move — not the attitude gains.

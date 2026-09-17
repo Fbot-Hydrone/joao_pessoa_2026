@@ -47,7 +47,7 @@ should not be forked. What changes is above it.
     everything; the belly camera answers one question, "is a base under me".
     A simpler pipeline has fewer ways to be wrong.
   * `pad_map` maps nothing until the vehicle first arms, and the base the drone
-    starts on is REGISTERED rather than detected — see docs/PHASE1-MISSION.md.
+    starts on is REGISTERED rather than detected — see docs/Phase 1 Mission.md.
   * Altitude is 1 m, not 2.5 m. This is test code and a fall from 1 m is cheap.
     Note that it therefore does NOT clear the 1.5 m structure the landing_sites
     cruise altitude was chosen for: this launch assumes the Phase 1 arena is
@@ -102,7 +102,7 @@ def generate_launch_description():
                         "against the real pad and the yellow mask comes back "
                         "empty, so no check ever runs and nothing is detected "
                         "or explained. phase1_real.launch.py sets this; see "
-                        "docs/LANDING-SITES.md."),
+                        "docs/Landing Sites.md."),
         DeclareLaunchArgument(
             "target_bases", default_value="3",
             description="How many landing sites to visit before returning to "
@@ -215,12 +215,12 @@ def generate_launch_description():
     # detections, never how they are made. The measurement behind these numbers
     # (blue S 37-75, yellow S 38-59 on a lossless /down_cam frame at 3 m hover,
     # 2026-08-18, against a library floor of S >= 110 that admitted zero pixels
-    # of either) is written out in full there and in docs/LANDING-SITES.md §3.
+    # of either) is written out in full there and in docs/Pad Detector.md.
     #
     # SIM VALUES, and they apply to field_mode:="blue" ONLY. The real arena
     # runs field_mode:="dark_blue", which uses no HSV band at all — retuning
     # these would not move it. Its knobs are mark_delta / mark_window_frac /
-    # real_min_radius_px on pad_detector_node; docs/LANDING-SITES.md 3.
+    # real_min_radius_px on pad_detector_node; docs/Pad Detector.md.
     blue_hsv_low = [95, 30, 50]
     yellow_hsv_low = [18, 30, 90]
     field_mode = LaunchConfiguration("field_mode")

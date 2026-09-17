@@ -13,7 +13,7 @@ Run inside the stack container (it has opencv + numpy):
 
 The renders here are idealised — flat lighting, no motion blur, no JPEG. They
 prove the geometry and the check cascade are right; the HSV bands still have to
-be confirmed against the real arena (see docs/LANDING-SITES.md).
+be confirmed against the real arena (see docs/Pad Detector.md).
 """
 
 import math

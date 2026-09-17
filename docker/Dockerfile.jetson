@@ -93,7 +93,7 @@ RUN echo "# R32 (release), REVISION: 6.1" > /etc/nv_tegra_release \
 #     ValueError: numpy.ndarray size changed ... Expected 96, got 88
 # while numpy 1 is not negotiable here: the image's cv2 (4.5.4, apt) is built
 # against it, and the numpy-2 mismatch is silent at import and SEGFAULTS at the
-# first array conversion (docs/LANDING-SITES.md §9). Measured on an earlier
+# first array conversion (docs/Landing Sites.md). Measured on an earlier
 # build of this very file, `--ignore-installed` quietly pulled numpy-2.2.6.
 #
 # Building the binding against the numpy and the SDK actually installed removes
@@ -114,7 +114,7 @@ RUN python3 -m pip install --no-cache-dir "numpy<2" \
 # camera_calibration is not needed to FLY, but it is needed to make the belly
 # camera's intrinsics mean anything, and the belly camera has no depth: its
 # camera_info is the only thing turning a pad's pixel position into a place to
-# land. See docs/CALIBRATION.md.
+# land. See docs/Calibration.md.
 #
 # It is a GUI program (cv2.imshow, GTK3 — already compiled into the image's
 # apt opencv). Run it either on the Jetson's own display or over `ssh -X`; the
