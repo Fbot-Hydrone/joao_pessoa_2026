@@ -303,6 +303,22 @@ def generate_launch_description():
             description="Confidence that counts as a look. Raise it if the "
                         "drone lands on things that are merely blue."),
         DeclareLaunchArgument(
+            "belly_offset_xy", default_value="[0.0, 0.0]",
+            description="Onde a camera da BARRIGA fica em relacao ao centro do "
+                        "veiculo, em metros no frame do corpo [x frente, y "
+                        "direita]. No drone real ela e montada ABAIXO DA ZED e "
+                        "nao no eixo, entao centralizar o pad na IMAGEM poe a "
+                        "CAMERA sobre a base e o trem de pouso toca deslocado "
+                        "desse tanto — numa base de 1 m, com borda a 50 cm, 8 "
+                        "cm ja e um sexto da margem. No simulador e [0, 0]: o "
+                        "config.yaml poe a DownCamera em [0, 0, -0.1] sem "
+                        "socket, entao nao ha o que corrigir e isto vira "
+                        "no-op. NAO da para usar pad_target_uv no lugar: um "
+                        "deslocamento fixo em PIXEL e um ANGULO fixo, cuja "
+                        "distancia no chao CRESCE com a altura, enquanto uma "
+                        "translacao e constante em metros — e a descida vai de "
+                        "2,5 m a zero."),
+        DeclareLaunchArgument(
             "mission_budget_s", default_value="600.0",
             description="O RELOGIO DA PROVA, em segundos de tempo de missao, "
                         "contados do primeiro tick armado. 0 desliga. A prova "
@@ -967,6 +983,9 @@ def generate_launch_description():
                 LaunchConfiguration("confirm_timeout_s"), value_type=float),
             "land_centre_max_cm": ParameterValue(
                 LaunchConfiguration("land_centre_max_cm"), value_type=float),
+            "belly_offset_xy": ParameterValue(
+                LaunchConfiguration("belly_offset_xy"),
+                value_type=List[float]),
             "mission_budget_s": ParameterValue(
                 LaunchConfiguration("mission_budget_s"), value_type=float),
             "return_reserve_s": ParameterValue(

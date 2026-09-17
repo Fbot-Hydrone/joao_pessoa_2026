@@ -573,6 +573,38 @@ def test_the_budget_is_centimetres_on_the_ground_not_pixels(node):
     assert near < node.land_centre_max_cm < far
 
 
+def test_a_centred_camera_needs_no_correction(node):
+    """The simulator's belly camera is on the axis, so this must be inert."""
+    assert node._belly_offset == [0.0, 0.0]
+    assert node._target_uv_now() == node._servo.target_uv
+
+
+def test_an_offset_camera_shifts_the_target_and_shrinks_with_height(node):
+    """A camera bolted forward must see the pad BEHIND image centre.
+
+    And the shift has to shrink as the vehicle descends: the offset is a fixed
+    distance in metres, so the pixels it subtends depend on how far away the
+    ground is. A fixed pixel target — pad_target_uv — cannot express that, and
+    over a 2.5 m descent the difference is the whole approach.
+    """
+    node._belly_offset = [0.08, 0.0]        # 8 cm forward
+    node.target_id = 4
+    set_map(node, pad(4, 1.0, 0.0, height=0.0))
+    u0, v0 = node._servo.target_uv
+
+    set_pose(node, 0.0, 0.0, 2.0)
+    u_high, v_high = node._target_uv_now()
+    set_pose(node, 0.0, 0.0, 0.5)
+    u_low, v_low = node._target_uv_now()
+
+    assert u_high == pytest.approx(u0)      # nothing sideways
+    assert v_high > v0                      # pad wanted BELOW centre
+    assert v_low > v_high                   # and further below, closer in
+    # fx 320, 8 cm, 2.0 m over the pad -> 12.8 px; at 0.5 m -> 51.2 px.
+    assert v_high - v0 == pytest.approx(12.8, abs=0.5)
+    assert v_low - v0 == pytest.approx(51.2, abs=1.0)
+
+
 # ── The competition clock ────────────────────────────────────────────────────
 #
 # A round is 10 minutes and returning to the takeoff base DOUBLES the score, so

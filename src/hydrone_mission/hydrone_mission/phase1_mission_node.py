@@ -457,6 +457,24 @@ class Phase1MissionNode(Node):
         # learn, because it is what "centred" means. Measure it once by
         # hovering over a known pad and reading where it lands in frame.
         self.declare_parameter("pad_target_uv", [320.0, 240.0])
+        # Where the BELLY CAMERA sits relative to the vehicle's centre, in
+        # metres in the body frame [x forward, y right]. On the real drone the
+        # belly camera is mounted under the ZED rather than on the axis, so
+        # centring the pad in the IMAGE parks the CAMERA over the pad and the
+        # landing gear lands by this much. In the simulator it is [0, 0] --
+        # config.yaml puts DownCamera at location [0, 0, -0.1] with no socket,
+        # so `location` is relative to the agent and there is nothing to
+        # correct. Zero makes every line below a no-op.
+        #
+        # This CANNOT be folded into pad_target_uv, and the difference is the
+        # whole reason it is a separate number. A fixed pixel offset is a fixed
+        # ANGLE, so the distance it represents on the ground GROWS with height
+        # -- which is right for a camera that points slightly off-vertical, and
+        # wrong for one that is simply bolted 8 cm forward. A translation is a
+        # constant in METRES, so the pixel shift that cancels it has to shrink
+        # as the vehicle descends. The descent runs 2.5 m to 0, so getting this
+        # backwards is wrong over the entire approach.
+        self.declare_parameter("belly_offset_xy", [0.0, 0.0])
         self.declare_parameter("survey_max_stalls", 2)
         # How much the predicted gain must fall for a trip to count as
         # learning something.
@@ -630,6 +648,7 @@ class Phase1MissionNode(Node):
         self.land_centre_max_cm = float(p("land_centre_max_cm"))
         t = [float(v) for v in p("pad_target_uv")]
         self._servo = servo.VisualServo(target_uv=(t[0], t[1]))
+        self._belly_offset = [float(v) for v in p("belly_offset_xy")]
         self._level = 1
         self._survey_path = None
         self.survey_max_stalls = int(p("survey_max_stalls"))
@@ -2270,11 +2289,38 @@ class Phase1MissionNode(Node):
                 return (pad.position.x, pad.position.y)
         return None
 
+    def _target_uv_now(self):
+        """Where the pad must sit in the image for the VEHICLE to be over it.
+
+        The servo's own target is where the pad sits when the CAMERA is over
+        it. They are the same point only when the camera is on the axis.
+
+        The shift is computed at the CURRENT height on purpose: the camera
+        offset is a fixed distance in metres, and the number of pixels that
+        distance subtends shrinks as the vehicle comes down. fx and the height
+        are the same two quantities the centimetre budget uses.
+        """
+        u0, v0 = self._servo.target_uv
+        ox, oy = self._belly_offset
+        info = self._sweep_cam_info
+        if (ox == 0.0 and oy == 0.0) or info is None:
+            return u0, v0
+        fx = float(info.k[0])
+        h = self._height_over_pad()
+        if fx <= 0.0 or h <= 0.0:
+            return u0, v0
+        # Body x is forward and the image's +v runs down the frame, which for a
+        # nadir camera is backwards along the body's x. Body y is right, and
+        # +u runs right. A camera AHEAD of the centre must therefore see the
+        # pad BEHIND image centre for the vehicle to be over it.
+        px_per_m = fx / h
+        return u0 - oy * px_per_m, v0 + ox * px_per_m
+
     def _centre_offset_px(self, det):
         """How far the pad is from where it should sit in the image, in px."""
         if det is None:
             return None
-        u0, v0 = self._servo.target_uv
+        u0, v0 = self._target_uv_now()
         return math.hypot(float(det.u) - u0, float(det.v) - v0)
 
     def _centre_offset_cm(self, det):
@@ -2321,7 +2367,14 @@ class Phase1MissionNode(Node):
         # twice too big. It does not converge, it hunts: the nudges on pad 5 ran
         # +0.25 then -0.25 m until the vehicle slid off the base and landed on
         # the floor beside it — an off-base landing, which is eliminatory.
-        step = self._servo.update((det.u, det.v), self._height_over_pad())
+        # The servo is told where the pad IS relative to where it SHOULD be,
+        # so the camera-offset correction rides in as a shifted reading rather
+        # than as a second controller fighting the first.
+        u0, v0 = self._target_uv_now()
+        su, sv = self._servo.target_uv
+        step = self._servo.update(
+            (float(det.u) - u0 + su, float(det.v) - v0 + sv),
+            self._height_over_pad())
         if step is None:
             return
         yaw = yaw_of(self.pose)

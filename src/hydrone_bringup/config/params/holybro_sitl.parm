@@ -213,3 +213,26 @@ ATC_RATE_WPY_MAX 15
 # NOT touched, on purpose: WP_SPD_UP / WP_SPD_DN and PILOT_SPEED_UP. The climb
 # is the one part of the flight that already behaves, and GUIDED takeoff takes
 # its rate from those.
+
+# ── Descida do pouso ─────────────────────────────────────────────────────────
+# ESTE PARAMETRO NAO E O FREIO. Fica aqui explicito, no valor do proprio
+# default, para registrar um resultado NEGATIVO e poupar a proxima pessoa de
+# repetir a tentativa.
+#
+# MEDIDO 2026-09-15 no ground truth: a descida roda a 0,15 m/s e o estado LAND
+# custa 18,3 s por base — 110 s dos 600 de uma rodada, com seis bases. O
+# default deste build ja e 0,5 m/s (LAND_SPD_MS_DEFAULT em ArduCopter/
+# config.h), ou seja tres vezes o observado, entao algo mais freia.
+#
+# MEDIDO 2026-09-16 com ele fixado em 0,5 e uma corrida completa: a descida
+# sustentada mais rapida foi 0,18 m/s contra 0,15. Ruido. O freio esta em
+# outro lugar — candidatos por ordem: o flare por rangefinder do modo LAND (as
+# bases tem 0,8-1,4 m e o sensor ve o topo cedo), PILOT_SPD_DN, e o limite de
+# aceleracao vertical do controlador de posicao.
+#
+# E VALE INSISTIR, porque aqui acelerar NAO troca precisao por tempo: a missao
+# entrega o veiculo ao modo LAND e PARA de mandar setpoint (_begin_landing), e
+# nao ha precision landing configurado. Os 17 s de descida sao MALHA ABERTA —
+# ninguem corrige deriva nesse trecho. Menos tempo no ar e menos tempo para
+# derivar.
+LAND_SPD_MS     0.5
