@@ -36,7 +36,7 @@ from hydrone_mission.maze.planner import GridPlanner, inflate
 @dataclass
 class MissionParams:
     flight_z: float = 0.5           # odom z to fly at (window centre height guess)
-    inside_dz: float = 0.45         # inside, fly this far above the floor instead
+    inside_bands: tuple = (0.40, 0.75)   # interior bands, m above the floor
     survey_rise: float = 0.6        # takeoff climbs this far above flight_z
     survey_hold: float = 2.0        # s hovering at each survey height
     inflate: float = 0.22           # obstacle inflation, m (330 mm drone)
@@ -89,11 +89,13 @@ class Mission:
         self.p = params or MissionParams()
         self.p.grid.flight_z = self.p.flight_z
         self.grid = OccupancyGrid(self.p.grid)
-        # A second grid, a band lower, for planning inside. A window is high in
-        # its wall and the passages behind it can be much lower (measured in
-        # BiguaSim: window 0.0..0.8, inner doorways floor..0.15), so one band
-        # can't both find the window and fly the maze.
-        self.igrid = None
+        # More grids, lower down, for planning inside. A window sits high in its
+        # wall while the passages behind it can be much lower (measured in
+        # BiguaSim: window 0.0..0.8, some inner doorways floor..0.15), and
+        # different passages sit at different heights, so the mission keeps one
+        # grid per band and explores in whichever one has somewhere to go.
+        self.bands = []
+        self.ib = 0
         self.logger = logger
         self.log = []                           # (t, message)
         self.phase = 'TAKEOFF'
@@ -132,6 +134,7 @@ class Mission:
         self._retries = 0
         self._blocked_since = None
         self._bad_exits = []
+        self._shift_back = 'EXPLORE'
 
     # ── bookkeeping ─────────────────────────────────────────────────────────
     def say(self, msg):
@@ -173,21 +176,32 @@ class Mission:
         return cmd
 
     @property
+    def igrid(self):
+        return self.bands[self.ib] if self.bands else None
+
+    @property
     def inside_z(self):
-        return self.igrid.p.flight_z if self.igrid is not None else self.p.flight_z
+        return self.igrid.p.flight_z if self.bands else self.p.flight_z
+
+    def _make_bands(self):
+        floor = self.grid.floor_z
+        for dz in self.p.inside_bands:
+            z = floor + dz
+            if z < self.p.flight_z - 0.15:      # the window band already covers the top
+                self.bands.append(OccupancyGrid(replace(self.p.grid, flight_z=z, floor_z=floor)))
+        if self.bands:
+            self.say('interior bands at z '
+                     + ', '.join(f'{g.p.flight_z:.2f}' for g in self.bands)
+                     + f' (floor {floor:.2f})')
 
     def _ingest(self, points, origin, pos):
         c0 = time.perf_counter()
         pts = np.asarray(points, dtype=np.float32)
         self.grid.update(pts, origin)
-        if self.igrid is None and self.grid.floor_z is not None:
-            z = self.grid.floor_z + self.p.inside_dz
-            if z < self.p.flight_z - 0.15:      # only worth it if it's really lower
-                gp = replace(self.p.grid, flight_z=z, floor_z=self.grid.floor_z)
-                self.igrid = OccupancyGrid(gp)
-                self.say(f'interior band at z {z:.2f} (floor {self.grid.floor_z:.2f})')
-        if self.igrid is not None:
-            self.igrid.update(pts, origin)
+        if not self.bands and self.grid.floor_z is not None:
+            self._make_bands()
+        for g in self.bands:
+            g.update(pts, origin)
         fz = self.p.flight_z
         # a thin 3D memory around the drone, for window heights
         near = (np.abs(pts[:, 0] - pos[0]) < 3.0) & (np.abs(pts[:, 1] - pos[1]) < 3.0) \
@@ -577,6 +591,47 @@ class Mission:
             self._t_explore = self.t
         return self._hover(pos, pos[:2], z, self.p.v_crawl)
 
+    def _shift(self, pos):
+        """Change interior band in place, then carry on where we left off."""
+        z = self.inside_z
+        if abs(pos[2] - z) < 0.08 or self.elapsed() > 15.0:
+            self.go(self._shift_back)
+        return self._hover(pos, pos[:2], z, self.p.v_crawl)
+
+    def _to_band(self, k, back):
+        self.ib = k
+        self._shift_back = back
+        self.say(f'switching to the interior band at z {self.inside_z:.2f}')
+        self.go('SHIFT')
+
+    def _frontiers_on(self, k, pos):
+        """(planner, reachable frontiers) for interior band k."""
+        g = self.bands[k] if self.bands else self.grid
+        pl = self.planner('in', pos, grid=g)
+        if pl.cost is None:
+            return pl, []
+        fs, _ = fr.find_frontiers(g, self.crop, self.covered, pl.cost, self.p.frontiers, pl,
+                                  self._ignore, self._bad_views)
+        return pl, fs
+
+    def _cell_clear(self, grid, pos):
+        """Is the drone's own cell free of obstacles on that band?"""
+        crop, free, occ, covered, clear = self._masks(grid)
+        c = self.grid.to_cell(pos[:2]) - np.array([crop[0], crop[2]])
+        if not (0 <= c[0] < clear.shape[0] and 0 <= c[1] < clear.shape[1]):
+            return False
+        return bool(clear[c[0], c[1]])
+
+    def _band_with_frontiers(self, pos):
+        """Another band with somewhere to explore, that we can rise or sink into."""
+        for k in range(len(self.bands)):
+            if k == self.ib or not self._cell_clear(self.bands[k], pos):
+                continue
+            _, fs = self._frontiers_on(k, pos)
+            if fs:
+                return k
+        return None
+
     def _explore(self, pos):
         self._track_exit()
         z = self.inside_z
@@ -585,20 +640,17 @@ class Mission:
             return self._hover(pos, pos[:2], z, self.p.v_in)
         if self.t - self._t_plan >= self.p.replan_s or self.path is None:
             self._t_plan = self.t
-            pl = self.planner('in', pos, grid=self.igrid)
-            if pl.cost is None:
-                self.frontiers = []
-                self._no_frontier += 1
-                if self._no_frontier >= self.p.give_up_cycles:
-                    self.go('GO_EXIT', 'nowhere to plan from inside')
-                return self._hover(pos, pos[:2], z, self.p.v_in)
-            fs, _ = fr.find_frontiers(self.igrid or self.grid, self.crop, self.covered, pl.cost,
-                                      self.p.frontiers, pl, self._ignore, self._bad_views)
+            pl, fs = self._frontiers_on(self.ib, pos)
             self.frontiers = fs
             if not fs:
+                # nothing left here: the way on may be a band up or down
+                k = self._band_with_frontiers(pos)
+                if k is not None:
+                    self._to_band(k, 'EXPLORE')
+                    return self._hover(pos, pos[:2], self.inside_z, self.p.v_crawl)
                 self._no_frontier += 1
                 if self._no_frontier >= self.p.give_up_cycles:
-                    self.go('GO_EXIT', 'no reachable frontier left')
+                    self.go('GO_EXIT', 'no reachable frontier left on any band')
                 return self._hover(pos, pos[:2], z, self.p.v_in)
             self._no_frontier = 0
             best = fs[0]
@@ -671,9 +723,23 @@ class Mission:
         if arrived:
             self.pass_z = self._window_z(o)
             self.go('ALIGN_EXIT', f'pass height {self.pass_z:.2f}')
-        elif not ok and self.elapsed() > 30.0:
-            self.go('LAND', 'no way to the exit')
+        elif not ok and self.elapsed() > 8.0:
+            # the way there may be on another band
+            k = self._band_reaching(pos, goal)
+            if k is not None:
+                self._to_band(k, 'GO_EXIT')
+            elif self.elapsed() > 30.0:
+                self.go('LAND', 'no way to the exit')
         return cmd
+
+    def _band_reaching(self, pos, goal):
+        for k in range(len(self.bands)):
+            if k == self.ib or not self._cell_clear(self.bands[k], pos):
+                continue
+            pl = self.planner('in', pos, grid=self.bands[k])
+            if pl.cost is not None and pl.path_to(goal, snap=0.4) is not None:
+                return k
+        return None
 
     def _inside_point(self, o):
         """A clear spot just inside an opening, on the band we fly inside."""
