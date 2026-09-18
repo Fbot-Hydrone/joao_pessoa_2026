@@ -1,30 +1,25 @@
 #!/usr/bin/env python3
 """
-phase4_maze_node — fly into the little 3D maze right of spawn and out the other end.
+phase4_maze_node — thin ROS wrapper around the maze core (hydrone_mission/maze).
 
-Minimal on purpose (docs/Phase 4 Maze Mission.md):
+All the thinking lives in `maze.mission.Mission`, which is pure Python and
+tested headless (docs/Phase 4 Maze Explorer.md). This node only:
 
-  TAKEOFF   arm, GUIDED, climb to takeoff_alt
-  APPROACH  forward clear of the structure, down to fly_z, sideways to the gap
-  MAZE      replan every replan_s: A* on a 2D grid cut from the live voxel map
-            between fly_z - below and fly_z + above, obstacles inflated by
-            radius. Unknown cells are free: the path gets corrected as the
-            lidar sees round each corner. When the known map walls the exit
-            off, fly to the reachable cell nearest it and look again. Planning is fenced to the structure's
-            footprint (plus the entry and exit aprons) so the shortest path
-            can't simply go round the outside.
-  EXIT      out through the exit gap to exit_xy at fly_z, then climb
-  LAND
+  in   /cloud_registered   (PointCloud2 in camera_init; odom = camera_init +
+                            lidar_mount, the Mid-360's height over base_link)
+       /hydrone/lio/odom_raw (odom -> base_link)
+       /mavros/state, /mavros/local_position/pose
+  out  /mavros/setpoint_velocity/cmd_vel_unstamped at cmd_hz (ArduPilot drops
+       GUIDED velocity control after ~1 s of silence, so this never stops)
+       arm / GUIDED / takeoff / land over the MAVROS services
+  dbg  /hydrone/maze/{grid,path,markers,phase}
 
-Everything is in `odom` (base_link at takeoff, from the LIO). MAVROS wants its
-local ENU frame; vision_odom_bridge feeds the EKF odom rotated +90 deg about z,
-so local = (-y, x, z) + a constant offset measured at arming.
-
-The entrance/exit and the fence are parameters measured once from the saved
-map (tools/phase4/slice_map.py). Finding them automatically is future work.
+Frames: the core plans in `odom` (base_link at takeoff, x forward, y left).
+vision_odom_bridge feeds the EKF that pose rotated +90 deg about z, so MAVROS'
+local ENU is (-y, x, z) and a velocity goes out the same way. `check_frame`
+logs the measured rotation against that assumption on the first metre flown.
 """
 
-import heapq
 import math
 
 import numpy as np
@@ -33,359 +28,317 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import Point, PoseStamped, Twist
 from mavros_msgs.msg import State
 from mavros_msgs.srv import CommandBool, CommandTOL, SetMode
-from nav_msgs.msg import Odometry, Path
+from nav_msgs.msg import OccupancyGrid, Odometry, Path
 from sensor_msgs.msg import PointCloud2
+from std_msgs.msg import ColorRGBA, String
+from visualization_msgs.msg import Marker, MarkerArray
+
+from hydrone_mission.maze.mission import Mission, MissionParams
 
 
-def cloud_xyz(msg):
+def cloud_xyz(msg, stride=1):
+    """(N,3) float32 from a PointCloud2, every `stride`-th point."""
     offs = {f.name: f.offset for f in msg.fields}
     raw = np.frombuffer(bytes(msg.data), dtype=np.uint8).reshape(-1, msg.point_step)
+    raw = raw[::stride]
     return np.stack([raw[:, offs[c]:offs[c] + 4].copy().view(np.float32)[:, 0]
                      for c in 'xyz'], axis=1)
 
 
-def astar(blocked, start, goal):
-    """8-connected A* on a bool grid. Returns [(i, j), ...] or None."""
-    h, w = blocked.shape
-    if not (0 <= start[0] < h and 0 <= start[1] < w and 0 <= goal[0] < h and 0 <= goal[1] < w):
-        return None
-    moves = [(1, 0, 1.0), (-1, 0, 1.0), (0, 1, 1.0), (0, -1, 1.0),
-             (1, 1, 1.414), (1, -1, 1.414), (-1, 1, 1.414), (-1, -1, 1.414)]
-    g = {start: 0.0}
-    came = {}
-    heap = [(0.0, start)]
-    while heap:
-        _, cur = heapq.heappop(heap)
-        if cur == goal:
-            path = [cur]
-            while cur in came:
-                cur = came[cur]
-                path.append(cur)
-            return path[::-1]
-        for di, dj, c in moves:
-            nxt = (cur[0] + di, cur[1] + dj)
-            if not (0 <= nxt[0] < h and 0 <= nxt[1] < w) or blocked[nxt]:
-                continue
-            # no corner cutting between two blocked cells
-            if di and dj and (blocked[cur[0] + di, cur[1]] or blocked[cur[0], cur[1] + dj]):
-                continue
-            ng = g[cur] + c
-            if ng < g.get(nxt, math.inf):
-                g[nxt], came[nxt] = ng, cur
-                heapq.heappush(heap, (ng + math.hypot(goal[0] - nxt[0], goal[1] - nxt[1]), nxt))
-    return None
+def odom_to_enu(v):
+    """odom (x forward, y left) -> MAVROS local ENU, as vision_odom_bridge feeds it."""
+    return np.array([-v[1], v[0], v[2]])
 
 
-def closest_reachable(blocked, start, goal):
-    """Flood fill from start; the reachable cell nearest the goal.
-
-    When the goal is walled off in the known map, going there lets the lidar
-    see round the next corner, and the next plan knows more.
-    """
-    h, w = blocked.shape
-    seen = np.zeros_like(blocked)
-    seen[start] = True
-    stack = [start]
-    best, best_d = start, math.hypot(start[0] - goal[0], start[1] - goal[1])
-    while stack:
-        i, j = stack.pop()
-        d = math.hypot(i - goal[0], j - goal[1])
-        if d < best_d:
-            best, best_d = (i, j), d
-        for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-            n = (i + di, j + dj)
-            if 0 <= n[0] < h and 0 <= n[1] < w and not seen[n] and not blocked[n]:
-                seen[n] = True
-                stack.append(n)
-    return best
-
-
-def nearest_free(blocked, c):
-    """The free cell closest to c (c itself if free), or None."""
-    if not blocked[c]:
-        return c
-    free = np.argwhere(~blocked)
-    if not len(free):
-        return None
-    k = int(np.argmin(((free - np.array(c)) ** 2).sum(axis=1)))
-    return tuple(int(v) for v in free[k])
-
-
-def inflate(occ, cells):
-    """Dilate a bool grid by a disc of `cells` radius (numpy only)."""
-    if cells <= 0:
-        return occ.copy()
-    out = occ.copy()
-    for di in range(-cells, cells + 1):
-        for dj in range(-cells, cells + 1):
-            if di * di + dj * dj > cells * cells:
-                continue
-            out |= np.roll(np.roll(occ, di, axis=0), dj, axis=1)
-    return out
+def yaw_of(q):
+    return math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
 
 
 class MazeNode(Node):
 
     def __init__(self):
         super().__init__('phase4_maze_node')
-        dp = self.declare_parameter
-        dp('takeoff_alt', 1.0)
-        # Measured on the saved map: floor at odom z -0.62, maze roof at +0.92.
-        # The Kopis' base_link rests ~0.6 m above the floor and the lidar sits
-        # 0.5 m above base_link, so the band that clears both is ~0.1..0.3.
-        dp('fly_z', 0.2)               # odom z inside the maze
-        dp('below', 0.55)              # obstacle slice under base_link (floor excluded)
-        dp('above', 0.6)               # and over it (roof excluded)
-        dp('radius', 0.2)              # inflation, m (caged 5" Kopis ~0.3 m wide)
-        dp('resolution', 0.1)
-        # From a clean map of the structure (tools/phase4/plan_offline.py): the
-        # entrance is a ~0.6 m gap in the front wall (x = 1.35) at y ~ -2.5;
-        # the open side is the far end, past y ~ -7.1. entry is outside the gap.
-        dp('entry_xy', [1.9, -2.55])
-        dp('exit_xy', [0.0, -7.7])
-        dp('approach_y', 0.0)          # spawn side, clear of the structure
-        # planning fence [x_min, x_max, y_min, y_max]: inside the structure, so
-        # the shortest path can't go round the outside
-        dp('fence', [-0.9, 1.3, -7.9, -0.3])
-        # voxels seen fewer times than this are treated as noise
-        dp('min_hits', 2)
-        dp('replan_s', 1.0)
-        dp('lookahead', 0.5)
-        dp('reach_tol', 0.25)
-        dp('leg_timeout_s', 300.0)
-        # the maze itself gets longer: unknown-is-free replanning walks into
-        # dead ends before it learns they are dead ends
-        dp('maze_timeout_s', 900.0)
-        p = lambda n: self.get_parameter(n).value  # noqa: E731
-        self.p = p
+        p = self.declare_parameters('', [
+            ('cmd_hz', 20.0),
+            ('debug_hz', 2.0),
+            ('lidar_mount', [0.0, 0.0, 0.1]),   # Mid-360 over base_link = camera_init offset
+            ('max_points', 25000),              # per scan, after striding
+            ('flight_z', 0.5),
+            ('inflate', 0.22),
+            ('v_in', 0.25),
+            ('v_out', 0.5),
+            ('v_crawl', 0.15),
+            ('start_delay', 5.0),               # s of odometry before arming
+            ('odom_timeout', 2.0),
+            ('auto_start', True),
+        ])
+        self.par = {q.name: q.value for q in p}
+        self.mount = np.array(self.par['lidar_mount'], dtype=float)
+
+        self.mission = Mission(MissionParams(
+            flight_z=self.par['flight_z'], inflate=self.par['inflate'],
+            v_in=self.par['v_in'], v_out=self.par['v_out'], v_crawl=self.par['v_crawl']),
+            logger=lambda m: self.get_logger().info(f'[maze] {m}'))
 
         self.state = State()
-        self.local = None
-        self.odom = None
-        self.occ_pts = None
-        self.offset = None
-        self.phase = 'TAKEOFF'
-        self.path = None
-        self.t_phase = self.now()
+        self.pose = None            # (xyz, yaw) in odom
+        self.t_pose = None
+        self.local = None           # MAVROS local ENU position
+        self.local0 = None
+        self.odom0 = None
+        self.cmd = None
+        self.armed_z = None
+        self.started = False
+        self.t_first = None
+        self.takeoff_sent = False
+        self.land_sent = False
+        self.finished = False
+        self._frame_checked = False
+        self._last_scan_t = None
 
-        self.create_subscription(State, '/mavros/state', lambda m: setattr(self, 'state', m), 10)
-        self.create_subscription(PoseStamped, '/mavros/local_position/pose', self._cb_local,
+        self.create_subscription(State, '/mavros/state', self._state_cb, 10)
+        self.create_subscription(PoseStamped, '/mavros/local_position/pose', self._local_cb,
                                  qos_profile_sensor_data)
-        self.create_subscription(Odometry, '/hydrone/lio/odom', self._cb_odom, 10)
-        self.create_subscription(PointCloud2, '/hydrone/map/voxels', self._cb_map, 1)
-        self.sp_pub = self.create_publisher(PoseStamped, '/mavros/setpoint_position/local', 10)
-        self.path_pub = self.create_publisher(Path, '/hydrone/maze/path', 1)
+        self.create_subscription(Odometry, '/hydrone/lio/odom_raw', self._odom_cb,
+                                 qos_profile_sensor_data)
+        self.create_subscription(PointCloud2, '/cloud_registered', self._cloud_cb,
+                                 qos_profile_sensor_data)
+
+        self.pub_vel = self.create_publisher(Twist, '/mavros/setpoint_velocity/cmd_vel_unstamped', 10)
+        self.pub_phase = self.create_publisher(String, '/hydrone/maze/phase', 10)
+        self.pub_grid = self.create_publisher(OccupancyGrid, '/hydrone/maze/grid', 1)
+        self.pub_path = self.create_publisher(Path, '/hydrone/maze/path', 1)
+        self.pub_mark = self.create_publisher(MarkerArray, '/hydrone/maze/markers', 1)
+
         self.cli_mode = self.create_client(SetMode, '/mavros/set_mode')
         self.cli_arm = self.create_client(CommandBool, '/mavros/cmd/arming')
         self.cli_takeoff = self.create_client(CommandTOL, '/mavros/cmd/takeoff')
         self.cli_land = self.create_client(CommandTOL, '/mavros/cmd/land')
+        self._pending = []
 
-        self.target = None
-        self._last_plan = 0.0
-        self._calls = {}
-        self.create_timer(0.1, self._tick)
-        self.get_logger().info('maze mission ready')
-
-    def now(self):
-        return self.get_clock().now().nanoseconds * 1e-9
+        self.create_timer(1.0 / max(self.par['cmd_hz'], 1.0), self._control)
+        self.create_timer(1.0 / max(self.par['debug_hz'], 0.1), self._publish_debug)
+        self.get_logger().info('phase4_maze_node up: waiting for LIO odometry')
 
     # ── inputs ──────────────────────────────────────────────────────────────
-    def _cb_local(self, m):
+    def _state_cb(self, m):
+        self.state = m
+
+    def _local_cb(self, m):
         self.local = np.array([m.pose.position.x, m.pose.position.y, m.pose.position.z])
 
-    def _cb_odom(self, m):
-        pp = m.pose.pose.position
-        self.odom = np.array([pp.x, pp.y, pp.z])
+    def _odom_cb(self, m):
+        p, q = m.pose.pose.position, m.pose.pose.orientation
+        self.pose = (np.array([p.x, p.y, p.z]), yaw_of(q))
+        self.t_pose = self._stamp(m.header)
+        if self.t_first is None:
+            self.t_first = self.t_pose
+        self._check_frame()
 
-    def _cb_map(self, m):
-        pts = cloud_xyz(m)
-        offs = {f.name: f.offset for f in m.fields}
-        fz = float(self.p('fly_z'))
-        keep = (pts[:, 2] > fz - float(self.p('below'))) & (pts[:, 2] < fz + float(self.p('above')))
-        if 'intensity' in offs:
-            raw = np.frombuffer(bytes(m.data), dtype=np.uint8).reshape(-1, m.point_step)
-            hits = raw[:, offs['intensity']:offs['intensity'] + 4].copy().view(np.float32)[:, 0]
-            keep &= hits >= float(self.p('min_hits'))
-        self.occ_pts = pts[keep]
+    def _cloud_cb(self, m):
+        if self.pose is None or self.finished:
+            return
+        n = m.width * m.height
+        stride = max(1, int(math.ceil(n / max(self.par['max_points'], 1000))))
+        pts = cloud_xyz(m, stride) + self.mount
+        origin = self.pose[0] + self.mount
+        t = self._stamp(m.header)
+        self._last_scan_t = t
+        self.cmd = self.mission.step(t, self.pose, (pts, origin))
+        self._act(self.cmd)
 
-    # ── frames ──────────────────────────────────────────────────────────────
-    def to_local(self, xyz):
-        x, y, z = xyz
-        return np.array([-y, x, z]) + self.offset
+    @staticmethod
+    def _stamp(header):
+        return header.stamp.sec + header.stamp.nanosec * 1e-9
 
-    def to_odom(self, local):
-        v = local - self.offset
-        return np.array([v[1], -v[0], v[2]])
+    def _check_frame(self):
+        """Measure the odom -> local ENU rotation once the drone has moved."""
+        if self._frame_checked or self.local is None or self.pose is None:
+            return
+        if self.local0 is None:
+            self.local0, self.odom0 = self.local.copy(), self.pose[0].copy()
+            return
+        d_odom = self.pose[0] - self.odom0
+        d_local = self.local - self.local0
+        if np.linalg.norm(d_odom[:2]) < 0.5:
+            return
+        self._frame_checked = True
+        want = odom_to_enu(d_odom)
+        err = float(np.linalg.norm(want[:2] - d_local[:2]))
+        msg = (f'frame check over {np.linalg.norm(d_odom[:2]):.2f} m: odom {np.round(d_odom, 2)} '
+               f'-> local {np.round(d_local, 2)}, expected {np.round(want, 2)} (err {err:.2f} m)')
+        if err > 0.3:
+            self.get_logger().error('FRAME MISMATCH — ' + msg)
+        else:
+            self.get_logger().info(msg)
 
-    def publish_sp(self, odom_xyz):
-        m = PoseStamped()
+    # ── commands ────────────────────────────────────────────────────────────
+    def _call(self, cli, req, what):
+        if not cli.service_is_ready():
+            self.get_logger().warn(f'{what}: service not ready')
+            return
+        fut = cli.call_async(req)
+        fut.add_done_callback(lambda f, w=what: self.get_logger().info(f'{w}: {f.result()}'))
+        self._pending.append(fut)
+
+    def _act(self, cmd):
+        """Turn one core command into MAVROS calls (the velocity itself is sent
+        by the control timer, which must never stop)."""
+        if cmd.kind == 'takeoff':
+            if not self.started:
+                return
+            if self.state.mode != 'GUIDED':
+                self._call(self.cli_mode, SetMode.Request(custom_mode='GUIDED'), 'GUIDED')
+                return
+            if not self.state.armed:
+                self._call(self.cli_arm, CommandBool.Request(value=True), 'arm')
+                return
+            if self.armed_z is None:
+                self.armed_z = float(self.pose[0][2])
+            if not self.takeoff_sent:
+                alt = float(cmd.z) - self.armed_z
+                self.takeoff_sent = True
+                self.get_logger().info(f'takeoff to odom z {cmd.z:.2f} ({alt:.2f} m above here)')
+                self._call(self.cli_takeoff, CommandTOL.Request(altitude=alt), 'takeoff')
+        elif cmd.kind == 'land':
+            if not self.land_sent:
+                self.land_sent = True
+                self.finished = True
+                self.get_logger().info('landing')
+                self._call(self.cli_land, CommandTOL.Request(), 'land')
+
+    def _control(self):
+        """Publish a velocity setpoint every tick, whatever else is going on."""
+        if self.pose is None:
+            return
+        if not self.started:
+            if self.par['auto_start'] and self.t_pose - self.t_first >= self.par['start_delay']:
+                self.started = True
+                self.get_logger().info('starting the mission')
+            return
+        if self.land_sent:
+            return
+        v = np.zeros(3)
+        stale = self._last_scan_t is None or (self.t_pose - self._last_scan_t) > self.par['odom_timeout']
+        if stale:
+            if self._last_scan_t is not None:
+                self.get_logger().warn('no scan for too long — holding still', throttle_duration_sec=2.0)
+        elif self.cmd is not None and self.cmd.kind == 'velocity':
+            v = np.asarray(self.cmd.velocity, dtype=float)
+        # takeoff climbs on the FCU's own ramp; don't fight it with velocities
+        if self.cmd is not None and self.cmd.kind == 'takeoff':
+            return
+        enu = odom_to_enu(v)
+        msg = Twist()
+        msg.linear.x, msg.linear.y, msg.linear.z = (float(a) for a in enu)
+        msg.angular.z = float(self.cmd.yaw_rate) if self.cmd is not None else 0.0
+        self.pub_vel.publish(msg)
+
+    # ── debug ───────────────────────────────────────────────────────────────
+    def _publish_debug(self):
+        if self.cmd is None:
+            return
+        d = self.cmd.debug
+        self.pub_phase.publish(String(data=f"{d['phase']} {'|'.join(d['fallback_used'])}"))
+        self._publish_grid(d)
+        self._publish_path(d)
+        self._publish_markers(d)
+
+    def _publish_grid(self, d):
+        g, crop = d.get('grid'), d.get('crop')
+        if g is None:
+            return
+        crop = crop or g.crop(1.0)
+        i0, i1, j0, j1 = crop
+        free = g.free()[i0:i1, j0:j1]
+        occ = g.occupied()[i0:i1, j0:j1]
+        cov = d.get('covered')
+        data = np.full(free.shape, -1, dtype=np.int8)
+        data[free] = 0
+        if cov is not None and cov.shape == free.shape:
+            data[free & cov] = 40         # roofed free space, so it stands out
+        data[occ] = 100
+        m = OccupancyGrid()
+        m.header.frame_id = 'odom'
         m.header.stamp = self.get_clock().now().to_msg()
-        m.header.frame_id = 'map'
-        m.pose.position.x, m.pose.position.y, m.pose.position.z = (float(v) for v in self.to_local(odom_xyz))
-        m.pose.orientation.w = 1.0
-        self.sp_pub.publish(m)
+        m.info.resolution = g.p.res
+        # the core indexes [x, y]; an OccupancyGrid runs x fastest, so transpose
+        m.info.width, m.info.height = data.shape[0], data.shape[1]
+        m.info.origin.position.x = g.origin + i0 * g.p.res
+        m.info.origin.position.y = g.origin + j0 * g.p.res
+        m.info.origin.position.z = self.par['flight_z'] - 0.4
+        m.info.origin.orientation.w = 1.0
+        m.data = data.T.ravel(order='C').astype(np.int8).tolist()
+        self.pub_grid.publish(m)
 
-    # ── services, fire and forget, at most one call per client every 2 s ──
-    def call(self, cli, req):
-        last = self._calls.get(id(cli), 0.0)
-        if cli.service_is_ready() and self.now() - last > 2.0:
-            self._calls[id(cli)] = self.now()
-            cli.call_async(req)
-
-    def go(self, phase):
-        self.get_logger().info(f'{self.phase} -> {phase}')
-        self.phase, self.t_phase, self.target = phase, self.now(), None
-
-    def near(self, odom_xyz):
-        return self.odom is not None and np.linalg.norm(self.odom - np.asarray(odom_xyz)) < float(self.p('reach_tol'))
-
-    # ── planning ────────────────────────────────────────────────────────────
-    def plan(self, start_xy, goal_xy):
-        res = float(self.p('resolution'))
-        x0, x1, y0, y1 = (float(v) for v in self.p('fence'))
-        h, w = int(round((x1 - x0) / res)) + 1, int(round((y1 - y0) / res)) + 1
-        occ = np.zeros((h, w), dtype=bool)
-        if self.occ_pts is not None and len(self.occ_pts):
-            i = np.floor((self.occ_pts[:, 0] - x0) / res).astype(int)
-            j = np.floor((self.occ_pts[:, 1] - y0) / res).astype(int)
-            ok = (i >= 0) & (i < h) & (j >= 0) & (j < w)
-            occ[i[ok], j[ok]] = True
-        # np.roll wraps; pad so the fence edge isn't dilated from the far side
-        pad = int(math.ceil(float(self.p('radius')) / res)) + 1
-        big = np.pad(occ, pad)
-        blocked = inflate(big, int(math.ceil(float(self.p('radius')) / res)))[pad:-pad, pad:-pad]
-        cell = lambda xy: (int(np.clip(round((xy[0] - x0) / res), 0, h - 1)),  # noqa: E731
-                           int(np.clip(round((xy[1] - y0) / res), 0, w - 1)))
-        s, g = nearest_free(blocked, cell(start_xy)), nearest_free(blocked, cell(goal_xy))
-        if s is None or g is None:
-            return None
-        path = astar(blocked, s, g)
-        if path is None:
-            # walled off as far as we know: explore toward it instead
-            path = astar(blocked, s, closest_reachable(blocked, s, g))
-        if path is None:
-            return None
-        return [(x0 + i * res, y0 + j * res) for i, j in path]
-
-    def carrot(self, path, pos_xy):
-        """The path point `lookahead` metres past the closest one."""
-        pts = np.array(path)
-        k = int(np.argmin(np.linalg.norm(pts - pos_xy, axis=1)))
-        acc = 0.0
-        while k + 1 < len(pts) and acc < float(self.p('lookahead')):
-            acc += float(np.linalg.norm(pts[k + 1] - pts[k]))
-            k += 1
-        return pts[k]
-
-    def publish_path(self, path, z):
+    def _publish_path(self, d):
         msg = Path()
         msg.header.frame_id = 'odom'
         msg.header.stamp = self.get_clock().now().to_msg()
-        for x, y in path:
+        for q in (d.get('path') if d.get('path') is not None else []):
             ps = PoseStamped()
             ps.header = msg.header
-            ps.pose.position.x, ps.pose.position.y, ps.pose.position.z = float(x), float(y), float(z)
+            ps.pose.position.x, ps.pose.position.y = float(q[0]), float(q[1])
+            ps.pose.position.z = float(self.par['flight_z'])
+            ps.pose.orientation.w = 1.0
             msg.poses.append(ps)
-        self.path_pub.publish(msg)
+        self.pub_path.publish(msg)
 
-    # ── the mission ─────────────────────────────────────────────────────────
-    def _tick(self):
-        if self.local is None or self.odom is None:
-            return
-        alt, fz = float(self.p('takeoff_alt')), float(self.p('fly_z'))
-        entry, exit_ = np.array(self.p('entry_xy')), np.array(self.p('exit_xy'))
-        limit = float(self.p('maze_timeout_s' if self.phase == 'MAZE' else 'leg_timeout_s'))
-        if self.phase != 'TAKEOFF' and self.now() - self.t_phase > limit \
-                and self.phase not in ('LAND', 'DONE'):
-            self.get_logger().error(f'{self.phase} timed out, landing where we are')
-            self.go('LAND')
+    def _marker(self, ns, mid, kind, scale, color):
+        m = Marker()
+        m.header.frame_id = 'odom'
+        m.header.stamp = self.get_clock().now().to_msg()
+        m.ns, m.id, m.type, m.action = ns, mid, kind, Marker.ADD
+        m.scale.x = m.scale.y = m.scale.z = scale
+        m.color = ColorRGBA(r=color[0], g=color[1], b=color[2], a=color[3])
+        m.pose.orientation.w = 1.0
+        return m
 
-        if self.phase == 'TAKEOFF':
-            if self.offset is None:
-                self.offset = self.local - np.array([-self.odom[1], self.odom[0], self.odom[2]])
-            if self.state.mode != 'GUIDED':
-                self.call(self.cli_mode, SetMode.Request(custom_mode='GUIDED'))
-                return
-            if not self.state.armed:
-                self.call(self.cli_arm, CommandBool.Request(value=True))
-                return
-            if self.target is None and self.cli_takeoff.service_is_ready():
-                self.target = np.array([self.odom[0], self.odom[1], alt])
-                self.call(self.cli_takeoff, CommandTOL.Request(altitude=alt))
-            if self.odom[2] > alt * 0.85:
-                self.go('APPROACH_HIGH')
-
-        # The approach never crosses the structure: forward along y = approach_y
-        # (clear of it), down, then sideways along the front face to the gap.
-        # The Kopis' body hangs ~0.6 m under base_link, so a diagonal over the
-        # roof corner at takeoff_alt hits it (it did, first run).
-        elif self.phase == 'APPROACH_HIGH':
-            t = np.array([entry[0], float(self.p('approach_y')), alt])
-            self.publish_sp(t)
-            if self.near(t):
-                self.go('APPROACH_LOW')
-
-        elif self.phase == 'APPROACH_LOW':
-            t = np.array([entry[0], float(self.p('approach_y')), fz])
-            self.publish_sp(t)
-            if self.near(t):
-                self.go('APPROACH_SIDE')
-
-        elif self.phase == 'APPROACH_SIDE':
-            t = np.array([entry[0], entry[1], fz])
-            self.publish_sp(t)
-            if self.near(t):
-                self.go('MAZE')
-
-        elif self.phase == 'MAZE':
-            pos = self.odom[:2]
-            x0, x1, y0, y1 = (float(v) for v in self.p('fence'))
-            goal = np.array([np.clip(exit_[0], x0, x1), np.clip(exit_[1], y0, y1)])
-            if self.now() - self._last_plan > float(self.p('replan_s')) or self.path is None:
-                self._last_plan = self.now()
-                path = self.plan(pos, goal)
-                if path is None:
-                    self.get_logger().warn('no path to the exit through the known map; holding',
-                                           throttle_duration_sec=5.0)
-                else:
-                    self.path = path
-                    self.publish_path(path, fz)
-            if self.path is None:
-                self.publish_sp(np.array([pos[0], pos[1], fz]))
-                return
-            c = self.carrot(self.path, pos)
-            self.publish_sp(np.array([c[0], c[1], fz]))
-            if np.linalg.norm(pos - goal) < float(self.p('reach_tol')):
-                self.go('EXIT_LOW')
-
-        elif self.phase == 'EXIT_LOW':
-            t = np.array([exit_[0], exit_[1], fz])
-            self.publish_sp(t)
-            if self.near(t):
-                self.go('EXIT')
-
-        elif self.phase == 'EXIT':
-            t = np.array([exit_[0], exit_[1], alt])
-            self.publish_sp(t)
-            if self.near(t):
-                self.go('LAND')
-
-        elif self.phase == 'LAND':
-            if self.state.mode == 'LAND':
-                self.go('DONE')
-            else:
-                self.call(self.cli_land, CommandTOL.Request())
-
-        elif self.phase == 'DONE':
-            if not self.state.armed and self.now() - self.t_phase > 5.0:
-                self.get_logger().info('maze mission finished', once=True)
+    def _publish_markers(self, d):
+        arr = MarkerArray()
+        z = float(self.par['flight_z'])
+        colors = {'window': (1.0, 0.2, 0.2, 1.0), 'door': (0.2, 0.4, 1.0, 1.0),
+                  'unknown': (0.2, 1.0, 0.2, 1.0), 'predicted': (1.0, 1.0, 0.2, 1.0)}
+        for k, o in enumerate(d.get('openings') or []):
+            m = self._marker('openings', k, Marker.ARROW, 0.06, colors.get(o.kind, (1., 1., 1., 1.)))
+            m.scale.x, m.scale.y, m.scale.z = 0.06, 0.12, 0.12
+            m.points = [Point(x=float(o.center[0] - o.normal[0] * 0.5),
+                              y=float(o.center[1] - o.normal[1] * 0.5), z=z),
+                        Point(x=float(o.center[0]), y=float(o.center[1]), z=z)]
+            if not o.confirmed:
+                m.color.a = 0.4
+            arr.markers.append(m)
+        fr = self._marker('frontiers', 0, Marker.SPHERE_LIST, 0.12, (1.0, 0.6, 0.0, 0.9))
+        for f in (d.get('frontiers') or []):
+            fr.points.append(Point(x=float(f.centroid[0]), y=float(f.centroid[1]), z=z))
+        arr.markers.append(fr)
+        for name, color, key in (('entrance', (1.0, 0.0, 0.0, 1.0), 'entrance'),
+                                 ('exit', (1.0, 0.0, 1.0, 1.0), 'exit')):
+            o = d.get(key)
+            if o is not None:
+                m = self._marker(name, 0, Marker.SPHERE, 0.25, color)
+                m.pose.position.x, m.pose.position.y, m.pose.position.z = \
+                    float(o.center[0]), float(o.center[1]), z
+                arr.markers.append(m)
+        if d.get('landing') is not None:
+            m = self._marker('landing', 0, Marker.CYLINDER, 0.4, (0.1, 1.0, 1.0, 0.8))
+            m.scale.z = 0.05
+            m.pose.position.x, m.pose.position.y = float(d['landing'][0]), float(d['landing'][1])
+            arr.markers.append(m)
+        if d.get('arena') is not None:
+            a = d['arena']
+            m = self._marker('arena', 0, Marker.LINE_STRIP, 0.05, (0.0, 1.0, 1.0, 0.8))
+            cs = np.vstack([a.corners(), a.corners()[:1]])
+            m.points = [Point(x=float(c[0]), y=float(c[1]), z=z) for c in cs]
+            arr.markers.append(m)
+        self.pub_mark.publish(arr)
 
 
-def main(args=None):
-    rclpy.init(args=args)
+def main():
+    rclpy.init()
     node = MazeNode()
     try:
         rclpy.spin(node)

@@ -229,6 +229,12 @@ def _launch_setup(context, *args, **kwargs):
     maze = Node(
         package='hydrone_mission', executable='phase4_maze_node', output='screen',
         condition=IfCondition(PythonExpression(["'", LaunchConfiguration('mission'), "' == 'maze'"])),
+        parameters=[{
+            # /cloud_registered is in camera_init; odom is the lidar mount above it
+            'lidar_mount': mount_xyz,
+            'flight_z': float(LaunchConfiguration('flight_z').perform(context)),
+            'auto_start': LaunchConfiguration('auto_start').perform(context).lower() == 'true',
+        }],
     )
 
     return [ardubridge, sitl_dds, livox, fast_lio, adapter, prior, mavros, lio_nav,
@@ -262,6 +268,12 @@ def generate_launch_description():
             'mission', default_value='none',
             description="'maze' flies phase4_maze_node through the structure "
                         'right of spawn; none just brings the vehicle up.'),
+        DeclareLaunchArgument(
+            'flight_z', default_value='0.5',
+            description='odom height the maze mission plans at (window centre).'),
+        DeclareLaunchArgument(
+            'auto_start', default_value='true',
+            description='Let the maze mission arm and take off by itself.'),
         DeclareLaunchArgument(
             'measure_drift', default_value='true',
             description='Log LIO drift against ground truth (sim only, never fed back).'),
