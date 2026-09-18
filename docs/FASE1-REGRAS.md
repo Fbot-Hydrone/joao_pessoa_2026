@@ -29,6 +29,28 @@ E a linha que muda tudo:
 
 > **Obs.: Caso o drone pouse fora da base, a tentativa será encerrada.**
 
+## O que conta como "pousar" — a definição que faltava aqui
+
+O PDF define o verbo, e a definição tem uma exigência que este arquivo não
+registrava:
+
+> **DEFINIÇÃO:** Entende-se por pousar quando o drone toca todas as partes do
+> trem de pouso na base, de forma que seja visível que o mesmo se apoia na base
+> para se manter em uma posição estável e **com hélices desligadas**.
+
+> **DEFINIÇÃO:** Visitar uma base é o ato do drone identificar (por visão) **e
+> pousar** em uma base de pouso específica.
+
+Encadeando as duas: sem hélice parada não há pouso, sem pouso não há visita,
+sem visita não há `+20`. Um toque-e-arranca não vale nada.
+
+**Isso estava quebrado, e em silêncio.** Nas 262 aterrissagens de
+`logs/param_sweep/` e `logs/seed_sweep/`, ZERO chegaram a `armed=False` — todas
+saíram por "descended and stopped" e rearmavam 4 s depois, abaixo do
+`DISARM_DELAY` de 10 s (`mav.parm:281`). O log dizia seis bases; a súmula diria
+nenhuma. O estado `DISARM` existe por causa desta seção: nada é contado como
+pouso antes de `/mavros/state` reportar `armed=False`.
+
 ## O que isso implica para a missão
 
 **Pousar fora não custa uma base — custa a corrida.** E junto vai o `x2` da

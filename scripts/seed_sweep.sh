@@ -51,9 +51,15 @@ for seed in "${SEEDS[@]}"; do
     # The bring-up is backgrounded and killed by the timeout, rather than run
     # under `timeout`, because `docker compose up` attached to a killed shell
     # leaves the container in exit 137 and that LOOKS like a simulator crash.
+    # COMMAND_ACK e statustext estao no filtro porque a AUSENCIA deles custou
+    # semanas: 45% das corridas morriam de 'takeoff refused three times' e o log
+    # so guardava 'no reason given by the FCU'. A resposta da FCU e a unica
+    # evidencia de POR QUE ela recusa, e o filtro a descartava. VO/inlier pela
+    # mesma razao: a odometria morrendo em cima da base move a estimativa de
+    # altura e a FCU deixa de se achar pousada, o que a faz recusar a decolagem.
     BASES_SEED="$seed" ./scripts/docker_up.sh $MISSION $ODOM --no-build 2>&1 \
         | stdbuf -oL grep --line-buffered -E \
-          'MAP SWEEP|SEARCH LEVEL|pad_map|phase1_mission|bases spawnadas|Traceback' \
+          'MAP SWEEP|SEARCH LEVEL|pad_map|phase1_mission|bases spawnadas|Traceback|COMMAND_ACK|statustext|PreArm|inlier|PnP failed|Mode ' \
         > "$log" &
     up_pid=$!
 
