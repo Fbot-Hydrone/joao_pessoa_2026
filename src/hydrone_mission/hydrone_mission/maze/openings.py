@@ -9,6 +9,7 @@ kind      'window' when the low band under the gap has hits (a sill),
           'unknown' when it hasn't been seen low enough yet
 """
 from dataclasses import dataclass, field
+import math
 
 import numpy as np
 
@@ -18,13 +19,14 @@ from hydrone_mission.maze.morph import close, dilate, dilate4, fill_holes, label
 @dataclass
 class OpeningParams:
     min_roof_hits: int = 2      # roof-layer hits for a cell to count
+    sky_min_passes: int = 3     # rays through the roof band = open sky, not roofed
     close_radius: float = 0.5   # bridges gaps up to ~2x this in the roof outline
     min_width: float = 0.45     # drone diameter + margin
     max_width: float = 1.5
     flank_search: float = 1.0   # how far along the gap to look for its walls
     probe: float = 0.45         # the gap must be clear this far in and out
     outside_depth: float = 1.2  # and lead to uncovered open space at least this deep
-    sill_min_hits: int = 3
+    sill_min_hits: int = 2
     door_min_passes: int = 12   # rays through the low band just past the gap
 
 
@@ -60,7 +62,11 @@ def covered_region(grid, crop, params=None):
     if not roof.any():
         return roof
     closed = close(roof, p.close_radius / grid.p.res)
-    return fill_holes(closed)
+    # the arena's own walls reach into the roof band, so hole filling alone
+    # would roof the whole arena: cells the lidar shot straight through up
+    # there are open sky, whatever the fill says
+    sky = ~roof & (grid.roof_pass[i0:i1, j0:j1] >= p.sky_min_passes)
+    return fill_holes(closed) & ~sky
 
 
 def _sample(mask, grid, crop, xy):
@@ -118,6 +124,7 @@ def detect_openings(grid, params=None, crop=None, covered=None, viewer=None):
         normal = _normal(cells, xy, out_free, covered, roof, grid, crop)
         if normal is None:
             continue
+        normal = _snap_to_wall(occ, grid, crop, c, normal)
         t = np.array([-normal[1], normal[0]])
         center, width, flanks = _gap_width(free, occ, grid, crop, c, t, p)
         if width is None or not (p.min_width <= width <= p.max_width):
@@ -131,9 +138,12 @@ def detect_openings(grid, params=None, crop=None, covered=None, viewer=None):
         if outside == 'no':
             continue
         hits, passes = _sill(low, low_pass, grid, crop, center, normal, t, width, viewer)
-        if hits >= p.sill_min_hits and hits >= 0.5 * passes:
+        # a sill is wall material under the gap, and that is what a door lacks.
+        # Passes alone can't rule a window out: on a low pad the lidar sits at
+        # sill height and shoots straight through the window into the low band
+        if hits >= p.sill_min_hits:
             kind = 'window'
-        elif passes >= p.door_min_passes and hits < max(p.sill_min_hits, 0.2 * passes):
+        elif passes >= p.door_min_passes:
             kind = 'door'
         else:
             kind = 'unknown'
@@ -177,6 +187,35 @@ def _normal(cells, xy, out_free, covered, roof, grid, crop):
             return None
         return n if np.dot(n, -o) >= 0 else -n
     return n if score[0] > score[1] else -n
+
+
+def _snap_to_wall(occ, grid, crop, c, n0, span=40.0, step=5.0):
+    """Turn the normal until the flank walls line up with it.
+
+    The gap cells alone give a normal that can be tens of degrees off when the
+    far side is barely seen, and everything after this (width, sill strip,
+    approach) is measured along it.
+    """
+    along = np.concatenate([np.arange(-1.2, -0.44, 0.05), np.arange(0.45, 1.21, 0.05)])
+    offs = np.arange(-0.25, 0.251, 0.05)
+    def score_of(n):
+        t = np.array([-n[1], n[0]])
+        return max(int(_sample(occ, grid, crop, c + b * n + along[:, None] * t).sum())
+                   for b in offs)
+
+    base = score_of(n0)
+    best, best_n = base, n0
+    degs = np.arange(-span, span + 1e-9, step)
+    for deg in degs[np.argsort(np.abs(degs), kind='stable')]:   # ties: the smallest turn
+        a = math.radians(deg)
+        n = np.array([n0[0] * math.cos(a) - n0[1] * math.sin(a),
+                      n0[0] * math.sin(a) + n0[1] * math.cos(a)])
+        score = score_of(n)
+        if score > best:
+            best, best_n = score, n
+    # only a clearly better wall line is worth turning for; a gap whose walls
+    # are barely seen keeps the normal the cells gave it
+    return best_n if best >= 1.25 * max(base, 1) else n0
 
 
 def _disc_points(r, step):

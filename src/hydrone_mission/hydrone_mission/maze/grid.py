@@ -4,7 +4,10 @@ One `update(points, origin)` per registered scan:
   - occupied: hits with z inside flight_z +- band
   - free: only the part of each ray that lies inside that band (unknown != free)
   - roof: hits in [flight_z + roof_lo, flight_z + roof_hi], low enough to miss
-    arena nets; walls tops and the roof of a confined space land here
+    arena nets; wall tops and the roof of a confined space land here
+  - roof_pass: rays crossing that band without ending in it — open sky. A tall
+    arena wall puts roof hits all round the arena, and without this the hole
+    filling in openings.py would call the whole arena roofed
   - low: hits in [floor + low_margin, flight_z - low_top] on vertical faces
     (a cell whose hits in one scan span some height): sills, arena walls, but
     not the top of a pad that happens to sit next to a wall
@@ -26,6 +29,7 @@ class GridParams:
     band: float = 0.2           # +- around flight_z
     roof_lo: float = 0.3        # roof layer, relative to flight_z
     roof_hi: float = 1.0
+    roof_pass_stride: int = 3   # rays cast for the open-sky check
     low_margin: float = 0.1     # low layer starts this far above the floor
     low_top: float = 0.45       # and ends this far under flight_z (below a sill top)
     low_vertical: float = 0.06  # low hits count only where one scan spans this much z
@@ -53,6 +57,7 @@ class OccupancyGrid:
         shape = (self.n, self.n)
         self.logodds = np.zeros(shape, dtype=np.float32)
         self.roof = np.zeros(shape, dtype=np.uint16)
+        self.roof_pass = np.zeros(shape, dtype=np.uint16)
         self.low = np.zeros(shape, dtype=np.uint16)
         self.low_pass = np.zeros(shape, dtype=np.uint16)
         self.observed = np.zeros(shape, dtype=bool)
@@ -138,9 +143,18 @@ class OccupancyGrid:
         flat = ij[:, 0] * self.n + ij[:, 1]
 
         hit_cells = np.unique(flat[in_band & ok])
-        self._add_counts(self.roof, np.unique(flat[in_roof & ok]))
+        roof_cells = np.unique(flat[in_roof & ok])
+        self._add_counts(self.roof, roof_cells)
+        # every k-th ray is plenty to tell open sky from a roof, and the cast is
+        # the expensive part of the update
+        k = p.roof_pass_stride
+        self._add_counts(self.roof_pass,
+                         np.setdiff1d(self._ray_cells(o, d[::k], rng[::k], fz + p.roof_lo,
+                                                      fz + p.roof_hi),
+                                      roof_cells, assume_unique=True))
         if low_ready:
-            self._add_counts(self.low, self._vertical_cells(flat[in_low & ok], z[in_low & ok]))
+            self._add_counts(self.low, self._span_cells(flat[in_low & ok], z[in_low & ok],
+                                                        lo=p.low_vertical))
 
         # free space: sample each ray only where it is inside the band
         free_cells = self._ray_cells(o, d, rng, fz - p.band, fz + p.band)
@@ -164,14 +178,20 @@ class OccupancyGrid:
                 b = self.bbox
                 self.bbox = (min(b[0], box[0]), max(b[1], box[1]), min(b[2], box[2]), max(b[3], box[3]))
 
-    def _vertical_cells(self, cells, z):
+    def _span_cells(self, cells, z, lo=None, hi=None):
+        """Cells whose hits in this scan span at least `lo` / at most `hi` in z."""
         if len(cells) == 0:
             return cells
         order = np.argsort(cells, kind='stable')
         cells, z = cells[order], z[order]
         uniq, start = np.unique(cells, return_index=True)
         span = np.maximum.reduceat(z, start) - np.minimum.reduceat(z, start)
-        return uniq[span >= self.p.low_vertical]
+        keep = np.ones(len(uniq), dtype=bool)
+        if lo is not None:
+            keep &= span >= lo
+        if hi is not None:
+            keep &= span <= hi
+        return uniq[keep]
 
     def _add_counts(self, layer, cells):
         v = layer.reshape(-1)
