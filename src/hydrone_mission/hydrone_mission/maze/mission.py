@@ -39,7 +39,10 @@ class MissionParams:
     inside_bands: tuple = (0.40, 0.75)   # interior bands, m above the floor
     survey_rise: float = 0.6        # takeoff climbs this far above flight_z
     survey_hold: float = 2.0        # s hovering at each survey height
-    inflate: float = 0.22           # obstacle inflation, m (330 mm drone)
+    inflate: float = 0.22           # obstacle inflation outside, m (330 mm drone)
+    inflate_in: float = 0.16        # and inside, where 0.6 m doorways close up
+                                    # entirely at 0.22 (the body radius is 0.165
+                                    # and the wall repulsion does the rest)
     v_in: float = 0.25              # speed cap inside, m/s
     v_out: float = 0.5              # and outside
     v_crawl: float = 0.15           # through a window
@@ -48,7 +51,7 @@ class MissionParams:
     kp_z: float = 1.0
     lookahead: float = 0.4
     wall_slow: float = 0.35         # slow down and push off walls closer than this
-    repulse_gain: float = 0.25      # m/s at contact
+    repulse_gain: float = 0.15      # m/s at contact
     goal_tol: float = 0.15
     replan_s: float = 1.0
     perceive_s: float = 0.5         # openings/frontiers refresh period
@@ -62,8 +65,11 @@ class MissionParams:
     min_hover_z: float = 0.15       # above the takeoff height
     explore_budget: float = 330.0   # s
     mission_budget: float = 560.0   # s, then land wherever we are
-    stuck_s: float = 20.0           # give up a frontier goal after this long
+    stuck_s: float = 35.0           # give up a frontier goal after this long
     give_up_cycles: int = 12        # planning cycles with nothing to explore
+    probe_s: float = 40.0           # s to reach a place to look from
+    probe_radius: float = 1.0       # unexplored spots this near one already probed
+    sweep_hold: float = 3.0         # s hovering per band while looking around
     view_tries: int = 3             # view cells tried before a frontier is dropped
     climb_margin: float = 0.5       # over the roof when there's no way round
     use_fallback: bool = True
@@ -135,6 +141,10 @@ class Mission:
         self._blocked_since = None
         self._bad_exits = []
         self._shift_back = 'EXPLORE'
+        self._probed = []
+        self._ib_sweep = 0
+        self.probe_target = None
+        self.probe_goal = None
 
     # ── bookkeeping ─────────────────────────────────────────────────────────
     def say(self, msg):
@@ -227,15 +237,17 @@ class Mission:
     # ── maps for planning ───────────────────────────────────────────────────
     def _masks(self, grid=None):
         """Crop plus free/occupied/covered/clear. `grid` picks the band; the
-        covered region always comes from the detection band above."""
+        covered region always comes from the detection band above, and an
+        interior band is inflated less."""
         crop = self.crop or self.grid.crop(1.5)
         i0, i1, j0, j1 = crop
         g = grid if grid is not None else self.grid
+        radius = self.p.inflate_in if g is not self.grid else self.p.inflate
         free = g.free()[i0:i1, j0:j1]
         occ = g.occupied()[i0:i1, j0:j1]
         covered = self.covered if self.covered is not None and self.covered.shape == free.shape \
             else np.zeros_like(free)
-        clear = free & ~inflate(occ, self.p.inflate / g.p.res)
+        clear = free & ~inflate(occ, radius / g.p.res)
         return crop, free, occ, covered, clear
 
     def _cells_xy(self, crop, shape):
@@ -316,6 +328,15 @@ class Mission:
         v = np.asarray(v_xy, dtype=float)
         if dmin < self.p.wall_slow:
             v = v * max(0.4, dmin / self.p.wall_slow)
+        s = np.linalg.norm(v)
+        if s > 1e-6:
+            # slide along the wall instead of being pushed back off it: in a
+            # 0.6 m doorway the jambs push straight back down the path, and the
+            # drone sat in front of the gap for a minute and a half
+            d = v / s
+            against = float(push @ d)
+            if against < 0:
+                push = push - against * d
         v = v + push
         s = np.linalg.norm(v)
         if s > cap:
@@ -604,6 +625,71 @@ class Mission:
         self.say(f'switching to the interior band at z {self.inside_z:.2f}')
         self.go('SHIFT')
 
+    def _unexplored_target(self, pos):
+        """((target xy, goal xy)) for the nearest bit of footprint no band has
+        seen, and the reachable cell closest to it, or None."""
+        crop, free, occ, covered, clear = self._masks(self.igrid)
+        i0, i1, j0, j1 = crop
+        foot = covered     # the roofed footprint itself, not the margin round it
+        seen = self.grid.observed[i0:i1, j0:j1].copy()
+        for g in self.bands:
+            seen |= g.observed[i0:i1, j0:j1]
+        un = foot & ~seen & ~occ
+        if not un.any():
+            return None
+        x, y = self._cells_xy(crop, free.shape)
+        xy = np.stack([x[un], y[un]], axis=1)
+        for q in self._probed:
+            xy = xy[np.linalg.norm(xy - q, axis=1) > self.p.probe_radius]
+            if not len(xy):
+                return None
+        target = xy[np.argmin(np.linalg.norm(xy - pos[:2], axis=1))]
+        # the closest place we can actually get to, on any band
+        best = None
+        for k in range(len(self.bands) or 1):
+            pl = self.planner('in', pos, grid=self.bands[k] if self.bands else None)
+            if pl.cost is None:
+                continue
+            cells = np.argwhere(np.isfinite(pl.cost))
+            if not len(cells):
+                continue
+            q = self.grid.origin + (cells + np.array([i0, j0]) + 0.5) * self.grid.p.res
+            d = np.linalg.norm(q - target, axis=1)
+            m = int(np.argmin(d))
+            if best is None or d[m] < best[0]:
+                best = (d[m], q[m], k)
+        if best is None:
+            return None
+        if best[2] != self.ib:
+            self.ib = best[2]
+        return target, best[1]
+
+    def _probe(self, pos):
+        """Fly to the nearest reachable point to unexplored footprint, then look
+        at it from every band before deciding the maze is done."""
+        target, goal = self.probe_target, self.probe_goal
+        cmd, arrived, ok = self._go_to(pos, goal, 'in', self.inside_z, self.p.v_in,
+                                       grid=self.igrid)
+        if arrived or not ok or self.elapsed() > self.p.probe_s:
+            self._probed.append(target)
+            self._ib_sweep = 0
+            self.go('SWEEP')
+        return cmd
+
+    def _sweep(self, pos):
+        """Hover here at each band in turn, so a gap at any height gets seen."""
+        while self._ib_sweep < len(self.bands) and not self._cell_clear(self.bands[self._ib_sweep], pos):
+            self._ib_sweep += 1         # no room at that height right here
+        if self._ib_sweep >= len(self.bands):
+            self.go('EXPLORE', 'looked from every band')
+            return self._hover(pos, pos[:2], self.inside_z, self.p.v_in)
+        self.ib = self._ib_sweep
+        z = self.inside_z
+        if self.elapsed() > self.p.sweep_hold and abs(pos[2] - z) < 0.12:
+            self._ib_sweep += 1
+            self.t_phase = self.t
+        return self._hover(pos, pos[:2], z, self.p.v_crawl)
+
     def _frontiers_on(self, k, pos):
         """(planner, reachable frontiers) for interior band k."""
         g = self.bands[k] if self.bands else self.grid
@@ -648,6 +734,14 @@ class Mission:
                 if k is not None:
                     self._to_band(k, 'EXPLORE')
                     return self._hover(pos, pos[:2], self.inside_z, self.p.v_crawl)
+                # nothing to explore anywhere, but the footprint is not covered:
+                # the way on is a gap none of the bands has looked at yet
+                target = self._unexplored_target(pos)
+                if target is not None:
+                    self.probe_target, self.probe_goal = target
+                    self.say(f'nothing left to explore; going to look at {np.round(target[0], 2)}')
+                    self.go('PROBE')
+                    return self._hover(pos, pos[:2], z, self.p.v_in)
                 self._no_frontier += 1
                 if self._no_frontier >= self.p.give_up_cycles:
                     self.go('GO_EXIT', 'no reachable frontier left on any band')
