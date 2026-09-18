@@ -43,7 +43,14 @@ LAND_CLEARANCE = 0.13
 # How close a resting altitude has to be to count as that base.
 LAND_TOL = 0.08
 
-RE_LANDED = re.compile(r"LANDED on base #\d+ of \d+ — resting at z=([-\d.]+)")
+# Both halves matter. The height says WHICH base the airframe is resting on;
+# the parenthetical says whether the propellers stopped, and the rules only
+# count a landing "com hélices desligadas" (docs/FASE1-REGRAS.md). A run where
+# every touchdown reads PROPS NOT CONFIRMED STOPPED scores zero on the day,
+# however neatly it sat on the bases — which is exactly what 262 logged
+# landings did before the DISARM state existed.
+RE_LANDED = re.compile(
+    r"LANDED on base #\d+ of \d+ — resting at z=([-\d.]+) m \(([^)]*)\)")
 RE_CONFIRMED = re.compile(r"pad (\d+): CONFIRMED at \(([-\d.]+), ([-\d.]+)\)")
 RE_SPAWNED = re.compile(r"(\d+) bases spawnadas \(seed (\d+)\)")
 
@@ -79,9 +86,13 @@ def score(seed, path):
             found.add(b)
             errs.append(d)
 
-    landings = [float(z) for z in RE_LANDED.findall(text)]
+    touchdowns = [(float(z), how) for z, how in RE_LANDED.findall(text)]
+    landings = [z for z, _ in touchdowns]
+    unproven = sum(1 for _, how in touchdowns if how != "props stopped")
     valid = []
-    for z in landings:
+    for z, how in touchdowns:
+        if how != "props stopped":
+            continue                      # props still turning: not a pouso
         b = min(range(len(bases)),
                 key=lambda i: abs(z - (bases[i][2] + LAND_CLEARANCE)))
         if abs(z - (bases[b][2] + LAND_CLEARANCE)) <= LAND_TOL:
@@ -100,7 +111,7 @@ def score(seed, path):
 
     return dict(
         seed=seed, spawned=n_spawned, found=len(found), landings=len(landings),
-        valid=len(set(valid)), err=(sorted(errs)[len(errs) // 2] if errs else None),
+        valid=len(set(valid)), unproven=unproven, err=(sorted(errs)[len(errs) // 2] if errs else None),
         outcome=outcome, heights=[round(b[2], 2) for b in bases])
 
 
@@ -124,6 +135,9 @@ def main():
               f"{r['landings']} ({r['valid']} em base de verdade), erro do mapa "
               f"{err} m, {r['outcome']}")
         print(f"          alturas dos topos: {r['heights']}")
+        if r["unproven"]:
+            print(f"          AVISO: {r['unproven']} pouso(s) sem confirmacao "
+                  "de helice parada — nao contam como pouso pelas regras.")
 
 
 if __name__ == "__main__":

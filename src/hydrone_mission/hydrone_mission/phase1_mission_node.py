@@ -27,9 +27,13 @@ State machine
                   |                                      |    ^   |     |
                   |                                      |    +-SETTLE  |
                   |                                      |              v
-                  +---------------- DWELL <---------------------------- LAND
-                                      |
-                                      +-> DONE
+                  +------- DWELL <- DISARM <------------------------- LAND
+                             |
+                             +-> DONE
+
+DISARM is where the propellers are stopped and CHECKED to have stopped. The
+rules count a landing only "com hélices desligadas", so nothing is booked as a
+landing until /mavros/state reports armed=False.
 
 Why turning instead of flying a pattern
 ---------------------------------------
@@ -196,6 +200,7 @@ class Phase1MissionNode(Node):
     TRAVEL = "TRAVEL"
     CONFIRM = "CONFIRM"
     LAND = "LAND"
+    DISARM = "DISARM"
     DWELL = "DWELL"
     DONE = "DONE"
     ABORTED = "ABORTED"
@@ -513,7 +518,46 @@ class Phase1MissionNode(Node):
         self.declare_parameter("fresh_detection_s", 1.0)
 
         # ── Landing, and the plumbing ───────────────────────────────────────
-        self.declare_parameter("dwell_s", 4.0)
+        # How long to sit on the pad AFTER the propellers have actually stopped,
+        # before re-arming. It used to be 4.0 s of blind waiting that began at
+        # touchdown, and it was the reason no landing in this stack ever scored:
+        # DISARM_DELAY is 10 s (mav.parm:281), so re-arming at t+4 s took off
+        # again with the props still turning. See DISARM.
+        #
+        # The wait is no longer blind, so it can be shorter AND mean more: the
+        # 2 s start once /mavros/state says armed=False, which is the thing the
+        # rule is about.
+        #
+        # THE CYCLE IS SLOWER, and honestly so. MEASURED 2026-09-18, seed 1,
+        # first base — touchdown 400.68, props confirmed stopped 407.68, dwell
+        # out 409.78, armed again 413.58, airborne 431.28:
+        #
+        #     disarm confirmed        +7.0 s   (new)
+        #     dwell                    2.1 s   (was 4.1)
+        #     a REAL arm from stopped  +3.8 s  (was a 0.2 s mode flip)
+        #     climb                   17.7 s   (unchanged)
+        #
+        # About +8.6 s per base against the old path, ~50 s over six. That is
+        # the price of the landing counting at all: the old path was 8.6 s
+        # cheaper and scored zero. See disarm_retry_s for where the 7 s went.
+        self.declare_parameter("dwell_s", 2.0)
+        # Ceiling on the wait for the FCU to confirm the disarm. Above
+        # DISARM_DELAY (10 s) on purpose: if our own disarm is refused because
+        # ArduPilot does not yet agree the vehicle is down, the auto-disarm
+        # still lands inside this window and is caught by the same test.
+        self.declare_parameter("disarm_timeout_s", 12.0)
+        # How often to re-ask for the disarm, s. Deliberately much shorter than
+        # `retry_period_s`, which is sized for mode and takeoff commands.
+        #
+        # The 7 s above is NOT ArduPilot being slow — it is us asking rarely.
+        # Our touchdown test (land_settle_s of stillness) fires before
+        # ArduPilot's own land detector has latched, so the first disarms are
+        # refused and the wait is then quantised to the retry period. At 2.0 s
+        # that turns a sub-second disagreement into whole seconds of standing
+        # still with the props running. Asking ~5x more often costs nothing —
+        # a refused disarm is a few bytes — and collects the accept the moment
+        # ArduPilot is willing to give it.
+        self.declare_parameter("disarm_retry_s", 0.4)
         # SETTLE ends on EVIDENCE that the estimate stopped moving, not on a
         # stopwatch. `settle_s` stays the ceiling.
         #
@@ -688,6 +732,8 @@ class Phase1MissionNode(Node):
         self.investigating = False
         self.fresh_s = float(p("fresh_detection_s"))
         self.dwell_s = float(p("dwell_s"))
+        self.disarm_timeout = float(p("disarm_timeout_s"))
+        self.disarm_retry = float(p("disarm_retry_s"))
         self.land_timeout = float(p("land_timeout_s"))
         self.land_settle = float(p("land_settle_s"))
         self.land_still_tol = float(p("land_still_tol_m"))
@@ -1201,6 +1247,7 @@ class Phase1MissionNode(Node):
             self.TRAVEL: self._do_travel,
             self.CONFIRM: self._do_confirm,
             self.LAND: self._do_land,
+            self.DISARM: self._do_disarm,
             self.DWELL: self._do_dwell,
         }[self.state]
         handler()
@@ -1236,11 +1283,45 @@ class Phase1MissionNode(Node):
         ready, pre-arm check pending), so "the call succeeded" is not the same
         as "the vehicle is in GUIDED". Only /mavros/state settles that.
 
-        GUIDED is checked BEFORE armed, which matters on the relaunch after a
-        landing: ArduCopter auto-disarms only after DISARM_DELAY (10 s by
-        default) and dwell is shorter than that, so the vehicle is usually still
-        armed — and still in LAND. Taking "armed" as done would send a takeoff
-        while in LAND, which ArduPilot refuses, forever.
+        GUIDED is checked BEFORE armed, and the reason has not gone away now
+        that DISARM leaves the vehicle genuinely disarmed: the MODE is still
+        LAND when we get here. Taking "armed" as done would send a takeoff while
+        in LAND, which ArduPilot refuses, forever.
+
+        What DID change is that this is now a real arm from a real disarmed
+        state — the same transition ArduPilot expects at the start of any
+        flight — rather than a mode flip on a vehicle that never stopped. It
+        costs about 3.8 s where the mode flip cost 0.2 s (MEASURED 2026-09-18).
+
+        Careful with the refusals in the log: a handful of
+        `NAV_TAKEOFF: FAILED` per takeoff is NORMAL and harmless. It is this
+        node's retry timer re-sending CommandTOL at a vehicle that is already
+        climbing, and it happens on the very first takeoff of a run from a cold,
+        genuinely disarmed vehicle. Counting those is what makes a healthy
+        takeoff look broken: ~5 refusals per takeoff is fine, ~16-23 is a
+        takeoff that never left.
+
+        THE THREE-STRIKE ABORT, and why this state is the suspected cure.
+        `takeoff refused three times` killed 25 of 55 runs in
+        logs/param_sweep/ — 45%, each after burning 3 x takeoff_timeout = 135 s.
+        ArduCopter accepts NAV_TAKEOFF only when armed AND `ap.land_complete`:
+        the FCU itself has to believe it is down. Touchdown here is declared on
+        a stillness heuristic that fires BEFORE ArduPilot's land detector
+        latches, and the old code then commanded takeoff 4.3 s later — while
+        MEASURED disarm acceptance, which needs the same latch, takes 4.7-7.6 s
+        (median 5.2 s). Commanding into that window is a coin flip, which is
+        exactly the shape of the data: ~13-17% of takeoffs failed, with no
+        dependence on pad height or on the (constant) 4.3 s gap.
+
+        Waiting for a CONFIRMED disarm closes the window: `armed=False` cannot
+        happen without the latch, so by the time this state arms again the
+        FCU agrees it is landed. THIS IS A HYPOTHESIS UNDER TEST, not a
+        result — three earlier explanations for the same aborts were killed by
+        the data (an absolute-vs-relative takeoff altitude: refuted, the climb
+        is 2.39-2.41 m from any start height across 275 takeoffs; the gap to
+        touchdown: refuted, 4.3 s whether it worked or not; pad height:
+        refuted, failure rate flat at 12-17%). Do not write it up as fixed
+        without the seed sweep that says so.
 
         DRY RUN: none of that happens. After `dry_arm_delay_s` on the base the
         rehearsal simply declares the vehicle armed and moves on, because the
@@ -1730,7 +1811,7 @@ class Phase1MissionNode(Node):
             return
         if self.landing_for == self.LAND_FINAL:
             return
-        if self.state in (self.LAND, self.DWELL):
+        if self.state in (self.LAND, self.DISARM, self.DWELL):
             return
 
         elapsed = self._now() - self._mission_t0
@@ -2509,27 +2590,109 @@ class Phase1MissionNode(Node):
 
         # No extra debounce: _z_is_still already demands a FULL land_settle_s
         # window of stillness before it returns true, and a disarm is definitive.
+        #
+        # This no longer COUNTS the landing. Stillness plus descent says the
+        # vehicle has stopped moving; the rules ask for something stricter —
+        # "com hélices desligadas" (REGRAS-CBR-2026.pdf, the definition of
+        # pousar) — and a vehicle held in a stable hover satisfies stillness
+        # while its props are still turning. What follows is the state that gets
+        # the props stopped and then checks that they are. See _do_disarm.
         if disarmed or (still and descended):
             z = self.pose.pose.position.z if self.pose else 0.0
             why = "disarmed" if disarmed else "descended and stopped"
-            if self.landing_for == self.LAND_PAD:
-                self.landed_count += 1
-                self.get_logger().info(
-                    f"LANDED on base #{self.landed_count} of "
-                    f"{self.target_bases} — resting at z={z:.2f} m ({why}).")
-                self._mark_visited(z)
-            else:
-                self.get_logger().info(
-                    f"LANDED ({self.landing_for}) at z={z:.2f} m ({why}).")
-                self._report_landing_anchor()
-            self._enter(self.DWELL)
+            self.get_logger().info(
+                f"touchdown at z={z:.2f} m ({why}) — stopping the motors "
+                "before this counts as a landing.")
+            self._enter(self.DISARM)
             return
 
         if self._since_entered() > self.land_timeout:
+            # The one way into DISARM with NO evidence of touchdown, so it is
+            # the one place the non-forced disarm earns its keep: if the vehicle
+            # is in fact still flying, ArduPilot refuses and DISARM times out
+            # into DWELL, which is exactly where this branch used to go anyway.
+            # Nothing is cut in mid-air on the strength of a timeout.
             self.get_logger().warn(
                 f"no touchdown within {self.land_timeout:.0f} s — carrying on "
                 "anyway so the mission does not stall here.")
-            self._enter(self.DWELL)
+            self._enter(self.DISARM)
+
+    # ── DISARM ───────────────────────────────────────────────────────────────
+
+    def _do_disarm(self):
+        """Stop the propellers, and do not count the landing until they stop.
+
+        WHY THIS STATE EXISTS, measured. Across the 262 landings in
+        `logs/param_sweep/` and `logs/seed_sweep/`, the number that ever reached
+        `armed=False` is ZERO — every one of them read "descended and stopped".
+        Nothing here ever sent a disarm; the mission relied on ArduCopter's
+        DISARM_DELAY, which is 10 s (mav.parm:281), while DWELL re-armed after
+        4 s. The vehicle touched the base and left again with its props turning.
+
+        The rules do not score that. REGRAS-CBR-2026.pdf defines pousar as
+        touching the base "de forma que seja visível que o mesmo se apoia na
+        base para se manter em uma posição estável e COM HÉLICES DESLIGADAS",
+        and visiting a base as detecting it by vision AND landing on it. A
+        touch-and-go is not a landing, so it is not a visit, so it is not +20 —
+        six times over, and the x2 for the return with it. The run scored 0.
+
+        So the disarm is COMMANDED rather than waited for, which is both correct
+        and faster than the 10 s it was implicitly waiting on and never reaching.
+
+        A NORMAL disarm, never a forced one. MAV_CMD_COMPONENT_ARM_DISARM with
+        the 21196 magic cuts the motors whatever the vehicle is doing, and the
+        signal that brought us here is a heuristic that a stable hover can
+        satisfy. If ArduPilot refuses because it does not agree we are down,
+        that refusal is information and the right answer is to keep asking and
+        let the vehicle finish landing — not to overrule it in mid-air.
+        """
+        # DRY RUN: the vehicle is disarmed for the whole rehearsal by
+        # construction and there is no client to ask, so there is nothing to
+        # prove and nothing to send. The landing is settled on the same evidence
+        # that brought us here.
+        if self.dry_run:
+            self._settle_landing(proven=True)
+            return
+
+        if not self.mav_state.armed:
+            self._settle_landing(proven=True)
+            return
+
+        if self._since_entered() > self.disarm_timeout:
+            # Past DISARM_DELAY as well as past our own retries. Count it and
+            # carry on: refusing to count it would leave the pad unvisited in
+            # the map, and the mission would fly back and land on it again — a
+            # repeated landing, which is -5. Progress is worth more than
+            # bookkeeping here, but the log has to say the scoring is in doubt.
+            self.get_logger().error(
+                f"STILL ARMED {self.disarm_timeout:.0f} s after touchdown — "
+                f"ArduPilot says: {self._fcu_reason()}. This landing may NOT "
+                "be scored: the rules require the propellers stopped. Counting "
+                "it anyway so the mission does not land on this base twice.")
+            self._settle_landing(proven=False)
+            return
+
+        if self._poll_call() == "pending":
+            return
+        if self._now() - self._last_cmd_t < self.disarm_retry:
+            return
+        self._start_call("disarm", self.cli_arm, CommandBool.Request(value=False))
+
+    def _settle_landing(self, proven: bool):
+        """Book the landing that DISARM has just finished proving, then rest."""
+        z = self.pose.pose.position.z if self.pose else 0.0
+        how = "props stopped" if proven else "PROPS NOT CONFIRMED STOPPED"
+        if self.landing_for == self.LAND_PAD:
+            self.landed_count += 1
+            self.get_logger().info(
+                f"LANDED on base #{self.landed_count} of {self.target_bases} — "
+                f"resting at z={z:.2f} m ({how}).")
+            self._mark_visited(z)
+        else:
+            self.get_logger().info(
+                f"LANDED ({self.landing_for}) at z={z:.2f} m ({how}).")
+            self._report_landing_anchor()
+        self._enter(self.DWELL)
 
     def _report_landing_anchor(self):
         """The one measurement of drift against the WORLD this stack can make.
@@ -2633,7 +2796,12 @@ class Phase1MissionNode(Node):
     # ── DWELL ────────────────────────────────────────────────────────────────
 
     def _do_dwell(self):
-        """Sit on the pad, then decide whether there is more flying to do."""
+        """Rest on the pad with the props stopped, then decide what is next.
+
+        The clock starts at the DISARM, not at touchdown, so these seconds are
+        the ones a judge is actually looking at: the vehicle supported by the
+        base, stationary, propellers off.
+        """
         if self._since_entered() < self.dwell_s:
             return
 
@@ -2793,6 +2961,9 @@ class Phase1MissionNode(Node):
         elif self.state == self.LAND:
             cue = ("PUT THE DRONE DOWN on the pad and let go — touchdown is "
                    "declared when the altitude stops changing.")
+        elif self.state == self.DISARM:
+            cue = ("LEAVE IT ON THE PAD — in flight this is where the motors "
+                   "are stopped. Nothing is sent here.")
         elif self.state == self.DWELL:
             left = max(0.0, self.dwell_s - self._since_entered())
             cue = f"RESTING on the pad — {left:.0f} s, then pick it up again."

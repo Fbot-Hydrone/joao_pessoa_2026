@@ -1565,3 +1565,110 @@ def test_the_u_flies_one_setpoint_per_leg(node):
     n._begin_level()
     assert len(n._survey_path) == 6
     n.destroy_node()
+
+
+# ── The propellers have to actually stop ─────────────────────────────────────
+#
+# The rules define pousar as touching the base "de forma que seja visível que o
+# mesmo se apoia na base para se manter em uma posição estável e COM HÉLICES
+# DESLIGADAS" (REGRAS-CBR-2026.pdf), and visiting a base as detecting it by
+# vision AND landing on it. No disarm, no landing, no +20.
+#
+# This was broken for the whole life of the mission and silently: across the 262
+# landings in logs/param_sweep/ and logs/seed_sweep/, ZERO reached armed=False.
+# Every one read "descended and stopped" and re-armed 4 s later, under the 10 s
+# DISARM_DELAY. The logs said six bases; the scoresheet would have said none.
+# These tests exist so that cannot come back without a red test.
+
+def test_touchdown_alone_does_not_count_as_a_landing(node):
+    """Stillness is not proof the props stopped — a stable hover satisfies it."""
+    node.dry_run = False
+    node.landing_for = node.LAND_PAD
+    node.mav_state.armed = True
+    enter(node, node.DISARM)
+
+    node._do_disarm()
+
+    assert node.state == node.DISARM, "must not leave DISARM while armed"
+    assert node.landed_count == 0, "an armed vehicle has not landed"
+
+
+def test_the_landing_is_booked_when_the_fcu_says_disarmed(node):
+    node.dry_run = False
+    node.landing_for = node.LAND_PAD
+    node.mav_state.armed = False
+    enter(node, node.DISARM)
+
+    node._do_disarm()
+
+    assert node.landed_count == 1
+    assert node.state == node.DWELL
+
+
+def test_a_disarm_that_never_lands_still_marks_the_base_visited(node):
+    """Otherwise the map keeps offering it and the drone lands on it twice: -5."""
+    node.dry_run = False
+    node.landing_for = node.LAND_PAD
+    node.mav_state.armed = True
+    enter(node, node.DISARM, age_s=node.disarm_timeout + 1.0)
+
+    node._do_disarm()
+
+    assert node.state == node.DWELL
+    assert node.landed_count == 1, "progress beats bookkeeping; the log warns"
+
+
+def test_the_rest_on_the_pad_starts_after_the_disarm_not_at_touchdown(node):
+    """dwell_s is the window a judge sees, so it must not overlap the descent."""
+    node.dry_run = False
+    node.landing_for = node.LAND_PAD
+    node.mav_state.armed = False
+    enter(node, node.DISARM, age_s=999.0)
+
+    node._do_disarm()
+
+    assert node.state == node.DWELL
+    assert node._since_entered() < 1.0, "the dwell clock restarts at the disarm"
+
+
+def test_land_hands_off_to_disarm_rather_than_resting(node):
+    node.dry_run = False
+    node.landing_for = node.LAND_PAD
+    node.mav_state.mode = "LAND"
+    node.mav_state.armed = True
+    enter(node, node.LAND, age_s=node.land_timeout + 1.0)
+
+    node._do_land()
+
+    assert node.state == node.DISARM
+    assert node.landed_count == 0
+
+
+def test_a_dry_run_has_no_motors_to_stop(node):
+    """No FCU client exists in a rehearsal, so DISARM must not stall there."""
+    node.dry_run = True
+    node.landing_for = node.LAND_PAD
+    enter(node, node.DISARM)
+
+    node._do_disarm()
+
+    assert node.state == node.DWELL
+    assert node.landed_count == 1
+
+
+def test_the_budget_never_interrupts_a_disarm(node):
+    """Cutting away mid-disarm leaves the props turning on a scored base."""
+    _armed_and_flying(node, elapsed=5000.0)
+    enter(node, node.DISARM)
+
+    node._check_budget()
+
+    assert node.state == node.DISARM
+
+
+def test_the_disarm_is_re_asked_faster_than_an_ordinary_command(node):
+    """The first disarms after touchdown ARE refused — ArduPilot's own land
+    detector has not latched yet — so how fast we re-ask sets how long the
+    vehicle sits on the base with the props turning. MEASURED at the 2.0 s
+    retry_period: 6-7 s to disarm, quantised into whole retries."""
+    assert node.disarm_retry < node.retry_period

@@ -294,6 +294,29 @@ def generate_launch_description():
                         "the map metres out. Keep this short — it is there to "
                         "let the estimate stop, not to loiter."),
         DeclareLaunchArgument(
+            "dwell_s", default_value="2.0",
+            description="Time resting on the base AFTER the propellers have "
+                        "been confirmed stopped, s, before re-arming. This is "
+                        "the window a judge sees the landing in: the rules "
+                        "count a landing only when the drone is stably "
+                        "supported with the props off."),
+        DeclareLaunchArgument(
+            "disarm_timeout_s", default_value="12.0",
+            description="Ceiling on the wait for armed=False after touchdown, "
+                        "s. Kept above ArduCopter's DISARM_DELAY (10 s) so the "
+                        "auto-disarm is still caught if our own disarm is "
+                        "refused. Past it the landing is counted anyway — an "
+                        "unvisited base would be flown to and landed on twice, "
+                        "which is -5 — and logged as unproven."),
+        DeclareLaunchArgument(
+            "disarm_retry_s", default_value="0.4",
+            description="How often to re-ask for the disarm, s. Short on "
+                        "purpose: the first disarms after touchdown are "
+                        "refused until ArduPilot's own land detector latches, "
+                        "and a slow retry turns a sub-second disagreement into "
+                        "seconds of sitting on the base with the props still "
+                        "turning. MEASURED at 2.0 s: 6-7 s to disarm."),
+        DeclareLaunchArgument(
             "confirm_detections", default_value="6",
             description="Belly-camera looks above confirm_confidence needed "
                         "before committing to a landing. One frame can be a "
@@ -962,6 +985,12 @@ def generate_launch_description():
                 LaunchConfiguration("target_bases"), value_type=int),
             "settle_s": ParameterValue(
                 LaunchConfiguration("settle_s"), value_type=float),
+            "dwell_s": ParameterValue(
+                LaunchConfiguration("dwell_s"), value_type=float),
+            "disarm_timeout_s": ParameterValue(
+                LaunchConfiguration("disarm_timeout_s"), value_type=float),
+            "disarm_retry_s": ParameterValue(
+                LaunchConfiguration("disarm_retry_s"), value_type=float),
             # The U's geometry. See the arguments for what 0 means.
             "u_side_x_m": ParameterValue(
                 LaunchConfiguration("u_side_x_m"), value_type=float),

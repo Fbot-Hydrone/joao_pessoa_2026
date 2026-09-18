@@ -87,6 +87,8 @@ exactly that and logs what it is waiting for.
 | `confirm_detections` | `3` | belly-camera looks needed before committing to a landing |
 | `confirm_confidence` | `0.60` | confidence that counts as a look |
 | `confirm_timeout_s` | `25.0` | hover budget over a candidate before blacklisting it |
+| `dwell_s` | `2.0` | rest on the base **after the props are confirmed stopped**, before re-arming. This is the window a judge scores the landing in |
+| `disarm_timeout_s` | `12.0` | ceiling on the wait for `armed=False`. Above ArduCopter's `DISARM_DELAY` (10 s) on purpose |
 | `require_armed` | `true` | `pad_map` maps nothing until the vehicle first arms |
 | `ground_z` | `0.0` | height of the arena **floor** above the takeoff plane — see §7 |
 | `auto_start` | `true` | `false` holds until `/hydrone/mission/start` is called |
@@ -120,9 +122,9 @@ WAIT_FCU -> ARMING -> REGISTER -> TAKEOFF -> SELECT -+-> TRAVEL -> CONFIRM
               |                                      |    ^    |    |
               |                                      |    +- SETTLE |
               |                                      |              v
-              +---------------- DWELL <----------------------------LAND
-                                  |
-                                  +-> DONE
+              +------- DWELL <- DISARM <-------------------------LAND
+                         |
+                         +-> DONE
 ```
 
 | state | what it does | how it leaves |
@@ -136,8 +138,9 @@ WAIT_FCU -> ARMING -> REGISTER -> TAKEOFF -> SELECT -+-> TRAVEL -> CONFIRM
 | `ROTATE` | one 45° clockwise step, position unchanged | heading reached (or `rotate_timeout_s`), turn counted, back to `SETTLE` |
 | `TRAVEL` | one setpoint, one leg, heading held | inside `arrive_tol_m` → `CONFIRM` (or `LAND`, going home); timeout → blacklist |
 | `CONFIRM` | hover and count belly-camera looks | `confirm_detections` looks → `LAND`; timeout → blacklist, back to `SETTLE` |
-| `LAND` | setpoint stream **stops**, LAND mode, wait for disarm or a settled low altitude | touchdown held for `land_settle_s` → mark visited → `DWELL` |
-| `DWELL` | sit for `dwell_s` | more to do → `ARMING`; done → `DONE` |
+| `LAND` | setpoint stream **stops**, LAND mode, wait for touchdown | disarmed, or descended and held still for `land_settle_s` → `DISARM`. **Nothing is counted here** |
+| `DISARM` | sends a plain disarm, repeatedly, until `/mavros/state` reports `armed=False` | confirmed → count the landing, mark visited, `DWELL`; `disarm_timeout_s` → count it anyway and log that it is unproven |
+| `DWELL` | sit for `dwell_s` **with the props stopped** | more to do → `ARMING`; done → `DONE` |
 
 Driven by a 10 Hz tick. **Every service call is asynchronous with its own
 deadline** — a blocking call inside a timer callback would stall the setpoint
