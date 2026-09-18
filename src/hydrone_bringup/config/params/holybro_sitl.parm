@@ -199,6 +199,18 @@ MOT_BAT_VOLT_MAX 12.8
 # neither useful nor survivable indoors. 0.5 m/s puts a 2 m leg at ~4 s plus
 # ramps: slow enough to watch, slow enough that a bad position estimate produces
 # a slow wander rather than a dash into a wall.
+# NAO SUBA WP_SPD. Resultado negativo MEDIDO 2026-09-18.
+#
+# O veiculo cruza uma perna inteira a 0,19-0,20 m/s constante, um TERCO do 0,6
+# pedido — nao rampa, nao gagueja, so nao chega perto do teto. Com o overlay de
+# 1,0 media 0,32, a mesma razao, o que sugeria que pedir mais entregaria mais.
+#
+# Sugeria errado. Com 1,5 (e giro a 60) o perimetro PIOROU, de 220 s para
+# 243 s, e a corrida terminou com o veiculo `stuck 29.46 m out` — vinte e nove
+# metros do setpoint, fora de uma arena de oito por oito. E literalmente o que
+# o texto acima previa: "uma estimativa ruim produz uma corrida contra a
+# parede". A razao de um terco vale enquanto o controlador acompanha, e o
+# limite de acompanhamento esta entre 1,0 e 1,5.
 WP_SPD          0.6
 # Default 2.5 m/s/s. The acceleration is what the airframe feels when a new
 # setpoint appears, and BiguaSim's ~0.3-0.5 s actuation lag is what turns a
