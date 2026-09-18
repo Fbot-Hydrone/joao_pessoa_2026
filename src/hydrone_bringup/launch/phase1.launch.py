@@ -319,26 +319,6 @@ def generate_launch_description():
                         "translacao e constante em metros — e a descida vai de "
                         "2,5 m a zero."),
         DeclareLaunchArgument(
-            "transit_low", default_value="true",
-            description="Voar BAIXO entre bases depois que o mapa ja tem todas "
-                        "as seis. Os 2,5 m de takeoff_alt pagam duas coisas e "
-                        "so uma e desviar de obstaculo: a outra e MAPEAR — no "
-                        "cruzeiro a barriga cobre uma faixa larga, entao todo "
-                        "trajeto tambem e busca e uma base que ninguem viu "
-                        "pode aparecer no caminho de outra. Isso vale a pena "
-                        "ate o mapa ter todas. Dali em diante a altura nao "
-                        "compra nada e custa 33 s por base (MEDIDO: LAND 18,3 s "
-                        "+ TAKEOFF 15,0 s), ou 198 s numa rodada de 600. A "
-                        "altura de cada trecho vem do OCTOMAP, nao de um "
-                        "numero fixo: o telhado tem 1,6 m e as bases chegam a "
-                        "1,5, entao nenhuma constante e segura na arena "
-                        "inteira, mas uma resposta por perna e."),
-        DeclareLaunchArgument(
-            "transit_min_alt_m", default_value="1.0",
-            description="O degrau mais baixo que o transito pode tentar. Nao e "
-                        "a altura escolhida — e o piso da busca que "
-                        "path_is_clear_inflated faz de baixo para cima."),
-        DeclareLaunchArgument(
             "mission_budget_s", default_value="600.0",
             description="O RELOGIO DA PROVA, em segundos de tempo de missao, "
                         "contados do primeiro tick armado. 0 desliga. A prova "
@@ -1006,10 +986,6 @@ def generate_launch_description():
             "belly_offset_xy": ParameterValue(
                 LaunchConfiguration("belly_offset_xy"),
                 value_type=List[float]),
-            "transit_low": ParameterValue(
-                LaunchConfiguration("transit_low"), value_type=bool),
-            "transit_min_alt_m": ParameterValue(
-                LaunchConfiguration("transit_min_alt_m"), value_type=float),
             "mission_budget_s": ParameterValue(
                 LaunchConfiguration("mission_budget_s"), value_type=float),
             "return_reserve_s": ParameterValue(

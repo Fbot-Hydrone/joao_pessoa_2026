@@ -605,68 +605,6 @@ def test_an_offset_camera_shifts_the_target_and_shrinks_with_height(node):
     assert v_low - v0 == pytest.approx(51.2, abs=1.0)
 
 
-# ── Transit altitude ─────────────────────────────────────────────────────────
-
-def test_transit_stays_high_while_a_base_is_still_missing(node):
-    """Cruise altitude is not only clearance — it is how the belly keeps
-    searching. Buying that is right until there is nothing left to find."""
-    node.transit_low = True
-    node.target_bases = 6
-    set_map(node, pad(0, 0.0, 0.0, takeoff_base=True), pad(1, 2.0, 0.0),
-            pad(2, 3.0, 0.0))                     # 2 of 6 known
-    set_pose(node, 0.0, 0.0, 2.5)
-    assert node._map_is_complete() is False
-    assert node._transit_alt(3.0, 0.0, 2.5) == 2.5
-
-
-def test_the_takeoff_base_does_not_count_towards_a_complete_map(node):
-    """It is registered, never detected — counting it would declare the map
-    finished one base early and stop the search that finds the last one."""
-    node.target_bases = 2
-    set_map(node, pad(0, 0.0, 0.0, takeoff_base=True), pad(1, 2.0, 0.0))
-    assert node._map_is_complete() is False
-
-
-def test_transit_stays_high_when_the_map_cannot_answer(node):
-    """No octomap, no certainty, no descent. Every doubtful case gets the old
-    behaviour rather than a guess at a safe height."""
-    node.transit_low = True
-    node.target_bases = 1
-    set_map(node, pad(0, 0.0, 0.0, takeoff_base=True), pad(1, 2.0, 0.0))
-    set_pose(node, 0.0, 0.0, 2.5)
-    node.octree_tree = None
-    node._octomap_msg = None
-    assert node._map_is_complete() is True
-    assert node._transit_alt(2.0, 0.0, 2.5) == 2.5
-
-
-def test_transit_low_can_be_turned_off(node):
-    node.transit_low = False
-    node.target_bases = 1
-    set_map(node, pad(0, 0.0, 0.0, takeoff_base=True), pad(1, 2.0, 0.0))
-    set_pose(node, 0.0, 0.0, 2.5)
-    assert node._transit_alt(2.0, 0.0, 2.5) == 2.5
-
-
-def test_the_ladder_starts_above_the_destination_pad(node):
-    """The destination IS a pad, so a rung below its top puts the endpoint
-    inside it and the map reads the leg as blocked BY THE TARGET.
-
-    Found on this feature's first flight: the ladder only ever cleared at
-    2.00 m against a floor of 1.00 m, and this was why.
-    """
-    node.transit_low = True
-    node.transit_min_alt = 1.0
-    node.target_bases = 1
-    tall = pad(1, 2.0, 0.0, height=1.4)
-    set_map(node, pad(0, 0.0, 0.0, takeoff_base=True), tall)
-    set_pose(node, 0.0, 0.0, 2.5)
-    # No octomap, so this falls back — what is pinned is that the floor the
-    # ladder WOULD start from clears the pad, not the arena floor.
-    assert tall.height_measured
-    assert tall.height + node.transit_min_alt > node.transit_min_alt
-
-
 # ── The competition clock ────────────────────────────────────────────────────
 #
 # A round is 10 minutes and returning to the takeoff base DOUBLES the score, so
