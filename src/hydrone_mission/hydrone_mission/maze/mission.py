@@ -18,7 +18,7 @@ LAND
 Commands are velocities in odom with yaw held constant (the lidar is 360 deg).
 """
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import math
 import time
 
@@ -36,6 +36,7 @@ from hydrone_mission.maze.planner import GridPlanner, inflate
 @dataclass
 class MissionParams:
     flight_z: float = 0.5           # odom z to fly at (window centre height guess)
+    inside_dz: float = 0.45         # inside, fly this far above the floor instead
     survey_rise: float = 0.6        # takeoff climbs this far above flight_z
     survey_hold: float = 2.0        # s hovering at each survey height
     inflate: float = 0.22           # obstacle inflation, m (330 mm drone)
@@ -62,6 +63,7 @@ class MissionParams:
     explore_budget: float = 330.0   # s
     mission_budget: float = 560.0   # s, then land wherever we are
     stuck_s: float = 20.0           # give up a frontier goal after this long
+    give_up_cycles: int = 12        # planning cycles with nothing to explore
     view_tries: int = 3             # view cells tried before a frontier is dropped
     climb_margin: float = 0.5       # over the roof when there's no way round
     use_fallback: bool = True
@@ -87,6 +89,11 @@ class Mission:
         self.p = params or MissionParams()
         self.p.grid.flight_z = self.p.flight_z
         self.grid = OccupancyGrid(self.p.grid)
+        # A second grid, a band lower, for planning inside. A window is high in
+        # its wall and the passages behind it can be much lower (measured in
+        # BiguaSim: window 0.0..0.8, inner doorways floor..0.15), so one band
+        # can't both find the window and fly the maze.
+        self.igrid = None
         self.logger = logger
         self.log = []                           # (t, message)
         self.phase = 'TAKEOFF'
@@ -165,10 +172,22 @@ class Mission:
         self.step_ms.append((time.perf_counter() - c_step) * 1e3)
         return cmd
 
+    @property
+    def inside_z(self):
+        return self.igrid.p.flight_z if self.igrid is not None else self.p.flight_z
+
     def _ingest(self, points, origin, pos):
         c0 = time.perf_counter()
         pts = np.asarray(points, dtype=np.float32)
         self.grid.update(pts, origin)
+        if self.igrid is None and self.grid.floor_z is not None:
+            z = self.grid.floor_z + self.p.inside_dz
+            if z < self.p.flight_z - 0.15:      # only worth it if it's really lower
+                gp = replace(self.p.grid, flight_z=z, floor_z=self.grid.floor_z)
+                self.igrid = OccupancyGrid(gp)
+                self.say(f'interior band at z {z:.2f} (floor {self.grid.floor_z:.2f})')
+        if self.igrid is not None:
+            self.igrid.update(pts, origin)
         fz = self.p.flight_z
         # a thin 3D memory around the drone, for window heights
         near = (np.abs(pts[:, 0] - pos[0]) < 3.0) & (np.abs(pts[:, 1] - pos[1]) < 3.0) \
@@ -192,10 +211,12 @@ class Mission:
                 'arena': self.arena, 'fallback_used': list(self.fallback_used)}
 
     # ── maps for planning ───────────────────────────────────────────────────
-    def _masks(self):
+    def _masks(self, grid=None):
+        """Crop plus free/occupied/covered/clear. `grid` picks the band; the
+        covered region always comes from the detection band above."""
         crop = self.crop or self.grid.crop(1.5)
         i0, i1, j0, j1 = crop
-        g = self.grid
+        g = grid if grid is not None else self.grid
         free = g.free()[i0:i1, j0:j1]
         occ = g.occupied()[i0:i1, j0:j1]
         covered = self.covered if self.covered is not None and self.covered.shape == free.shape \
@@ -224,9 +245,9 @@ class Mission:
         dx, dy = x - opening.center[0], y - opening.center[1]
         return (dx * dx + dy * dy < radius * radius) & (dx * opening.normal[0] + dy * opening.normal[1] < into)
 
-    def planner(self, mode, pos, allow=None):
+    def planner(self, mode, pos, allow=None, grid=None):
         """GridPlanner for 'out' (outside the covered region), 'in' (inside it) or 'any'."""
-        crop, free, occ, covered, clear = self._masks()
+        crop, free, occ, covered, clear = self._masks(grid)
         if mode == 'out':
             passable = clear & ~dilate(covered, 1)
         elif mode == 'in':
@@ -339,13 +360,13 @@ class Mission:
                 break
         return False
 
-    def _go_to(self, pos, goal, mode, z, cap, allow=None):
+    def _go_to(self, pos, goal, mode, z, cap, allow=None, grid=None):
         """Replanning path follower. Returns (Command, arrived, planned_ok)."""
         if np.linalg.norm(goal - pos[:2]) < self.p.goal_tol:
             return self._hover(pos, goal, z, cap), True, True
         if self.t - self._t_plan >= self.p.replan_s or self.path is None:
             self._t_plan = self.t
-            pl = self.planner(mode, pos, allow)
+            pl = self.planner(mode, pos, allow, grid)
             path = pl.path_to(goal, snap=0.4)
             if path is not None:
                 path[-1] = goal if np.linalg.norm(path[-1] - goal) < 0.4 else path[-1]
@@ -432,7 +453,15 @@ class Mission:
 
     def _fallback(self):
         g = self.grid
-        ij = np.argwhere(g.roof >= self.p.openings.min_roof_hits)
+        # the covered region, not the raw roof layer: that one also holds the
+        # arena's wall tops, and the box would fit itself to the arena
+        if self.covered is not None and self.covered.any():
+            i0, _, j0, _ = self.crop
+            roofed = self.covered & ~g.occupied()[self.crop[0]:self.crop[1],
+                                                  self.crop[2]:self.crop[3]]
+            ij = np.argwhere(roofed) + np.array([i0, j0])
+        else:
+            ij = np.argwhere(g.roof >= self.p.openings.min_roof_hits)
         if not len(ij):
             return None
 
@@ -534,30 +563,41 @@ class Mission:
         return bool(g.occupied()[c[:, 0], c[:, 1]].sum() >= 2)
 
     def _enter(self, pos):
-        cmd = self._cross(pos, self.entrance, 1.0, self.p.enter_depth, 'EXPLORE', 'ALIGN')
-        if self.phase == 'EXPLORE':
+        cmd = self._cross(pos, self.entrance, 1.0, self.p.enter_depth, 'SINK', 'ALIGN')
+        if self.phase == 'SINK':
             self.entry_point = self.entrance.center.copy()
-            self._t_explore = self.t
         return cmd
+
+    def _sink(self, pos):
+        """Settle onto the interior band before exploring: the passages inside
+        can be a lot lower than the window we came through."""
+        z = self.inside_z
+        if abs(pos[2] - z) < 0.08 or self.elapsed() > 20.0:
+            self.go('EXPLORE', f'at the interior band {z:.2f}')
+            self._t_explore = self.t
+        return self._hover(pos, pos[:2], z, self.p.v_crawl)
 
     def _explore(self, pos):
         self._track_exit()
-        z = self.pass_z
+        z = self.inside_z
         if self.t - self._t_explore > self.p.explore_budget:
             self.go('GO_EXIT', 'exploration budget spent')
             return self._hover(pos, pos[:2], z, self.p.v_in)
         if self.t - self._t_plan >= self.p.replan_s or self.path is None:
             self._t_plan = self.t
-            pl = self.planner('in', pos)
+            pl = self.planner('in', pos, grid=self.igrid)
             if pl.cost is None:
                 self.frontiers = []
+                self._no_frontier += 1
+                if self._no_frontier >= self.p.give_up_cycles:
+                    self.go('GO_EXIT', 'nowhere to plan from inside')
                 return self._hover(pos, pos[:2], z, self.p.v_in)
-            fs, _ = fr.find_frontiers(self.grid, self.crop, self.covered, pl.cost,
+            fs, _ = fr.find_frontiers(self.igrid or self.grid, self.crop, self.covered, pl.cost,
                                       self.p.frontiers, pl, self._ignore, self._bad_views)
             self.frontiers = fs
             if not fs:
                 self._no_frontier += 1
-                if self._no_frontier >= 3:
+                if self._no_frontier >= self.p.give_up_cycles:
                     self.go('GO_EXIT', 'no reachable frontier left')
                 return self._hover(pos, pos[:2], z, self.p.v_in)
             self._no_frontier = 0
@@ -626,7 +666,8 @@ class Mission:
             self.say(f'FALLBACK: no exit seen, using the rulebook one at {np.round(self.exit.center, 2)}')
         o = self._refresh(self.exit)
         goal = self._inside_point(o)
-        cmd, arrived, ok = self._go_to(pos, goal, 'in', self.pass_z, self.p.v_in, allow=o)
+        cmd, arrived, ok = self._go_to(pos, goal, 'in', self.inside_z, self.p.v_in, allow=o,
+                                       grid=self.igrid)
         if arrived:
             self.pass_z = self._window_z(o)
             self.go('ALIGN_EXIT', f'pass height {self.pass_z:.2f}')
@@ -635,8 +676,11 @@ class Mission:
         return cmd
 
     def _inside_point(self, o):
-        crop, free, occ, covered, clear = self._masks()
-        for d in np.arange(self.p.align_dist, 0.29, -0.1):
+        """A clear spot just inside an opening, on the band we fly inside."""
+        crop, free, occ, covered, clear = self._masks(self.igrid)
+        # nearest clear spot first: the drone climbs to the window height there,
+        # and right under the window is the part we know is open to the top
+        for d in np.arange(0.35, self.p.align_dist + 0.01, 0.1):
             q = o.inside(d)
             c = self.grid.to_cell(q) - np.array([crop[0], crop[2]])
             if 0 <= c[0] < clear.shape[0] and 0 <= c[1] < clear.shape[1] and clear[c[0], c[1]]:

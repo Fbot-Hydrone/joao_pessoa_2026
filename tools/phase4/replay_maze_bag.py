@@ -108,7 +108,7 @@ def main():
               f'z {None if bot is None else round(bot, 2)}..{None if top is None else round(top, 2)}')
     if arena is not None:
         print(f'  arena centre {np.round(arena.center, 2)} size {np.round(arena.size, 2)}')
-    ij = np.argwhere(grid.roof >= 2)
+    ij = np.argwhere(covered) + np.array([crop[0], crop[2]])
     if len(ij):
         def free_score(pts):
             c = grid.to_cell(np.asarray(pts))

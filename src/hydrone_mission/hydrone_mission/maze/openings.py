@@ -19,11 +19,11 @@ from hydrone_mission.maze.morph import close, dilate, dilate4, fill_holes, label
 @dataclass
 class OpeningParams:
     min_roof_hits: int = 2      # roof-layer hits for a cell to count
-    sky_min_passes: int = 3     # rays through the roof band = open sky, not roofed
     close_radius: float = 0.5   # bridges gaps up to ~2x this in the roof outline
     min_width: float = 0.45     # drone diameter + margin
     max_width: float = 1.5
     flank_search: float = 1.0   # how far along the gap to look for its walls
+    wall_near: float = 0.6      # a candidate cell must have wall within this
     probe: float = 0.45         # the gap must be clear this far in and out
     outside_depth: float = 1.2  # and lead to uncovered open space at least this deep
     sill_min_hits: int = 2
@@ -58,15 +58,16 @@ def covered_region(grid, crop, params=None):
     """Bool crop of the roofed footprint."""
     p = params or OpeningParams()
     i0, i1, j0, j1 = crop
-    roof = grid.roof[i0:i1, j0:j1] >= p.min_roof_hits
-    if not roof.any():
-        return roof
-    closed = close(roof, p.close_radius / grid.p.res)
-    # the arena's own walls reach into the roof band, so hole filling alone
-    # would roof the whole arena: cells the lidar shot straight through up
-    # there are open sky, whatever the fill says
-    sky = ~roof & (grid.roof_pass[i0:i1, j0:j1] >= p.sky_min_passes)
-    return fill_holes(closed) & ~sky
+    # a wall's top is not a roof: the arena walls reach into the roof band all
+    # round, and filling that ring's holes would roof the whole arena. So only
+    # roof hits away from walls are filled in — the wall tops are then added
+    # back, so that a covered region still ends on its own wall
+    hits = grid.roof[i0:i1, j0:j1] >= p.min_roof_hits
+    occ = grid.occupied()[i0:i1, j0:j1]
+    if not hits.any():
+        return hits
+    closed = close(hits & ~occ, p.close_radius / grid.p.res)
+    return fill_holes(closed) | (hits & occ)
 
 
 def _sample(mask, grid, crop, xy):
@@ -108,6 +109,10 @@ def detect_openings(grid, params=None, crop=None, covered=None, viewer=None):
     # next to uncovered space that isn't wall: free, or not seen yet (an exit
     # seen from deep inside); the checks below sort them out
     cand = free & covered & dilate4(~covered & ~occ)
+    # an opening is a gap in a wall, so there must be wall near it. Without
+    # this the ragged edge of the roofed region (which just follows what the
+    # lidar has seen) joins onto the real gap and swamps its shape
+    cand &= dilate(occ, p.wall_near / res)
     # a gap is 1-2 cells deep; take its neighbours too so the pieces join up
     cand = dilate(cand, 1.5) & free & covered
     lab, n = label(cand, conn=8)
@@ -228,14 +233,15 @@ def _disc_points(r, step):
 def _gap_width(free, occ, grid, crop, c, t, p):
     """Walk along the gap from c until it stops being free, both ways.
 
-    Returns (centre, width, flanks); the gap may be sampled a little in or out
-    of the wall line, so take the best of three parallel lines.
+    Returns (centre, width, flanks); the candidate cells sit a little inside the
+    wall line, so walk several parallel lines and keep the one with walls beside
+    it.
     """
     res = grid.p.res
     n = np.array([t[1], -t[0]])
     best = (None, None, 0)
     steps = np.arange(0.0, p.flank_search + 1e-9, res * 0.5)
-    for off in (0.0, 0.1, -0.1):
+    for off in (0.0, -0.1, -0.2, -0.3, 0.1):
         base = c + n * off
         if not _sample(free, grid, crop, base)[0]:
             continue

@@ -4,10 +4,8 @@ One `update(points, origin)` per registered scan:
   - occupied: hits with z inside flight_z +- band
   - free: only the part of each ray that lies inside that band (unknown != free)
   - roof: hits in [flight_z + roof_lo, flight_z + roof_hi], low enough to miss
-    arena nets; wall tops and the roof of a confined space land here
-  - roof_pass: rays crossing that band without ending in it — open sky. A tall
-    arena wall puts roof hits all round the arena, and without this the hole
-    filling in openings.py would call the whole arena roofed
+    arena nets; wall tops and the roof of a confined space land here (openings.py
+    drops the wall tops, which are occupied cells themselves)
   - low: hits in [floor + low_margin, flight_z - low_top] on vertical faces
     (a cell whose hits in one scan span some height): sills, arena walls, but
     not the top of a pad that happens to sit next to a wall
@@ -29,10 +27,10 @@ class GridParams:
     band: float = 0.2           # +- around flight_z
     roof_lo: float = 0.3        # roof layer, relative to flight_z
     roof_hi: float = 1.0
-    roof_pass_stride: int = 3   # rays cast for the open-sky check
     low_margin: float = 0.1     # low layer starts this far above the floor
     low_top: float = 0.45       # and ends this far under flight_z (below a sill top)
     low_vertical: float = 0.06  # low hits count only where one scan spans this much z
+    floor_flat: float = 0.08    # a floor vote needs one scan's hits in a cell this level
     floor_z: float = None       # fixed floor; None = estimate it
     floor_guess: float = None   # used until the estimate settles; None = flight_z - 1.1
     voxel: float = 0.05         # endpoint downsampling before ray casting
@@ -57,7 +55,6 @@ class OccupancyGrid:
         shape = (self.n, self.n)
         self.logodds = np.zeros(shape, dtype=np.float32)
         self.roof = np.zeros(shape, dtype=np.uint16)
-        self.roof_pass = np.zeros(shape, dtype=np.uint16)
         self.low = np.zeros(shape, dtype=np.uint16)
         self.low_pass = np.zeros(shape, dtype=np.uint16)
         self.observed = np.zeros(shape, dtype=bool)
@@ -143,15 +140,7 @@ class OccupancyGrid:
         flat = ij[:, 0] * self.n + ij[:, 1]
 
         hit_cells = np.unique(flat[in_band & ok])
-        roof_cells = np.unique(flat[in_roof & ok])
-        self._add_counts(self.roof, roof_cells)
-        # every k-th ray is plenty to tell open sky from a roof, and the cast is
-        # the expensive part of the update
-        k = p.roof_pass_stride
-        self._add_counts(self.roof_pass,
-                         np.setdiff1d(self._ray_cells(o, d[::k], rng[::k], fz + p.roof_lo,
-                                                      fz + p.roof_hi),
-                                      roof_cells, assume_unique=True))
+        self._add_counts(self.roof, np.unique(flat[in_roof & ok]))
         if low_ready:
             self._add_counts(self.low, self._span_cells(flat[in_low & ok], z[in_low & ok],
                                                         lo=p.low_vertical))
@@ -231,13 +220,25 @@ class OccupancyGrid:
     def _update_floor(self, pts):
         if self.p.floor_z is not None:
             return
-        b = np.floor((pts[:, 2] + 10.0) / 0.05).astype(int)
+        # one vote per cell that this scan saw as a horizontal surface. Voting
+        # per point let a wall, which is a dense sheet of heights, outvote the
+        # floor; inside a structure the floor is barely visible at all
+        ij = self.to_cell(pts[:, :2])
+        ok = self.inside(ij)
+        flat, z = ij[ok, 0] * self.n + ij[ok, 1], pts[ok, 2]
+        level = self._span_cells(flat, z, hi=self.p.floor_flat)
+        if not len(level):
+            return
+        order = np.argsort(flat, kind='stable')
+        uniq, start = np.unique(flat[order], return_index=True)
+        low = np.minimum.reduceat(z[order], start)[np.isin(uniq, level)]
+        b = np.floor((low + 10.0) / 0.05).astype(int)
         b = b[(b >= 0) & (b < len(self._zhist))]
         self._zhist += np.bincount(b, minlength=len(self._zhist))
         # only below the flight band; the floor is the lowest strong peak
         top = int((self.p.flight_z - self.p.low_top - 0.2 + 10.0) / 0.05)
         h = self._zhist[:max(top, 1)]
-        if h.sum() < 300:
+        if h.sum() < 60:
             return
         # a horizontal surface piles up in one or two bins; walls spread out
         h2 = h[:-1] + h[1:]
@@ -246,7 +247,7 @@ class OccupancyGrid:
         k = int(strong[0])
         # refine inside the pair of bins
         k = k if h[k] >= h[k + 1] else k + 1
-        self.floor_z = None if peak < 100 else (k + 0.5) * 0.05 - 10.0
+        self.floor_z = None if peak < 25 else (k + 0.5) * 0.05 - 10.0
         self._floor_est = self.floor_z
 
     def estimated_floor(self):
