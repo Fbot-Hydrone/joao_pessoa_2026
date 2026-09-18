@@ -514,6 +514,35 @@ class Phase1MissionNode(Node):
 
         # ── Landing, and the plumbing ───────────────────────────────────────
         self.declare_parameter("dwell_s", 4.0)
+        # TRANSIT LOW ONCE THERE IS NOTHING LEFT TO FIND.
+        #
+        # `takeoff_alt` is 2.5 m for two reasons and only one of them is
+        # obstacle clearance. The other is MAPPING: at cruise the belly camera
+        # covers a wide strip, so every transit is also a search, and a base
+        # nobody has seen yet may turn up on the way to one we have. That is
+        # worth paying for -- right up until the map holds every base there is.
+        #
+        # From that moment the extra altitude buys nothing and costs 33 s per
+        # base: MEASURED, LAND is 18,3 s and TAKEOFF 15,0 s, which over six
+        # bases is 198 s of a 600 s round spent purely going up and down.
+        #
+        # So the rule is not "fly low because it is faster". It is "stop paying
+        # for search once there is no search left", and `_transit_alt` refuses
+        # to descend while a single base is still missing from the map.
+        #
+        # The floor is not a guess either: the height comes from the OCTOMAP,
+        # by asking `path_is_clear_inflated` for the lowest rung that still has
+        # a clear path. The house roof is 1,6 m and bases reach 1,5 m, so no
+        # single constant is safe across a whole arena -- but a per-leg answer
+        # is, and the map already holds it.
+        self.declare_parameter("transit_low", True)
+        # Read TWICE, and both readings are the same number for a reason: it is
+        # the clearance the vehicle keeps, whether over the arena floor or over
+        # the base it is flying AT. A tall base therefore earns little and a
+        # low one earns a lot, which is exactly right — the saving should track
+        # how far there was to come down.
+        self.declare_parameter("transit_min_alt_m", 1.0)
+        self.declare_parameter("transit_step_m", 0.25)
         # SETTLE ends on EVIDENCE that the estimate stopped moving, not on a
         # stopwatch. `settle_s` stays the ceiling.
         #
@@ -634,10 +663,14 @@ class Phase1MissionNode(Node):
         self.settle_still_yaw_rate = math.radians(
             float(p("settle_still_yaw_rate_deg")))
         self._vel = None
+        self.transit_low = bool(p("transit_low"))
+        self.transit_min_alt = float(p("transit_min_alt_m"))
+        self.transit_step = float(p("transit_step_m"))
         self.mission_budget_s = float(p("mission_budget_s"))
         self.return_reserve_s = float(p("return_reserve_s"))
         self._mission_t0 = None
         self._budget_called = False
+        self._climb_alt = None
         self.settle_s = float(p("settle_s"))
         self.yaw_tol = math.radians(float(p("yaw_tol_deg")))
         self.rotate_timeout = float(p("rotate_timeout_s"))
@@ -1361,7 +1394,20 @@ class Phase1MissionNode(Node):
         # every one of them, because the vehicle was already flying.
         climbed = (self.pose.pose.position.z - self._takeoff_start_z
                    if self.pose is not None else 0.0)
-        if self.pose is not None and climbed >= self.takeoff_alt - 0.15:
+        # Climb only as high as the NEXT leg will actually use. Without this the
+        # transit altitude is a pure loss: the vehicle climbs the full
+        # takeoff_alt and then descends again to transit — MEASURED on this
+        # feature's first flight, the landings went 256/323 to 255/336 because
+        # the descent had been added without the climb being removed.
+        # Computed ONCE per climb, not per tick. _transit_alt decodes the
+        # octomap, and at 10 Hz that is an octree rebuild every 100 ms for the
+        # whole climb — MEASURED: the "transiting at" line appeared 403 times
+        # in one run, which is 403 decodes, and it ate the saving it was
+        # supposed to deliver.
+        if self._climb_alt is None:
+            self._climb_alt = self._climb_target()
+        alt = self._climb_alt
+        if self.pose is not None and climbed >= alt - 0.15:
             x = self.pose.pose.position.x
             y = self.pose.pose.position.y
             yaw = yaw_of(self.pose)
@@ -1369,7 +1415,7 @@ class Phase1MissionNode(Node):
                 f"airborne — climbed {climbed:.2f} m to z="
                 f"{self.pose.pose.position.z:.2f} m, "
                 f"heading {math.degrees(yaw):.0f} deg.")
-            self._goto(x, y, self.takeoff_alt, yaw)
+            self._goto(x, y, alt, yaw)
             if self._land_after_takeoff:
                 # The fallback's second hop: up, then straight back down.
                 self._land_after_takeoff = False
@@ -1458,14 +1504,27 @@ class Phase1MissionNode(Node):
             # confirmation is flown from the same distance. Floored at
             # the old behaviour, and clamped so a tall base cannot push the
             # vehicle into the net.
-            # ONE ALTITUDE. The vehicle cruises, searches and confirms at
-            # `takeoff_alt` and only ever leaves it to land, returning to it
-            # afterwards. Three separate heights used to be computed here from
-            # the pad's own height; that bought nothing the belly camera could
-            # not do from a single fixed height, and every one of them was
-            # another number to get wrong.
+            # ONE ALTITUDE WHILE THERE IS STILL SOMETHING TO FIND. The vehicle
+            # cruises, searches and confirms at `takeoff_alt`, and the height
+            # is not only clearance: at cruise the belly camera covers a wide
+            # strip, so every transit doubles as a search and a base nobody has
+            # seen yet can turn up on the way to one we have.
+            #
+            # Once the map holds them all that stops being true, and the
+            # altitude is pure cost -- 33 s per base in climb and descent. From
+            # there `_transit_alt` asks the OCTOMAP for the lowest rung with a
+            # clear path and flies that instead. It returns `takeoff_alt`
+            # unchanged whenever the answer is not certain, so the old
+            # behaviour is what every doubtful case still gets.
+            #
+            # Only THIS leg descends. The perimeter still maps from cruise, and
+            # the run home still climbs -- that one ends on the takeoff base,
+            # which is the one landing the rules pay double for.
             self._goto_via_map(pad.position.x, pad.position.y,
-                               self.takeoff_alt, self.setpoint[3])
+                               self._transit_alt(pad.position.x,
+                                                 pad.position.y,
+                                                 self.takeoff_alt, pad),
+                               self.setpoint[3])
             self._enter(self.TRAVEL)
             return
 
@@ -2320,6 +2379,83 @@ class Phase1MissionNode(Node):
                 return (pad.position.x, pad.position.y)
         return None
 
+    def _climb_target(self) -> float:
+        """How high to climb after a landing.
+
+        `takeoff_alt` while anything is still unknown, because the climb is
+        also what puts the belly camera back where it can search. Once the map
+        is complete the only job left is reaching the next base, so climb to
+        whatever THAT leg will fly at and no higher.
+
+        Never below `transit_min_alt`: the candidate can be refused between
+        here and SELECT, and a vehicle that climbed to nothing has no margin.
+        """
+        if not self.transit_low or not self._map_is_complete():
+            return self.takeoff_alt
+        cand = self._best_candidate()
+        if cand is None:
+            return self.takeoff_alt
+        return max(self.transit_min_alt,
+                   self._transit_alt(cand.position.x, cand.position.y,
+                                     self.takeoff_alt, cand))
+
+    def _map_is_complete(self) -> bool:
+        """Does the map already hold every base this attempt is going for?
+
+        Landed-on ones count: they were found. What this asks is whether any
+        base is still UNKNOWN, because that is the only thing the extra cruise
+        altitude is still buying.
+        """
+        if self.pad_map is None:
+            return False
+        known = sum(1 for p in self.pad_map.pads if not p.is_takeoff_base)
+        return known >= self.target_bases
+
+    def _transit_alt(self, x: float, y: float, fallback: float,
+                     pad=None) -> float:
+        """The lowest altitude that still has a clear path to (x, y).
+
+        Returns `fallback` -- the cruise altitude -- whenever the answer is not
+        both cheap and certain:
+
+          * transit_low off, or no pose, or no octomap decoded;
+          * the map still missing a base, because then the altitude is paying
+            for search and not just for clearance;
+          * no rung clears, which means the map says the low route is blocked.
+
+        Asked per LEG and not once per mission: the arena has a 1,6 m roof and
+        bases up to 1,5 m, so the safe height between one pair of bases says
+        nothing about the next pair.
+        """
+        if not self.transit_low or self.pose is None:
+            return fallback
+        if not self._map_is_complete():
+            return fallback
+        tree = self.octree_tree or self._tree()
+        if tree is None:
+            return fallback
+        here = (self.pose.pose.position.x, self.pose.pose.position.y)
+        # The DESTINATION is the pad, so the ladder cannot start below the
+        # pad's own top: the endpoint would be inside it and every low rung
+        # would read as blocked BY THE THING WE ARE FLYING TO. MEASURED on the
+        # first flight of this feature: the ladder only ever cleared at 2,00 m
+        # against a floor of 1,00 m, and this was why.
+        floor = self.transit_min_alt
+        if pad is not None and pad.height_measured:
+            floor = max(floor, float(pad.height) + self.transit_min_alt)
+        z = floor
+        while z < fallback:
+            if octree.path_is_clear_inflated(tree, (here[0], here[1], z),
+                                             (x, y, z)):
+                if z < fallback:
+                    self.get_logger().info(
+                        f"map is complete — transiting at {z:.2f} m instead of "
+                        f"{fallback:.2f} m; nothing left to search for on the "
+                        "way.")
+                return z
+            z += self.transit_step
+        return fallback
+
     def _settled(self) -> bool:
         """Has the settle pause done its job yet? See settle_still_speed."""
         waited = self._since_entered()
@@ -2694,6 +2830,8 @@ class Phase1MissionNode(Node):
         return status
 
     def _enter(self, state: str):
+        if state == self.TAKEOFF:
+            self._climb_alt = None      # recomputed for each climb
         if state != self.state:
             self.get_logger().info(f"[{self.state} -> {state}]")
         if state == self.TAKEOFF:
