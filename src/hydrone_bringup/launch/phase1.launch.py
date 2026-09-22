@@ -309,6 +309,17 @@ def generate_launch_description():
                         "unvisited base would be flown to and landed on twice, "
                         "which is -5 — and logged as unproven."),
         DeclareLaunchArgument(
+            "takeoff_settled_frac", default_value="0.8",
+            description="Fracao de takeoff_alt que, JA SEM SUBIR, conta como "
+                        "estar voando. Uma decolagem aceita pela FCU que "
+                        "termina curta deixava a missao esperando centimetros "
+                        "que nao vinham, e cada retentativa era recusada porque "
+                        "o veiculo ja estava no ar: 1 de 6 corridas abortava "
+                        "por 10 cm. 0 desliga a aceitacao curta."),
+        DeclareLaunchArgument(
+            "takeoff_tol_m", default_value="0.15",
+            description="Quao perto de takeoff_alt conta como ter chegado, m."),
+        DeclareLaunchArgument(
             "disarm_retry_s", default_value="0.4",
             description="How often to re-ask for the disarm, s. Short on "
                         "purpose: the first disarms after touchdown are "
@@ -991,6 +1002,10 @@ def generate_launch_description():
                 LaunchConfiguration("disarm_timeout_s"), value_type=float),
             "disarm_retry_s": ParameterValue(
                 LaunchConfiguration("disarm_retry_s"), value_type=float),
+            "takeoff_settled_frac": ParameterValue(
+                LaunchConfiguration("takeoff_settled_frac"), value_type=float),
+            "takeoff_tol_m": ParameterValue(
+                LaunchConfiguration("takeoff_tol_m"), value_type=float),
             # The U's geometry. See the arguments for what 0 means.
             "u_side_x_m": ParameterValue(
                 LaunchConfiguration("u_side_x_m"), value_type=float),

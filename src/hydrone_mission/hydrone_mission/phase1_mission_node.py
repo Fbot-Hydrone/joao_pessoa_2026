@@ -598,6 +598,17 @@ class Phase1MissionNode(Node):
         # takeoff_alt above the pad, so a real landing covers far more than
         # this; a hover covers none of it.
         self.declare_parameter("min_descent_m", 0.30)
+        # How close to `takeoff_alt` counts as having arrived, m. This was a
+        # hardcoded 0.15 and it is the number a 10 cm shortfall failed against.
+        self.declare_parameter("takeoff_tol_m", 0.15)
+        # The OTHER way out of TAKEOFF: a climb that stopped below the target
+        # but above this FRACTION of it is a flying aircraft, not a failed
+        # takeoff. 0.8 of 2.5 m is 2.0 m — well clear of the 1.5 m a base can
+        # be, so the vehicle accepted here still has room to fly to the next
+        # one, and the position setpoint keeps asking for the full height.
+        # MEASURED 2026-09-18, seed 4: the climb that aborted a whole run
+        # stopped at 2.25 m of 2.5 m, which is 0.90.
+        self.declare_parameter("takeoff_settled_frac", 0.8)
         self.declare_parameter("takeoff_timeout_s", 45.0)
         self.declare_parameter("service_timeout_s", 30.0)
         self.declare_parameter("setpoint_hz", 10.0)
@@ -738,6 +749,8 @@ class Phase1MissionNode(Node):
         self.land_settle = float(p("land_settle_s"))
         self.land_still_tol = float(p("land_still_tol_m"))
         self.min_descent = float(p("min_descent_m"))
+        self.takeoff_tol = float(p("takeoff_tol_m"))
+        self.takeoff_settled_frac = float(p("takeoff_settled_frac"))
         self.takeoff_timeout = float(p("takeoff_timeout_s"))
         self.svc_timeout = float(p("service_timeout_s"))
         self.auto_start = bool(p("auto_start"))
@@ -798,6 +811,9 @@ class Phase1MissionNode(Node):
         self._pending: str | None = None    # what _call is for
         self._last_cmd_t = 0.0              # when the last command went out
         self._takeoff_tries = 0
+        # False = the next entry to TAKEOFF records the surface we are leaving.
+        # Cleared by a confirmed landing, NOT by a takeoff retry.
+        self._takeoff_anchored = False
         # Down-camera looks accepted during the current CONFIRM.
         self._confirm_hits = 0
         self._confirm_seen = 0          # belly frames that arrived at all
@@ -1442,14 +1458,41 @@ class Phase1MissionNode(Node):
         # every one of them, because the vehicle was already flying.
         climbed = (self.pose.pose.position.z - self._takeoff_start_z
                    if self.pose is not None else 0.0)
-        if self.pose is not None and climbed >= self.takeoff_alt - 0.15:
+
+        # TWO ways to be flying, because asking for the full height back is a
+        # question ArduPilot does not always answer with the full height.
+        #
+        # The first is the obvious one: we got what we asked for.
+        #
+        # The second is the one whose absence aborted runs. A takeoff that
+        # ACCEPTS, lifts the vehicle, and then finishes short leaves this state
+        # waiting for centimetres that are never coming — and every retry is
+        # refused, correctly, because the vehicle is already in the air. What
+        # matters for the rest of the flight is not the last 10 cm, it is that
+        # the vehicle LEFT THE BASE and is no longer climbing. `takeoff_alt` is
+        # a target to fly at, not a gate to pass: the setpoint below holds it
+        # anyway, so a climb that stopped at 90% is a flying aircraft that the
+        # position controller will finish raising.
+        #
+        # Stillness is what makes this safe to accept. It cannot fire on the way
+        # up — _z_is_still needs a full land_settle_s window inside
+        # land_still_tol_m, and a climbing vehicle moves far more than that —
+        # so this can only mean the FCU considers its takeoff done.
+        settled_floor = self.takeoff_alt * self.takeoff_settled_frac
+        reached = climbed >= self.takeoff_alt - self.takeoff_tol
+        settled = climbed >= settled_floor and self._z_is_still()
+        if self.pose is not None and (reached or settled):
             x = self.pose.pose.position.x
             y = self.pose.pose.position.y
             yaw = yaw_of(self.pose)
             self.get_logger().info(
                 f"airborne — climbed {climbed:.2f} m to z="
                 f"{self.pose.pose.position.z:.2f} m, "
-                f"heading {math.degrees(yaw):.0f} deg.")
+                f"heading {math.degrees(yaw):.0f} deg"
+                + ("." if reached else
+                   f" — SHORT of the {self.takeoff_alt:.2f} m asked for, but "
+                   "the climb has stopped, so we are flying. The setpoint "
+                   "below will finish raising it."))
             self._goto(x, y, self.takeoff_alt, yaw)
             if self._land_after_takeoff:
                 # The fallback's second hop: up, then straight back down.
@@ -2682,6 +2725,9 @@ class Phase1MissionNode(Node):
         """Book the landing that DISARM has just finished proving, then rest."""
         z = self.pose.pose.position.z if self.pose else 0.0
         how = "props stopped" if proven else "PROPS NOT CONFIRMED STOPPED"
+        # We are standing on something again: the next climb re-anchors here,
+        # and only here. See _enter(TAKEOFF).
+        self._takeoff_anchored = False
         if self.landing_for == self.LAND_PAD:
             self.landed_count += 1
             self.get_logger().info(
@@ -2869,8 +2915,27 @@ class Phase1MissionNode(Node):
             # WHATEVER WE ARE STANDING ON, and pose.z is absolute in the FCU's
             # local frame (zeroed at the FIRST takeoff plane), so the two are
             # only comparable on the first climb of a run. See _do_takeoff.
-            self._takeoff_start_z = (self.pose.pose.position.z
-                                     if self.pose is not None else 0.0)
+            #
+            # ONCE PER CYCLE, and that word is the whole fix. This used to run on
+            # EVERY entry to TAKEOFF, and TAKEOFF bounces back here through
+            # ARMING on each refusal — so a climb that fell short re-anchored on
+            # the altitude it had ALREADY REACHED and then asked for the full
+            # height again from there. The goalpost moved up with the vehicle.
+            # MEASURED 2026-09-18, seed 4: landed at -0.53, climbed 2.25 of the
+            # 2.35 needed, and the retry then wanted 2.35 more from 1.72 — which
+            # ArduPilot refuses, because the vehicle is already flying. Three
+            # refusals, 135 s, mission aborted. A 10 cm shortfall was fatal.
+            #
+            # The anchor is released by a confirmed landing (_settle_landing),
+            # which is the only evidence that we are standing on something
+            # again, so a retry keeps measuring from the pad it left.
+            if not self._takeoff_anchored:
+                self._takeoff_start_z = (self.pose.pose.position.z
+                                         if self.pose is not None else 0.0)
+                self._takeoff_anchored = True
+            # Stale samples from the descent must not be read as "the climb has
+            # settled" by the check in _do_takeoff.
+            self._z_hist = []
         if state == self.TRAVEL:
             # Each leg gets its own progress record. Carrying the previous
             # leg's best distance over would make a new leg look stalled from

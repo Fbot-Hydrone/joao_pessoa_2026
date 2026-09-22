@@ -1672,3 +1672,95 @@ def test_the_disarm_is_re_asked_faster_than_an_ordinary_command(node):
     vehicle sits on the base with the props turning. MEASURED at the 2.0 s
     retry_period: 6-7 s to disarm, quantised into whole retries."""
     assert node.disarm_retry < node.retry_period
+
+
+# ── A decolagem que cai 10 cm curta ──────────────────────────────────────────
+#
+# MEDIDO 2026-09-18, seed 4: o drone pousou em z=-0.53, rearmou, o ArduPilot
+# ACEITOU a decolagem, o veiculo subiu 2.25 m dos 2.35 exigidos — e a missao
+# abortou. Duas causas somadas, uma em cada teste abaixo. A corrida inteira foi
+# a zero por causa de dez centimetros.
+
+def _on_a_pad(node, pad_z):
+    """Veiculo em repouso sobre uma base a `pad_z`, pronto para decolar."""
+    node.dry_run = False
+    node.takeoff_alt = 2.5
+    node.landing_for = node.LAND_PAD
+    node.mav_state.armed = False
+    enter(node, node.DISARM)
+    set_pose(node, 0.0, 0.0, pad_z)
+    node._do_disarm()                      # confirma o pouso e solta a ancora
+    set_pose(node, 0.0, 0.0, pad_z)
+
+
+def test_a_takeoff_retry_measures_from_the_pad_not_from_where_it_got_stuck(node):
+    """A ancora que se movia com o veiculo e o que tornava 10 cm fatais."""
+    _on_a_pad(node, pad_z=-0.53)
+    enter(node, node.TAKEOFF)
+    assert node._takeoff_start_z == pytest.approx(-0.53)
+
+    # Subiu 2.25 dos 2.35 e travou. A missao volta para ARMING e tenta de novo.
+    set_pose(node, 0.0, 0.0, 1.72)
+    enter(node, node.ARMING)
+    enter(node, node.TAKEOFF)
+
+    assert node._takeoff_start_z == pytest.approx(-0.53), \
+        "a retentativa tem que medir da BASE, nao de 1.72 m"
+
+
+def _hold_altitude(node, z):
+    """Uma janela CHEIA de land_settle_s parada em `z`.
+
+    Preenche o historico que _z_is_still le, em vez de encurtar a janela: o que
+    esta sendo testado e justamente que a aceitacao exige imobilidade de
+    verdade, e um land_settle zerado tornaria o teste trivial.
+    """
+    now = node._now()
+    node._z_hist = [(now - node.land_settle * (1.0 - i / 10.0), z)
+                    for i in range(11)]
+    set_pose(node, 0.0, 0.0, z)
+
+
+def test_a_climb_that_stopped_short_is_still_a_flying_aircraft(node):
+    """Aceitar so a altura cheia deixa a missao esperando cm que nao vem."""
+    _on_a_pad(node, pad_z=-0.53)
+    enter(node, node.TAKEOFF)
+
+    # 2.25 m de 2.5 = 0.90, acima do piso de 0.8, e a altitude parou de mudar.
+    _hold_altitude(node, 1.72)
+    node._do_takeoff()
+
+    assert node.state == node.SELECT, \
+        "subiu 2.25 m e parou de subir — esta voando, nao falhou"
+
+
+def test_a_vehicle_still_on_the_pad_is_never_called_airborne(node):
+    """O mesmo teste nao pode aceitar um veiculo que nunca saiu do chao.
+
+    Mesma imobilidade perfeita do teste acima — o que separa os dois e so a
+    altura subida, que e o que o piso existe para checar.
+    """
+    _on_a_pad(node, pad_z=-0.53)
+    enter(node, node.TAKEOFF)
+
+    _hold_altitude(node, -0.53)            # parado, mas parado NO CHAO
+    node._do_takeoff()
+
+    assert node.state != node.SELECT, \
+        "zero de subida esta abaixo do piso; parado no chao nao e voar"
+
+
+def test_a_climb_still_rising_is_not_accepted_short(node):
+    """Imobilidade e o que torna a aceitacao curta segura: sem ela, nao vale."""
+    _on_a_pad(node, pad_z=-0.53)
+    enter(node, node.TAKEOFF)
+
+    # Acima do piso de 0.8, mas AINDA SUBINDO: a janela nao esta parada.
+    now = node._now()
+    node._z_hist = [(now - node.land_settle * (1.0 - i / 10.0), 1.0 + i * 0.1)
+                    for i in range(11)]
+    set_pose(node, 0.0, 0.0, 1.72)
+    node._do_takeoff()
+
+    assert node.state == node.TAKEOFF, \
+        "um veiculo ainda subindo nao terminou a decolagem"
