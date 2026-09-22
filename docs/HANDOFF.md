@@ -3,6 +3,10 @@
 Escrito em 2026-08-27, no fim de uma sessão longa. Branch `spawn-bases-seed`,
 tudo commitado e no remoto. 307 testes verdes.
 
+> Antes de commitar qualquer coisa: [`AUTORIA.md`](AUTORIA.md). Os autores deste
+> repositório são as três pessoas da equipe, e nenhuma ferramenta de IA entra
+> como co-autora — inclusive quando a própria ferramenta insiste em se assinar.
+
 ---
 
 ## Localização ≠ navegação (a pergunta do octomap)
