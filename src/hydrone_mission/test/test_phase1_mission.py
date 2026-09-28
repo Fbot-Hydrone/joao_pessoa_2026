@@ -1565,3 +1565,61 @@ def test_the_u_flies_one_setpoint_per_leg(node):
     n._begin_level()
     assert len(n._survey_path) == 6
     n.destroy_node()
+
+# ── O relogio da prova ───────────────────────────────────────────────────────
+#
+# A prova da 10 minutos AO DRONE. MEDIDO 2026-09-28: o simulador roda a ~0,35 s
+# de simulacao por segundo de parede (69,6 Hz de tick com ticks_per_sec=200),
+# entao 600 s de parede davam ao veiculo 209 s de voo. A missao vinha sendo
+# afinada contra um teto tres vezes mais apertado que o real.
+
+def test_the_budget_runs_on_the_simulator_clock_when_there_is_one(node):
+    node.mission_budget_s = 600.0
+    node.return_reserve_s = 60.0
+    node.home = (0.0, 0.0)
+    set_map(node, pad(0, 0.0, 0.0, takeoff_base=True), pad(4, 3.0, 0.0))
+    enter(node, node.SELECT)
+    node._budget_called = False
+
+    # 100 s de simulacao decorridos: longe do teto, ainda que a parede tenha
+    # visto quase 300 s passarem.
+    node._cb_clock(_clock(1000.0))
+    node._mission_t0 = None
+    node._check_budget()                       # ancora t0 em tempo de SIM
+    node._cb_clock(_clock(1100.0))
+    node._check_budget()
+
+    assert not node._budget_called, "100 s de simulacao nao estouram 600"
+    assert node.landing_for != node.LAND_FINAL
+
+
+def test_the_budget_fires_on_simulator_seconds_not_wall_seconds(node):
+    node.mission_budget_s = 600.0
+    node.return_reserve_s = 60.0
+    node.home = (0.0, 0.0)
+    set_map(node, pad(0, 0.0, 0.0, takeoff_base=True), pad(4, 3.0, 0.0))
+    enter(node, node.SELECT)
+    node._budget_called = False
+
+    node._cb_clock(_clock(1000.0))
+    node._mission_t0 = None
+    node._check_budget()
+    node._cb_clock(_clock(1545.0))             # 545 s de SIMULACAO
+    node._check_budget()
+
+    assert node._budget_called
+    assert node.landing_for == node.LAND_FINAL
+
+
+def test_without_a_simulator_clock_the_budget_is_the_wall_clock(node):
+    """O drone real. Ninguem publica /clock, e o tempo dele e o de parede."""
+    assert node._sim_clock is None
+    assert node._mission_now() == pytest.approx(node._now(), abs=0.5)
+
+
+def _clock(t):
+    from rosgraph_msgs.msg import Clock
+    m = Clock()
+    m.clock.sec = int(t)
+    m.clock.nanosec = int((t - int(t)) * 1e9)
+    return m

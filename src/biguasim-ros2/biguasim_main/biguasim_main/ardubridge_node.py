@@ -3,6 +3,8 @@
 import threading
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from rosgraph_msgs.msg import Clock
 from std_msgs.msg import Float64MultiArray
 
 from biguasim.ardubridge.bridge import ArduPilotBridge
@@ -139,12 +141,40 @@ class ArduBridgeNode(Node):
                 except Exception as e:
                     self.get_logger().warn(f"Erro publicando sensores: {e}")
 
+                # /clock — o mesmo sim_time que vai para o ArduPilot acima.
+                #
+                # Este loop avanca sim_time em dt por passo de FDM, e o
+                # simulador roda em camera lenta: MEDIDO 2026-09-28, com as tres
+                # cameras ligadas passam ~0,35 s de simulacao por segundo de
+                # parede. Um prazo contado no relogio de parede mede, portanto,
+                # uma coisa que o drone nao viveu — e o orcamento de 10 minutos
+                # da prova e exatamente um desses prazos: 600 s de parede davam
+                # ao veiculo 209 s de voo.
+                #
+                # Topico ADICIONAL de proposito. Nenhum carimbo de sensor muda
+                # (interface.system_time continua True), nenhum no passa a usar
+                # use_sim_time, nenhum timer deste stack muda de ritmo. Quem
+                # quiser tempo de simulacao le daqui. No drone real ninguem
+                # publica isto, e e assim que a missao sabe que deve usar o
+                # relogio de parede — sem parametro e sem saber onde esta.
+                self._publish_clock(sim_time)
+
         except KeyboardInterrupt:
             pass
         finally:
             bridge.close()
 
+    def _publish_clock(self, sim_time):
+        msg = Clock()
+        msg.clock.sec = int(sim_time)
+        msg.clock.nanosec = int((sim_time - int(sim_time)) * 1e9)
+        self._clock_pub.publish(msg)
+
     def _sensor_publisher_create(self):
+        self._clock_pub = self.create_publisher(
+            Clock, '/clock',
+            QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT,
+                       history=HistoryPolicy.KEEP_LAST))
         for sensor in self.interface.sensors:
             # agent_name comes from config.yaml (agents[0].agent_name), carries
             # the biguasim batch suffix -> e.g. "auv0_id0". Topics land under the

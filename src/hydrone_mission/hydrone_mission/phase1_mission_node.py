@@ -122,6 +122,7 @@ from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
 
 from geometry_msgs.msg import PoseStamped, TwistStamped
 from nav_msgs.msg import Path
+from rosgraph_msgs.msg import Clock
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
@@ -822,6 +823,22 @@ class Phase1MissionNode(Node):
         self.create_subscription(StatusText, "/mavros/statustext/recv",
                                  self._cb_statustext, sensor_qos)
 
+        # O RELOGIO DA PROVA. Nada mais neste no o usa — nem o tick, nem o
+        # stream de setpoint, nem um timeout. So o orcamento de missao.
+        #
+        # A prova da 10 minutos AO DRONE. O simulador roda em camera lenta
+        # (MEDIDO 2026-09-28: ~0,35 s de simulacao por segundo de parede, com as
+        # tres cameras ligadas), entao 600 s de parede davam ao veiculo 209 s de
+        # voo e a missao vinha sendo afinada contra um teto tres vezes mais
+        # apertado que o da prova. No drone real os dois relogios sao o mesmo.
+        #
+        # Por isso a fonte e o topico e nao um parametro: onde /clock existe
+        # estamos no simulador e o tempo do veiculo e esse; onde nao existe
+        # estamos no drone real e o tempo do veiculo e o de parede. A missao nao
+        # precisa saber em qual dos dois esta.
+        self._sim_clock = None
+        self.create_subscription(Clock, "/clock", self._cb_clock, sensor_qos)
+
         if self.dry_run:
             self.cli_mode = None
             self.cli_arm = None
@@ -988,6 +1005,17 @@ class Phase1MissionNode(Node):
                 self.get_logger().warn(f"FCU refuses: {text}")
             self._fcu_gripe = text
             self._fcu_gripe_t = self._now()
+
+    def _cb_clock(self, msg: Clock):
+        self._sim_clock = msg.clock.sec + msg.clock.nanosec * 1e-9
+
+    def _mission_now(self) -> float:
+        """Segundos como o VEICULO os vive, para o orcamento da prova.
+
+        Tempo do simulador quando ha um; relogio de parede quando nao ha, que e
+        o caso do drone real. Ver a assinatura de /clock no construtor.
+        """
+        return self._sim_clock if self._sim_clock is not None else self._now()
 
     def _fcu_reason(self) -> str:
         """The FCU's refusal, if it is recent enough to be about this attempt."""
@@ -1726,14 +1754,14 @@ class Phase1MissionNode(Node):
         if self._mission_t0 is None:
             if self.state in (self.WAIT_FCU, self.ARMING, self.REGISTER):
                 return
-            self._mission_t0 = self._now()
+            self._mission_t0 = self._mission_now()
             return
         if self.landing_for == self.LAND_FINAL:
             return
         if self.state in (self.LAND, self.DWELL):
             return
 
-        elapsed = self._now() - self._mission_t0
+        elapsed = self._mission_now() - self._mission_t0
         if elapsed < self.mission_budget_s - self.return_reserve_s:
             return
 

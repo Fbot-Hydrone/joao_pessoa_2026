@@ -3,6 +3,8 @@ from biguasim_main.interface import BiguaSimInterface
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from rosgraph_msgs.msg import Clock
 from std_msgs.msg import Float64MultiArray
 
 class BiguaSimNode(Node):
@@ -24,6 +26,28 @@ class BiguaSimNode(Node):
         print("Time Warp Period:", period)
         self.timer = self.create_timer(period, self.tick_callback)
         self.callback_in_progress = False
+
+        # /clock — o TEMPO DO SIMULADOR, publicado a cada tick.
+        #
+        # POR QUE ISSO EXISTE. O simulador roda em camera lenta: com as tres
+        # cameras ligadas o loop sustenta ~70 Hz de parede e cada tick avanca
+        # 1/ticks_per_sec de tempo simulado, entao passam ~0,35 s de simulacao
+        # por segundo de parede (MEDIDO 2026-09-28: 69,6 Hz com ticks_per_sec
+        # 200). Qualquer prazo contado no relogio de parede mede, portanto, uma
+        # coisa que o drone nao viveu — e o orcamento de 10 minutos da prova e
+        # exatamente um desses prazos. Em 600 s de parede o veiculo voava 209 s.
+        #
+        # Publicado como topico ADICIONAL de proposito: nenhum carimbo de sensor
+        # muda (self.system_time continua True na interface), nenhum no passa a
+        # usar use_sim_time, e portanto nenhum timer deste stack muda de ritmo.
+        # Quem quiser tempo de simulacao le daqui; quem nao ler continua como
+        # estava. No drone real ninguem publica isto, e e assim que a missao
+        # sabe que deve voltar ao relogio de parede.
+        self.clock_pub = self.create_publisher(
+            Clock, '/clock',
+            QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT,
+                       history=HistoryPolicy.KEEP_LAST))
+
         self.get_logger().info('Tick Started')
 
  
@@ -66,6 +90,17 @@ class BiguaSimNode(Node):
     def tick_callback(self):
         state = self.interface.tick()
         self.interface.publish_sensor_data(state)
+        self.publish_clock(state)
+
+    def publish_clock(self, state):
+        """state['t'] e o relogio do simulador, em segundos."""
+        t = state.get('t')
+        if t is None:
+            return
+        msg = Clock()
+        msg.clock.sec = int(t)
+        msg.clock.nanosec = int((t - int(t)) * 1e9)
+        self.clock_pub.publish(msg)
     
 
 def main(args=None):
