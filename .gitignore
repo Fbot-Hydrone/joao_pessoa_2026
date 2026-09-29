@@ -53,3 +53,7 @@ docker/ZED_SDK_*.run
 
 # ─── Phase 4 saved maps (lio_map_node) ───────────────────────────
 maps/
+
+CLAUDE.md
+
+graphify-out/

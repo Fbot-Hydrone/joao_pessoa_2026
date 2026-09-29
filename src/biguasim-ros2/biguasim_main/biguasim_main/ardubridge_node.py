@@ -66,6 +66,10 @@ class ArduBridgeNode(Node):
         ardu_scenario['octree_min'] = scenario_cfg.get('octree_min', 0.02)
         ardu_scenario['octree_max'] = scenario_cfg.get('octree_max', 5.0)
         ardu_scenario['show_viewport'] = scenario_cfg.get('show_viewport', True)
+        # viewport size from sim_settings.yaml, merged in by the interface
+        for key in ('window_width', 'window_height'):
+            if key in scenario_cfg:
+                ardu_scenario[key] = scenario_cfg[key]
 
         # 3. Cria o runner com o scenario correto
         self.runner = ArduBiguaSimRunner(

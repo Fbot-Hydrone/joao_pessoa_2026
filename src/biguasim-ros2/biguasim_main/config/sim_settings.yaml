@@ -1,0 +1,10 @@
+# Simulator settings that don't depend on the airframe.
+# Read by BiguaSimInterface from the same folder as config-<agent>.yaml.
+# Only applied when the node starts UE5 itself (ardubridge / biguasim launch),
+# not on the remote_ardubridge path.
+
+# UE5 window size in pixels (passed to the binary as -ResX / -ResY).
+# Has no visible effect with show_viewport: false.
+viewport:
+  width: 1280
+  height: 720

@@ -154,7 +154,31 @@ class BiguaSimInterface():
         if biguasim_scenario_yaml is None:
             raise KeyError("Could not find 'biguasim_scenario' in the YAML file.")
 
+        biguasim_scenario_yaml.update(self.load_sim_settings(Path(scenario_path).parent))
         return biguasim_scenario_yaml
+
+    @staticmethod
+    def load_sim_settings(config_dir):
+        """Scenario keys from sim_settings.yaml. Missing file -> biguasim defaults."""
+        path = Path(config_dir) / 'sim_settings.yaml'
+        if not path.exists():
+            return {}
+        with open(path, 'r') as file:
+            settings = yaml.safe_load(file) or {}
+
+        out = {}
+        viewport = settings.get('viewport')
+        if viewport is not None:
+            width, height = viewport.get('width'), viewport.get('height')
+            # a bad value here would only show up as a weird UE5 window, so fail loud
+            for key, value in (('width', width), ('height', height)):
+                if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                    raise ValueError(
+                        f"{path}: viewport.{key} must be a positive integer, got {value!r}")
+            # biguasim reads these straight from the scenario (environments.py)
+            out['window_width'] = width
+            out['window_height'] = height
+        return out
 
     def create_sensor_list(self):
         scenario = self.scenario

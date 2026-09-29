@@ -40,6 +40,7 @@ sensing, no GPS, no ground truth in the loop.
 - [[Calibration]]: calibrating the belly camera (ChArUco capture + offline solve)
 - [[Rangefinder Sim]] (pt-BR): how the nadir rangefinder is injected in sim and why it's sim-only
 - [[Config Single Source]]: audit of hardcoded sim values that duplicated `config.yaml`
+- [[Sim Settings]]: `sim_settings.yaml`, the airframe-independent sim settings (UE5 viewport resolution)
 
 ### Infra & scripts
 - [[Scripts]]: what every script in `scripts/` is for
