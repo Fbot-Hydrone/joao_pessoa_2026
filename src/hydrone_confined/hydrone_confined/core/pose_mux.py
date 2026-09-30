@@ -21,9 +21,11 @@ When odometry fails, the map pose carries on alone ('map-only'):
   - silent for odom_timeout (FAST-LIO "No Effective Points" in a 1 m room,
     or the motion-prior gate holding it back): the output becomes the map
     pose, smoothed, emitted on each map pose
-  - a jump (a step faster than max_odom_speed): absorbed into the anchor, so
-    the output doesn't move
-  - back again: re-anchored so it continues from where the output is
+  - lying (a step or a velocity faster than max_odom_speed: a diverging
+    FAST-LIO runs away at ~20 m/s): the same, and its velocity is not passed
+    on (in BiguaSim the EKF failed safe on exactly that velocity)
+  - back and sane for odom_sane_s: re-anchored so it continues from where
+    the output is
 In BiguaSim the EKF lost external nav when LIO went silent inside, failed
 safe to LAND and the drone crashed; that's what this is for.
 
@@ -69,8 +71,9 @@ class MuxParams:
     rejoin_s: float = 0.5               # healthy this long before corrections resume
     history_s: float = 3.0              # odometry kept to match map stamps
     odom_timeout: float = 0.35          # s without odometry: fly on the map pose alone
-    max_odom_speed: float = 2.0         # m/s; a faster odometry step is a jump, absorbed
+    max_odom_speed: float = 1.2         # m/s; faster odometry (step or velocity) is lying
     map_only_tau: float = 0.2           # s, smoothing of the map pose when it flies alone
+    odom_sane_s: float = 1.0            # odometry must look sane this long before it's trusted again
 
 
 class PoseMux:
@@ -88,6 +91,7 @@ class PoseMux:
         self._hist = deque()                # (stamp, pose)
         self._ok_since = None
         self._t_corr = None
+        self._sane_since = None
         self.last_offset = 0.0              # |map - output| at the last correction, m
         self.logger = logger
         self.events = []
@@ -119,19 +123,34 @@ class PoseMux:
         stamp: the pose's own time (defaults to t) for matching map poses."""
         pose = np.asarray(pose, dtype=float)
         st = t if stamp is None else stamp
+        v_ok = vel_odom is None or float(np.linalg.norm(np.asarray(vel_odom)[:2])) <= self.p.max_odom_speed
         if self.odom is not None and self.out is not None:
             gap = t - self.odom[0]
             step = float(np.hypot(*(pose[:2] - self.odom[1][:2])))
+            jump = step > self.p.max_odom_speed * max(gap, 0.05) + 0.05
+            if jump or not v_ok:
+                # odometry is lying (a diverging FAST-LIO runs away at ~20 m/s):
+                # don't follow it, don't pass its velocity on; the map flies
+                self._sane_since = None
+                self.odom = (t, pose)
+                if self.mode != 'map-only':
+                    self.say(t, f'odometry jumped {step:.2f} m in {gap:.2f} s'
+                             + ('' if v_ok else ' (velocity implausible)') + ': flying on the map pose alone')
+                    self.mode = 'map-only'
+                return
             if self.mode == 'map-only' or gap > self.p.odom_timeout:
-                # odometry is back: carry on from where the output is
+                # back (or sane again): trust it after odom_sane_s of sane steps
+                if self._sane_since is None or gap > self.p.odom_timeout:
+                    self._sane_since = t
+                self.odom = (t, pose)
+                if t - self._sane_since < self.p.odom_sane_s and self.map_ok_any(t):
+                    if self.mode != 'map-only':
+                        self.mode = 'map-only'
+                    return
                 self.T = between(self.out[1], pose)
                 self._hist.clear()
-                self.say(t, f'odometry back after {gap:.1f} s, re-anchored')
+                self.say(t, f'odometry sane again, re-anchored')
                 self.mode = 'odom'
-            elif step > self.p.max_odom_speed * max(gap, 0.05) + 0.05:
-                self.T = between(self.out[1], pose)
-                self._hist.clear()
-                self.say(t, f'odometry jumped {step:.2f} m in {gap:.2f} s: absorbed')
         self._hist.append((st, pose))
         while self._hist and st - self._hist[0][0] > self.p.history_s:
             self._hist.popleft()
@@ -139,7 +158,7 @@ class PoseMux:
         self._update_mode(t)
         out = compose(self.T, pose)
         c, s = np.cos(self.T[3]), np.sin(self.T[3])
-        if vel_odom is not None:
+        if vel_odom is not None and v_ok:
             v = np.asarray(vel_odom, dtype=float)
             self.vel = np.array([c * v[0] - s * v[1], s * v[0] + c * v[1], v[2]])
         elif self.out is not None and t > self.out[0]:
@@ -149,7 +168,12 @@ class PoseMux:
         self.out = (t, out)
 
     def odom_alive(self, t):
-        return self.odom is not None and t - self.odom[0] <= self.p.odom_timeout
+        return (self.odom is not None and t - self.odom[0] <= self.p.odom_timeout
+                and self.mode != 'map-only')
+
+    def map_ok_any(self, t):
+        """A healthy, fresh map pose to fly on alone (no rejoin wait)."""
+        return self.map is not None and self.map[2] and t - self.map[0] <= self.p.map_timeout
 
     def on_map(self, t, pose, healthy=True, stamp=None):
         """t: arrival time (freshness); stamp: when the scan behind it was taken.

@@ -429,7 +429,19 @@ class KnownMission:
     def _start_search(self, name):
         base = self._shift.get(name, 0.0)
         k = int(round(self.p.search_span / self.p.search_step))
-        self._search = [base + i * self.p.search_step for i in range(-k, k + 1)]
+        offs = [base + i * self.p.search_step for i in range(-k, k + 1)]
+        # only stand-off points in the room we're in (or outside, for the
+        # entrance): past the end of the room is through a wall
+        p = self._cross['p']
+        _, n, t = self._cross_frame()
+        room = self.graph.rooms.get(self._cross['from']) if self._cross['from'] else None
+        keep = []
+        for o in offs:
+            a = p.center + t * o - n * self.p.align_dist
+            inside = room.contains(a, margin=-0.12) if room is not None else not self.km.inside_structure(a)
+            if inside:
+                keep.append(o)
+        self._search = keep
         self._search_open = []
 
     def _ph_verify(self, pos, yaw):
@@ -475,7 +487,11 @@ class KnownMission:
         gap = base + t * off
         a = gap - n * self.p.align_dist
         z = p.opening.pass_z
-        cmd = self._hover(pos, a, z, self.p.v_crawl)
+        if np.linalg.norm(a - pos[:2]) > 0.25:
+            # to the next look point on the planner, not straight through anything
+            cmd, _, _ = self._go_to(pos, a, pos[2], self.p.v_crawl, 'out' if self._cross['from'] is None else 'in')
+        else:
+            cmd = self._hover(pos, a, z, self.p.v_crawl)
         there = np.linalg.norm(a - pos[:2]) < self.p.goal_tol and abs(pos[2] - z) < self.p.z_tol
         if there:
             if self._blocked_since is None:

@@ -27,8 +27,9 @@ SCENARIOS = {
     'nominal': (dict(), dict()),
     # LIO slides 0.15 m/s along the maze while inside (a degenerate corridor)
     'lio_degenerate': (dict(), dict(degen_rate=0.15)),
-    # a soft passage sits 0.4 m from where the rulebook render put it
-    'passage_moved': (dict(perturb={'t2_r5': {'u': (0.68, 1.42)}}), dict()),
+    # a soft passage sits 0.5 m from where the rulebook render put it (r5|r6:
+    # both rooms run the full 2 m, so the shifted door is still a door)
+    'passage_moved': (dict(perturb={'r5_r6': {'u': (0.62, 1.36)}}), dict()),
     # the drone was put down 12 deg and 15 cm off the takeoff prior
     'start_off': (dict(yaw_error=np.deg2rad(12.0), xy_error=(0.15, -0.1)), dict()),
     # LIO dies in the middle of the maze for 40 s and comes back 2.8 m off
@@ -95,7 +96,7 @@ def test_lio_degenerate_inside():
 def test_soft_passage_found_where_it_really_is():
     km, world, stack, res, err = fly('passage_moved')
     check_common(km, world, stack, res, err)
-    assert 'moved:t2_r5' in res.fallback_used
+    assert 'moved:r5_r6' in res.fallback_used
 
 
 @pytest.mark.slow

@@ -214,7 +214,7 @@ def run(world, stack, sparams=None, on_step=None, landing_world=None):
             last_phase = phase
 
         # command -> desired world velocity, through the stack's own heading estimate
-        yaw_est = getattr(stack, 'yaw_est', frame.odom[1])
+        yaw_est = stack.yaw_est if hasattr(stack, 'yaw_est') else (frame.odom[1] if frame.odom else yaw_true)
         z0 = getattr(stack, 'z0', 0.0)
         w_want = 0.0
         if cmd.kind == 'velocity':

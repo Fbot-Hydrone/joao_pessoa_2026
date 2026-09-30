@@ -227,19 +227,24 @@ def test_mux_flies_on_the_map_when_odometry_dies_and_absorbs_its_jump():
     assert mux.mode == 'map-only'
     assert abs(mux.pose()[0] - truth(t - 0.1)[0]) < 0.03
     assert max(steps) < 0.05
-    # it comes back 2.8 m off (FAST-LIO after "No Effective Points"): no jump
+    # it comes back 2.8 m off (FAST-LIO after "No Effective Points"): the map
+    # keeps flying until odometry has looked sane for a second, then no jump
     before = mux.pose().copy()
-    mux.on_odom(t, truth(t) + [2.8, 0.0, 0.0, 0.0])
-    assert np.linalg.norm(mux.pose()[:2] - before[:2]) < 0.05
+    for _ in range(12):
+        mux.on_odom(t, truth(t) + [2.8, 0.0, 0.0, 0.0])
+        mux.on_map(t, truth(t), True, stamp=t)
+        t += 0.1
+    assert mux.mode != 'map-only'
+    assert np.linalg.norm(mux.pose()[:2] - truth(t - 0.1)[:2]) < 0.05
     assert any('re-anchored' in m for _, m in mux.events)
-    # and a jump in mid-flight is absorbed too
-    t += 0.1
-    mux.on_odom(t, truth(t) + [2.8, 0.0, 0.0, 0.0])
-    before = mux.pose().copy()
-    t += 0.1
-    mux.on_odom(t, truth(t) + [4.3, 0.0, 0.0, 0.0])
-    assert np.linalg.norm(mux.pose()[:2] - before[:2]) < 0.05
-    assert any('jumped' in m for _, m in mux.events)
+    # a diverging odometry in mid-flight (2 m every step): never followed
+    for k in range(10):
+        mux.on_odom(t, truth(t) + [2.8 + 2.0 * (k + 1), 0.0, 0.0, 0.0], vel_odom=[20.0, 0.0, 0.0])
+        mux.on_map(t, truth(t), True, stamp=t)
+        assert np.linalg.norm(mux.pose()[:2] - truth(t)[:2]) < 0.05
+        assert np.linalg.norm(mux.vel[:2]) < 1.0
+        t += 0.1
+    assert mux.mode == 'map-only' and any('jumped' in m for _, m in mux.events)
 
 
 def test_mux_anchor_tracks_map_slowly_on_odometry():

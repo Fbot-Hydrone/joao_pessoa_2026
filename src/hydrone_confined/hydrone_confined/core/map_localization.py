@@ -25,9 +25,11 @@ class MapLocParams:
     beams: BeamParams = field(default_factory=BeamParams)
     sectors: int = 16
     mount: tuple = (0.0, 0.0, 0.1)      # sensor over base_link
-    max_speed: float = 1.5              # m/s; a faster odometry step isn't believed
+    max_speed: float = 0.8              # m/s; a faster odometry step isn't believed (the
+                                        # missions fly <= 0.5; a diverging LIO runs away at ~20)
     healthy_xy: float = 0.12            # m, particle spread still flyable
-    lost_s: float = 2.0                 # s lost before re-spreading the particles
+    lost_s: float = 2.0                 # s lost before re-spreading the particles locally
+    global_after: int = 2               # local re-spreads that didn't help: spread over every room
     init_xy: float = 0.25
     init_yaw: float = np.deg2rad(20.0)
     yaw_band: tuple = (-0.3, 0.3)
@@ -57,6 +59,7 @@ class MapLocalization:
         self.z = None
         self.t = None
         self._lost_since = None
+        self._respreads = 0
         self.last = None
         self.ms = []
 
@@ -105,12 +108,20 @@ class MapLocalization:
         if lost:
             self._lost_since = self._lost_since if self._lost_since is not None else t
             if t - self._lost_since > self.p.lost_s:
-                # spread out around where we think we are and try again
-                self.loc.init_gaussian(xy, yaw, 0.5, np.deg2rad(30.0))
+                self._respreads += 1
+                if self._respreads > self.p.global_after and self.map.rooms:
+                    # local tries failed: we may be rooms away, look everywhere
+                    self.loc.init_rooms(yaw=yaw, sigma_yaw=np.deg2rad(25.0))
+                    self._respreads = 0
+                    note = 'lost: particles spread over every room'
+                else:
+                    # spread out around where we think we are and try again
+                    self.loc.init_gaussian(xy, yaw, 0.5, np.deg2rad(30.0))
+                    note = 'lost: particles re-spread'
                 self._lost_since = t
-                note = 'lost: particles re-spread'
         else:
             self._lost_since = None
+            self._respreads = 0
         healthy = (not lost) and spread <= self.p.healthy_xy
         self.last = MapFix(t, np.array([xy[0], xy[1], self.z, yaw]), cov, healthy,
                            self.loc.last_consistency, bm, sec, zsrc, note)
