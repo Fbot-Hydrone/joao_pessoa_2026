@@ -44,7 +44,7 @@ iGPU, with a printed note.
 
 Flags: `--dev` bind-mounts `src/` so code edits need no image rebuild (implies
 `--no-build`), `--no-build` reuses the current image, `--phase1` /
-`--landing-sites` / `--phase4` pick what runs, `--ground-truth` flies the EKF on
+`--landing-sites` / `--phase3` / `--phase4` pick what runs, `--ground-truth` flies the EKF on
 BiguaSim ground truth (a debugging aid — a green run on it proves nothing about
 the real drone), `--no-odom-print` silences the VO-drift line. Any argument
 containing `:=` is forwarded to `ros2 launch`; anything else goes to
@@ -65,6 +65,10 @@ is gated on the `phase` launch argument (3 and 4 fly the Kopis; 1 and 2 fly the
 Holybro, whose DepthCamera is the ZED's and must never be turned). `--world`
 cannot spin it — the sensor lives in the world process — and the remote bridge
 says so on startup.
+
+`--phase3` runs the Phase 3 mission on the phase 4 aircraft; the operator's
+gestures are typed with `phase3_terminal.sh` (`docker exec` into the running
+container, or `--host`). See [[Phase 3 HRI Mission]].
 
 ### `dev_rebuild.sh`
 Rebuilds project packages in the running container, for the changes the

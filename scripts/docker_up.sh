@@ -2,7 +2,7 @@
 # Bring up the full simulation stack in Docker.
 #
 # Usage: scripts/docker_up.sh [--dev] [--no-build] [--phase1] [--landing-sites]
-#                             [--phase4] [--ground-truth] [--no-odom-print]
+#                             [--phase3] [--phase4] [--ground-truth] [--no-odom-print]
 #                             [--world HOST[:PORT]] [--world-port PORT]
 #                             [name:=value ...] [docker compose up args...]
 #   --dev             mount the project packages from the host into the
@@ -18,6 +18,11 @@
 #                     sim bring-up. See docs/Phase 1 Mission.md.
 #   --landing-sites   run the earlier landing-site mission (fly forward and land
 #                     on whatever the belly camera sees). See docs/Landing Sites.md.
+#   --phase3          Phase 3 (human-swarm interaction) on the phase 4 aircraft:
+#                     take off, 2 m ahead, turn right, then move only on the
+#                     operator's gestures. In the sim, type the gestures in a
+#                     second terminal: scripts/phase3_terminal.sh.
+#                     See phase3_sim.launch.py and docs/Phase 3 HRI Mission.md.
 #   --phase4          bring up the OTHER AIRCRAFT: the Kopis X8 flying on its
 #                     Livox Mid-360 (config-KopisX8.yaml, an engine raycast
 #                     lidar). FAST-LIO odometry is the EKF's external nav; the
@@ -57,7 +62,7 @@
 #
 #   scripts/docker_up.sh --phase1 target_bases:=2 takeoff_alt:=1.5
 #
-# --phase1, --landing-sites and --phase4 all pick the launch file, so they are
+# --phase1, --landing-sites, --phase3 and --phase4 all pick the launch file, so they are
 # mutually exclusive; the last one given wins.
 # Anything else is forwarded untouched to `docker compose up` (-d, --force-recreate, ...).
 set -e
@@ -103,6 +108,7 @@ for arg in "$@"; do
         --world-port)    want_value=world-port ;;
         --phase1)        HYDRONE_LAUNCH=phase1_sim.launch.py ;;
         --landing-sites) HYDRONE_LAUNCH=landing_sites_sim.launch.py ;;
+        --phase3)        HYDRONE_LAUNCH=phase3_sim.launch.py ;;
         --phase4)        HYDRONE_LAUNCH=phase4_sim.launch.py ;;
         --ground-truth)  ODOM_SOURCE=ground_truth ;;
         --dev)           DEV_MODE=true; DO_BUILD=false ;;
@@ -129,7 +135,8 @@ HYDRONE_LAUNCH_ARGS="${launch_args[*]}"
 # is not. Empty for phase 4, and UNSET is what docker-compose.yml falls back on
 # for a plain `docker compose up`.
 HYDRONE_ODOM_ARGS="odom_error_print:=$ODOM_ERROR_PRINT odom_source:=$ODOM_SOURCE"
-[ "$HYDRONE_LAUNCH" = phase4_sim.launch.py ] && HYDRONE_ODOM_ARGS=
+# phase3_sim flies the same aircraft, so the same goes for it.
+case "$HYDRONE_LAUNCH" in phase3_sim.launch.py|phase4_sim.launch.py) HYDRONE_ODOM_ARGS= ;; esac
 
 export HYDRONE_LAUNCH       # interpolated into `command:` in docker-compose.yml
 export HYDRONE_ODOM_ARGS    # ditto — the odom pair above, or empty for phase 4

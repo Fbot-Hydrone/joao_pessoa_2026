@@ -60,6 +60,9 @@ anywhere else, point `BS_SIM_DIR` at it).
 BS_SIM_DIR=~/Documents/bs-drone-competition ./scripts/docker_up.sh
 # Phase 1 mission (turn until a base is found, confirm it, land, come home):
 ./scripts/docker_up.sh --phase1             # docs/Phase 1 Mission.md
+# Phase 3 (fly on the operator's gestures) — gestures typed in a 2nd terminal:
+./scripts/docker_up.sh --phase3             # docs/Phase 3 HRI Mission.md
+./scripts/phase3_terminal.sh
 # the earlier landing-site mission (fly forward, land on what you see):
 ./scripts/docker_up.sh --landing-sites      # docs/Landing Sites.md
 # any name:=value argument is forwarded to the launch:

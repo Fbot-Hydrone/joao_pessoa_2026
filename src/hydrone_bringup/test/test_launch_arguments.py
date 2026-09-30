@@ -73,6 +73,8 @@ WRAPPER_PAIRS = [
     # tightly than "nothing" would.
     ("phase1_dry.launch.py", "phase1.launch.py"),
     ("phase1_dry.launch.py", "sources_real.launch.py"),
+    ("phase3_sim.launch.py", "phase3.launch.py"),
+    ("phase3_sim.launch.py", "phase4_sim.launch.py"),
 ]
 
 # {wrapper: {inner: allowed forwards}}. Every entry needs the argument written
@@ -90,6 +92,10 @@ FORWARDING_EXEMPT = {
         {"field_mode", "dry_run"},
     ("phase1_dry.launch.py", "sources_real.launch.py"):
         {"zed_point_cloud"},
+    # Not an autonomy layer: phase 4's sources, told they are flying phase 3
+    # with no maze mission and their own map.
+    ("phase3_sim.launch.py", "phase4_sim.launch.py"):
+        {"phase", "mission", "map_name"},
 }
 
 

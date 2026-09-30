@@ -23,6 +23,9 @@ sensing, no GPS, no ground truth in the loop.
 - [[ZED Feature Map]]: accumulating the ZED's point cloud into a world map + coverage grid
 - [[ZED Visual Odometry]]: the real VO estimate vs. ground truth, and how it drifts
 
+### Phase 3
+- [[Phase 3 HRI Mission]]: approach the operator, then fly only on gestures; the gesture contract and the terminal stand-in for the camera
+
 ### Phase 4
 - [[Phase 4 Pipeline]]: overview and layered roadmap, data-flow table
 - [[Livox Mid-360 Sim]]: TODO — sim replica of the Mid-360

@@ -25,6 +25,8 @@ setup(
             'pad_mission_node = hydrone_mission.pad_mission_node:main',
             'phase1_mission_node = hydrone_mission.phase1_mission_node:main',
             'phase4_maze_node = hydrone_mission.phase4_maze_node:main',
+            'phase3_hri_node = hydrone_mission.phase3_hri_node:main',
+            'gesture_terminal = hydrone_mission.gesture_terminal:main',
         ],
     },
 )
