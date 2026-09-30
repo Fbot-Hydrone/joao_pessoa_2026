@@ -14,6 +14,13 @@ PHASE 4 — the Kopis X8 flying on its Livox Mid-360, in simulation:
   +  lio_map_node        -> persistent map (/hydrone/map/*)
   +  odom_error_node     -> LIO drift vs ground truth, CSV (measurement only)
 
+mission:=maze   the generic explorer (phase4_maze_node) on LIO
+mission:=known  the known-map stack: beam_localizer + pose_mux + phase4_known_node
+                (+ viz_udp for tools/maze_viewer). The EKF is then fed from
+                /hydrone/nav/odom (LIO outside, map pose inside), not raw LIO.
+                Same nodes as phase4_simple.launch.py, which runs them on the
+                kinematic sim instead.
+
 The EKF flies on the LIO. Ground truth reaches nothing but odom_error_node.
 Docs: docs/Phase 4 Pipeline.md, docs/LIO Odometry.md, docs/Livox Mid-360 Sim.md.
 
@@ -192,6 +199,16 @@ def _launch_setup(context, *args, **kwargs):
         ],
     )
 
+    mission = LaunchConfiguration('mission').perform(context)
+    map_yaml = LaunchConfiguration('map_yaml').perform(context) or os.path.join(
+        get_package_share_directory('hydrone_mission'), 'config', 'phase4', 'known_maps', 'rulebook.yaml')
+    if mission == 'known':
+        nav_in = '/hydrone/nav/odom'
+    elif LaunchConfiguration('ext_nav').perform(context) == 'lio':
+        nav_in = '/hydrone/lio/odom'
+    else:
+        nav_in = f'{prefix}/DynamicsSensor/Odom'
+
     lio_nav = Node(
         package='hydrone_bringup', executable='vision_odom_bridge', name='lio_nav',
         output='screen',
@@ -199,9 +216,7 @@ def _launch_setup(context, *args, **kwargs):
             os.path.join(bringup_pkg, 'config', 'timeouts.yaml'),
             # ground_truth is a DEBUGGING AID for tuning the airframe apart
             # from the estimator; a flight on it proves nothing about the LIO
-            {'in_odom': '/hydrone/lio/odom' if LaunchConfiguration('ext_nav').perform(context) == 'lio'
-             else f'{prefix}/DynamicsSensor/Odom',
-             'out_speed': '/mavros/vision_speed/speed_twist'},
+            {'in_odom': nav_in, 'out_speed': '/mavros/vision_speed/speed_twist'},
         ],
     )
 
@@ -237,8 +252,27 @@ def _launch_setup(context, *args, **kwargs):
         }],
     )
 
+    known = []
+    if mission == 'known':
+        known = [
+            Node(package='hydrone_confined', executable='beam_localizer_node', name='beam_localizer',
+                 output='screen',
+                 parameters=[{'map_yaml': map_yaml, 'cloud': '/livox/lidar_pc', 'cloud_type': 'pc2',
+                              'mount_xyz': mount_xyz}]),
+            Node(package='hydrone_confined', executable='pose_mux_node', name='pose_mux', output='screen',
+                 parameters=[{'map_yaml': map_yaml, 'odom': '/hydrone/lio/odom'}]),
+            Node(package='hydrone_mission', executable='phase4_known_node', output='screen',
+                 parameters=[{'map_yaml': map_yaml, 'lidar_mount': mount_xyz,
+                              'auto_start': LaunchConfiguration('auto_start').perform(context).lower() == 'true'}]),
+            Node(package='hydrone_confined', executable='viz_udp_node', name='viz_udp', output='screen',
+                 parameters=[{'map_yaml': map_yaml, 'mount_xyz': mount_xyz,
+                              'host': LaunchConfiguration('viz_host').perform(context),
+                              'truth': LaunchConfiguration('viz_truth').perform(context) or '/none',
+                              'truth_offset': [float(v) for v in
+                                               LaunchConfiguration('viz_truth_offset').perform(context).split(',')]}]),
+        ]
     return [ardubridge, sitl_dds, livox, fast_lio, adapter, prior, mavros, lio_nav,
-            lio_map, odom_error, maze]
+            lio_map, odom_error, maze] + known
 
 
 def generate_launch_description():
@@ -266,8 +300,20 @@ def generate_launch_description():
             description='Start from the saved map of the same name.'),
         DeclareLaunchArgument(
             'mission', default_value='none',
-            description="'maze' flies phase4_maze_node through the structure "
-                        'right of spawn; none just brings the vehicle up.'),
+            description="'maze' flies the generic explorer, 'known' the known-map stack "
+                        '(rulebook maze by its walls); none just brings the vehicle up.'),
+        DeclareLaunchArgument(
+            'map_yaml', default_value='',
+            description='known map for mission:=known (default: hydrone_mission rulebook.yaml).'),
+        DeclareLaunchArgument(
+            'viz_host', default_value='127.0.0.1',
+            description='where tools/maze_viewer listens (mission:=known).'),
+        DeclareLaunchArgument(
+            'viz_truth', default_value='',
+            description='ground truth for the viewer only, e.g. the DynamicsSensor/Odom topic.'),
+        DeclareLaunchArgument(
+            'viz_truth_offset', default_value='0,0,0,0',
+            description='map <- truth frame as x,y,z,yaw_deg.'),
         DeclareLaunchArgument(
             'flight_z', default_value='0.5',
             description='odom height the maze mission plans at (window centre).'),

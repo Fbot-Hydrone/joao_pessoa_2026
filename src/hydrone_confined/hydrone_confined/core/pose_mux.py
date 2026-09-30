@@ -46,7 +46,8 @@ class MuxParams:
     anchor_xy_rate: float = 0.25        # m/s the anchor may move while tracking the map
     anchor_yaw_rate: float = np.deg2rad(10.0)
     anchor_z: bool = False              # also pull odom z to the map's
-    map_timeout: float = 0.6            # s without a map pose -> back to odom
+    map_timeout: float = 1.0            # s without a map pose -> back to odom
+    rejoin_s: float = 0.5               # map pose fresh and healthy this long before (re)joining it
 
 
 class PoseMux:
@@ -63,6 +64,7 @@ class PoseMux:
         self.vel = np.zeros(3)
         self._offset = np.zeros(4)
         self._t_switch = None
+        self._ok_since = None
         self.logger = logger
         self.events = []                    # (t, message)
 
@@ -101,6 +103,10 @@ class PoseMux:
 
     def on_map(self, t, pose, healthy=True):
         self.map = (t, np.asarray(pose, dtype=float), bool(healthy))
+        if not healthy:
+            self._ok_since = None
+        elif self._ok_since is None:
+            self._ok_since = t
         self._switch(t)
         if self.mode != 'map':
             return
@@ -131,8 +137,11 @@ class PoseMux:
                 last = self.out[1] if self.out is not None else self.map[1]
                 self.T = between(last, self.odom[1])
             self.mode = 'odom'
+            if why != 'requested':
+                self._ok_since = None
             self.say(t, f'pose source -> odom ({why})')
-        elif self.mode == 'odom' and self.want == 'map' and self.map_ok(t):
+        elif self.mode == 'odom' and self.want == 'map' and self.map_ok(t) \
+                and self._ok_since is not None and t - self._ok_since >= self.p.rejoin_s:
             last = self.out[1] if self.out is not None else self.map[1]
             self._offset = last - self.map[1]
             self._offset[3] = wrap(self._offset[3])

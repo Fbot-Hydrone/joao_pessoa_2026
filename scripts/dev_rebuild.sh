@@ -23,7 +23,7 @@ cd "$(dirname "$0")/.."
 
 ALL_PKGS=(hydrone_msgs biguasim_interfaces biguasim_main hydrone_bringup
           hydrone_vision hydrone_controller hydrone_nav hydrone_mission
-          hydrone_lio)
+          hydrone_lio hydrone_confined)
 
 RESTART=false
 pkgs=()

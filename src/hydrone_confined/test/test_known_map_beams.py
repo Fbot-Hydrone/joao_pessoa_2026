@@ -94,10 +94,18 @@ def test_levelling_undoes_tilt():
 
 def test_vertical_clearance():
     rng = np.random.default_rng(1)
-    xy = rng.uniform(-0.5, 0.5, (500, 2))
-    up = np.column_stack([xy, np.full(500, 0.9)])
-    u, d = vertical_clearance(up)
-    assert u == pytest.approx(0.9) and d is None
+    # a ceiling 0.9 m up, seen where a Mid-360 looks (up to 52 deg)
+    h = rng.uniform(0.7, 1.4, 600)
+    a = rng.uniform(-np.pi, np.pi, 600)
+    ceil = np.column_stack([h * np.cos(a), h * np.sin(a), np.full(600, 0.9)])
+    # walls 0.5 m away, below it
+    wz = rng.uniform(0.0, 0.5 * np.tan(np.deg2rad(52)), 600)
+    walls = np.column_stack([0.5 * np.cos(a), 0.5 * np.sin(a), wz])
+    u, d = vertical_clearance(np.vstack([ceil, walls]))
+    assert u == pytest.approx(0.9, abs=0.01) and d is None
+    # low in a small room: the top rays end on the walls, there's no ceiling in view
+    u, _ = vertical_clearance(walls)
+    assert u is None
 
 
 def test_wall_yaw_finds_the_axis():
@@ -156,13 +164,20 @@ def test_mux_switches_without_jumps():
     # odom says 1 m forward: in nav that's +y
     mux.on_odom(1.0, [1.0, 0.0, 0.0, 0.0])
     assert np.allclose(mux.pose()[:2], [1.0, 1.5])
-    # the map disagrees by 0.2 m; switching keeps the output where it was
+    # the map disagrees by 0.2 m; it has to stay healthy 0.5 s before it's
+    # joined, and switching keeps the output where it was
     mux.request('map')
     mux.on_map(1.05, [1.2, 1.5, 0.0, np.pi / 2])
+    assert mux.mode == 'odom'
+    mux.on_map(1.3, [1.2, 1.5, 0.0, np.pi / 2], healthy=False)
+    mux.on_map(1.4, [1.2, 1.5, 0.0, np.pi / 2])
+    mux.on_map(1.8, [1.2, 1.5, 0.0, np.pi / 2])
+    assert mux.mode == 'odom'                   # the unhealthy one restarted the streak
+    mux.on_map(1.95, [1.2, 1.5, 0.0, np.pi / 2])
     assert mux.mode == 'map'
     assert np.allclose(mux.pose()[:2], [1.0, 1.5], atol=1e-6)
     for k in range(1, 60):
-        mux.on_map(1.05 + 0.1 * k, [1.2, 1.5, 0.0, np.pi / 2])
+        mux.on_map(1.95 + 0.1 * k, [1.2, 1.5, 0.0, np.pi / 2])
     assert np.allclose(mux.pose()[:2], [1.2, 1.5], atol=0.01)
     # map goes stale -> back on odom, continuing from the output
     mux.on_odom(9.0, [1.0, 0.0, 0.0, 0.0])

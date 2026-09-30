@@ -22,6 +22,10 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'beam_localizer_node = hydrone_confined.nodes.beam_localizer_node:main',
+            'pose_mux_node = hydrone_confined.nodes.pose_mux_node:main',
+            'kinematic_sim_node = hydrone_confined.nodes.kinematic_sim_node:main',
+            'viz_udp_node = hydrone_confined.nodes.viz_udp_node:main',
         ],
     },
 )
