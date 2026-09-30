@@ -1,0 +1,3 @@
+[submodule "tools/maze_viewer/external/opengl-quickstart"]
+	url = git@github.com:GatoMonocromatico/opengl-quickstart.git
+	path = tools/maze_viewer/external/opengl-quickstart
