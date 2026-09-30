@@ -150,9 +150,28 @@ def test_publish_tf_survives_as_a_real_bool(mode):
 
 
 def test_the_launch_file_still_builds_in_both_modes():
-    """Guards against the helper drifting away from its caller."""
+    """Guards against the helper drifting away from its caller.
+
+    The description is EXECUTED, not just built: sources_sim builds its nodes
+    inside an OpaqueFunction (so `agent_name` is resolved before the biguasim
+    config is read), and generate_launch_description() therefore returns
+    without touching odom_wiring at all. Asserting it is not None would pass
+    against a launch file that cannot start a single node.
+    """
+    from launch.actions import DeclareLaunchArgument, OpaqueFunction
+
     module = _load_sources_sim()
     for mode in ("ground_truth", "vo"):
         ctx = LaunchContext()
+        description = module.generate_launch_description()
+        for entity in description.entities:
+            if isinstance(entity, DeclareLaunchArgument):
+                entity.visit(ctx)
+        # After the declarations, so it beats agent_name's default the same way
+        # a command-line value does.
         ctx.launch_configurations["odom_source"] = mode
-        assert module.generate_launch_description() is not None
+        nodes = []
+        for entity in description.entities:
+            if isinstance(entity, OpaqueFunction):
+                nodes += entity.visit(ctx) or []
+        assert nodes, f"{mode}: the launch file produced no entities"

@@ -15,7 +15,7 @@ Nodes (all sim-only or agnostic plumbing):
   - zed_mimic_node    : /biguasim/* -> /zed/zed_node/* (stand-in for zed_wrapper,      [SIM-ONLY]
                         including the ZED's own point cloud)
   - down_cam_mimic_node : /biguasim/*/DownCamera -> /down_cam/* (stand-in for the     [SIM-ONLY]
-                          belly camera's driver). Only launched if config.yaml
+                          belly camera's driver). Only launched if config-<agent>.yaml
                           declares the DownCamera sensor.
   - visual_odometry_node : ZED RGB-D -> visual odometry (stands in for the ZED       [SIM-ONLY]
                            SDK's native VIO, which zed_wrapper provides on real).
@@ -30,6 +30,9 @@ Nodes (all sim-only or agnostic plumbing):
                         affect flight. Disable with odom_error:=false.
 
 Launch arguments:
+  agent_name:=<name>            which airframe, i.e. which biguasim scenario
+                                file (config-<name>.yaml) everything sim-side
+                                is read from            (default HolybroX500)
   odom_source:=vo|ground_truth  what the EKF navigates on             (default vo)
                                 vo: the real visual odometry flies the vehicle,
                                   as the ZED SDK's VIO will on the drone. KNOWN
@@ -76,11 +79,13 @@ Notes:
 """
 
 import os
+from glob import glob
 
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import (DeclareLaunchArgument, IncludeLaunchDescription,
+                            OpaqueFunction)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
@@ -91,8 +96,9 @@ from launch_ros.parameter_descriptions import ParameterValue
 # Must match the namespace set in biguasim_main/launch/ardubridge.launch.py.
 BIGUASIM_NS = 'biguasim'
 
-# `sensor_name` of the belly camera in biguasim's config.yaml. It is what lets a
-# second RGBCamera coexist with the ZED's, and it becomes the topic name.
+# `sensor_name` of the belly camera in biguasim's config-<agent>.yaml. It is
+# what lets a second RGBCamera coexist with the ZED's, and it becomes the topic
+# name.
 DOWN_CAM_SENSOR = 'DownCamera'
 
 
@@ -113,8 +119,29 @@ def _find_biguasim_scenario(node):
     return None
 
 
+def _biguasim_config_path(agent_name):
+    """biguasim's scenario file for `agent_name`, or a readable error.
+
+    One file per airframe (config-HolybroX500.yaml, config-KopisX8.yaml, ...):
+    the sensor suite differs between them, and everything this launch file
+    derives is downstream of that. A typo used to surface as a bare
+    "[Errno 2] No such file or directory" from the middle of a launch.
+    """
+    config_dir = os.path.join(
+        get_package_share_directory('biguasim_main'), 'config')
+    path = os.path.join(config_dir, f'config-{agent_name}.yaml')
+    if not os.path.exists(path):
+        available = sorted(
+            os.path.basename(p)[len('config-'):-len('.yaml')]
+            for p in glob(os.path.join(config_dir, 'config-*.yaml')))
+        raise RuntimeError(
+            f"no biguasim config for agent_name:={agent_name} ({path}). "
+            f"Available: {', '.join(available) or '(none installed)'}")
+    return path
+
+
 def _biguasim_agent(config_path):
-    """Return the first agent's config block from biguasim's config.yaml.
+    """Return the first agent's config block from biguasim's config-<agent>.yaml.
 
     Single source of truth for everything sim-side below: agent name (-> topic
     prefix) and the sensor blocks (-> camera mount offset, rangefinder range).
@@ -128,8 +155,8 @@ def _biguasim_agent(config_path):
 def _biguasim_topic_prefix(agent):
     """Build the ROS topic prefix that ardubridge_node publishes sensors under.
 
-    The agent name comes from config.yaml. BiguaSim's environment appends a
-    batch suffix to it -> '<name>-id0', which the ROS bridge renders as
+    The agent name comes from config-<agent>.yaml. BiguaSim's environment
+    appends a batch suffix to it -> '<name>-id0', which the ROS bridge renders as
     '<name>_id0'.
     """
     return f"/{BIGUASIM_NS}/{agent['agent_name']}_id0"
@@ -152,7 +179,8 @@ def _sensor(agent, sensor_type, sensor_name=None):
 
 
 def _camera_offset_xyz(agent, default=(0.14, 0.0, -0.08)):
-    """ZED mounting position on the body, from the config.yaml sensor block.
+    """ZED mounting position on the body, from the config-<agent>.yaml sensor
+    block.
 
     BiguaSim's body frame is GLU (x forward, y left, z up) — identical to ROS
     base_link (FLU) — so the sensor `location` carries over 1:1 with no sign
@@ -179,7 +207,7 @@ def _down_cam_offset_xyz(agent, default=(0.0, 0.0, -0.12)):
 
 
 def _down_cam_rpy_deg(agent, default=(0.0, 90.0, 0.0)):
-    """Down camera mount rotation, straight out of config.yaml.
+    """Down camera mount rotation, straight out of config-<agent>.yaml.
 
     Single source of truth: the SAME numbers aim the simulated camera and build
     the ROS mount TF, so the two cannot drift apart. See the sign convention in
@@ -222,13 +250,22 @@ def odom_wiring(odom_source):
 
 
 def _rangefinder_max_range(agent, default=40.0):
-    """Rangefinder max distance in meters, from the config.yaml sensor block."""
+    """Rangefinder max distance in m, from the config-<agent>.yaml sensor block."""
     rf = _sensor(agent, 'RangeFinderSensor') or {}
     value = rf.get('configuration', {}).get('LaserMaxDistance', default)
     return float(value)
 
 
-def generate_launch_description():
+def _launch_setup(context, *args, **kwargs):
+    """The whole sources layer, built with `agent_name` already resolved.
+
+    An OpaqueFunction rather than a plain generate_launch_description() because
+    the biguasim config is READ HERE, not passed on: the agent name, the camera
+    mount offsets, whether there is a belly camera at all and the rangefinder's
+    ceiling all come out of it and become plain Python values below. A
+    LaunchConfiguration is only a promise to produce a string later, so
+    `config-<agent>.yaml` cannot be opened without a context to resolve it in.
+    """
     sitl_pkg = get_package_share_directory('ardupilot_sitl')
     bringup_pkg = get_package_share_directory('hydrone_bringup')
 
@@ -237,12 +274,46 @@ def generate_launch_description():
     dds_udp_parm = os.path.join(
         sitl_pkg, 'config', 'default_params', 'dds_udp.parm')
 
-    ardubridge = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(get_package_share_directory('biguasim_main'),
-                         'launch', 'ardubridge.launch.py')
+    # Local simulator, or one running somewhere else?
+    #
+    # Keyed off the environment rather than a launch argument on purpose. The
+    # argument would have to be re-declared and forwarded by every wrapper
+    # (hydrone_sim, phase1_sim, landing_sites_sim), and a re-declared argument
+    # carries the WRAPPER's default -- the exact trap documented at the top of
+    # phase1_sim.launch.py, where a tuned takeoff altitude was silently
+    # overridden. One env var read in one place has no such failure mode, and it
+    # reaches every entry point without any of them knowing about it.
+    #
+    # scripts/docker_up.sh --world <host[:port]> sets these.
+    world_address = os.environ.get('WORLD_ADDRESS', '').strip()
+    world_port = os.environ.get('WORLD_PORT', '8770').strip() or '8770'
+
+    if world_address:
+        # The world owns the engine; this container owns only SITL and the
+        # autonomy stack. Note the world PACKAGE still has to be installed here
+        # -- biguasim.server.protocol.build_id digests the local copy of the
+        # world config, and a client without it cannot match the world's digest.
+        ardubridge = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(get_package_share_directory('biguasim_main'),
+                             'launch', 'remote_ardubridge.launch.py')
+            ),
+            launch_arguments={
+                'world_address': world_address,
+                'world_port': world_port,
+                'agent_name': LaunchConfiguration("agent_name"),
+            }.items(),
         )
-    )
+    else:
+        ardubridge = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(get_package_share_directory('biguasim_main'),
+                             'launch', 'ardubridge.launch.py')
+            ),
+            launch_arguments={
+                'agent_name': LaunchConfiguration("agent_name"),
+            }.items(),
+        )
 
     sitl_dds = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -274,10 +345,10 @@ def generate_launch_description():
     # point_cloud/cloud_registered — the camera's product, produced where the
     # camera is. On the real drone, launch zed_wrapper instead.
     # Input topics AND the camera mount offset are derived from biguasim's
-    # config.yaml, so editing the agent name or the sensor position there
+    # config-<agent>.yaml, so editing the agent name or the sensor position there
     # propagates to the bridge and to every node below — one source of truth.
-    biguasim_config = os.path.join(
-        get_package_share_directory('biguasim_main'), 'config', 'config.yaml')
+    biguasim_config = _biguasim_config_path(
+        LaunchConfiguration('agent_name').perform(context))
     agent = _biguasim_agent(biguasim_config)
     prefix = _biguasim_topic_prefix(agent)
 
@@ -330,15 +401,16 @@ def generate_launch_description():
             'out_odom':    mimic_odom,
             'publish_tf':  ParameterValue(mimic_tf, value_type=bool),
             # base_link -> zed_camera_link static TF, taken from the camera's
-            # `location` in config.yaml (same GLU/FLU convention, no conversion).
+            # `location` in config-<agent>.yaml (same GLU/FLU convention,
+            # no conversion).
             'camera_offset_xyz': _camera_offset_xyz(agent),
         }],
     )
 
     # Down-facing belly camera — SIM-ONLY shim, same role as zed_mimic. Only
-    # launched when config.yaml actually declares the sensor, so commenting the
-    # camera out there (to buy back render time) does not leave a node spinning
-    # on a topic nobody publishes.
+    # launched when config-<agent>.yaml actually declares the sensor, so
+    # commenting the camera out there (to buy back render time) does not leave
+    # a node spinning on a topic nobody publishes.
     # On the REAL drone: a USB/CSI camera driver publishes /down_cam/image_raw +
     # /down_cam/camera_info, and a static_transform_publisher supplies
     # base_link -> down_cam_link -> down_cam_optical_frame.
@@ -361,19 +433,12 @@ def generate_launch_description():
     # stereo-VO core. SIM-ONLY: on the real drone zed_wrapper (ZED SDK) publishes
     # /zed/zed_node/odom natively, so this node is not launched there.
     visual_odometry = Node(
-        package="hydrone_localization",
+        package='hydrone_bringup',
         executable='visual_odometry_node',
         output='screen',
         parameters=[{
             'out_odom': vo_odom,
             'publish_tf': ParameterValue(vo_tf, value_type=bool),
-            # Empty turns stereo OFF and the node falls back to the depth
-            # IMAGE, which is also how the real drone runs (zed_wrapper
-            # computes depth on the camera). It is the A/B switch between
-            # "triangulate it ourselves" and "read a depth image".
-            'in_right': PythonExpression(
-                ["'/zed/zed_node/right/image_rect_color' if '",
-                 LaunchConfiguration('vo_stereo'), "' == 'true' else ''"]),
         }],
     )
 
@@ -414,7 +479,7 @@ def generate_launch_description():
     # /mavros/vision_pose/pose (VISION_POSITION_ESTIMATE). Consumes the agnostic
     # /zed odom, produces the agnostic /mavros pose — no sim assumption.
     vision_odom = Node(
-        package="hydrone_localization",
+        package="hydrone_bringup",
         executable="vision_odom_bridge",
         output="screen",
         parameters=[os.path.join(bringup_pkg, "config", "timeouts.yaml")],
@@ -440,7 +505,8 @@ def generate_launch_description():
             # /mavros/distance_sensor/rangefinder). Align the bridge output to it.
             'out_range': '/mavros/rangefinder',
             # Valid-range ceiling = the sim sensor's LaserMaxDistance, so raising
-            # it in config.yaml doesn't silently keep the bridge clipping returns.
+            # it in config-<agent>.yaml doesn't silently keep the bridge
+            # clipping returns.
             'max_range': _rangefinder_max_range(agent),
         }],
     )
@@ -469,7 +535,35 @@ def generate_launch_description():
         }],
     )
 
+    return [
+        ardubridge,
+        sitl_dds,
+        zed_mimic,
+        *down_cam_nodes,
+        visual_odometry,
+        mavros,
+        vision_odom,
+        rangefinder,
+        odom_error,
+    ]
+
+
+def generate_launch_description():
     return LaunchDescription([
+        # Declared HERE and not inside _launch_setup: an argument has to be
+        # declared before the OpaqueFunction runs, or its default does not
+        # exist yet when the function resolves it.
+        DeclareLaunchArgument(
+            'agent_name', default_value='HolybroX500',
+            description="Which airframe to fly, i.e. which "
+                        "biguasim_main/config/config-<agent_name>.yaml the "
+                        "scenario is read from. It decides the agent's "
+                        "sensors, so it also decides this file's topic "
+                        "prefix, camera mount offsets, whether a belly camera "
+                        "is launched at all, and the rangefinder ceiling. "
+                        "Wrappers (phase1_sim, ...) forward their own; this "
+                        "default only applies when sources_sim is launched "
+                        "directly."),
         DeclareLaunchArgument(
             'odom_source', default_value='vo',
             description="Which odometry the EKF navigates on. 'vo' (default) "
@@ -485,30 +579,7 @@ def generate_launch_description():
             'odom_error_print', default_value='false',
             description='Echo the VO drift to stdout at 1 Hz as well as the CSV.'),
         DeclareLaunchArgument(
-            'vo_stereo', default_value='false',
-            description='Triangulate depth from the stereo pair for odometry '
-                        '(what the ZED does). false reads the depth image '
-                        'instead. MEASURED 2026-08-27, same 41.4 m flight, '
-                        'IMU off in both: stereo gave 0.13x scale and 4.83 m '
-                        'median error, the depth image 1.14x and 1.80 m — '
-                        'hence the default. The sim pair is fx=320 B=0.12, so '
-                        'disparity resolves to ~0.23 m at 3 m; the real ZED is '
-                        'fx~700. Mapping and odom_GT are unaffected either way.'),
-        DeclareLaunchArgument(
-            'odom_error_dir', default_value='/ws/logs',
-            description='Directory for the drift CSV. Defaults to /ws/logs, '
-                        'which docker-compose bind-mounts to ./logs on the '
-                        'host — the CSV is the only record of VO drift there '
-                        'is, and anywhere else in the container it dies with '
-                        'the container. Empty = the node picks the repo root, '
-                        'which it does NOT find from an installed path.'),
-        ardubridge,
-        sitl_dds,
-        zed_mimic,
-        *down_cam_nodes,
-        visual_odometry,
-        mavros,
-        vision_odom,
-        rangefinder,
-        odom_error,
+            'odom_error_dir', default_value='',
+            description='Directory for the drift CSV. Empty = repo root.'),
+        OpaqueFunction(function=_launch_setup),
     ])

@@ -260,7 +260,7 @@ def main():
     ap.add_argument("--height", type=int, default=480)
     ap.add_argument("--dict", default="4x4_250")
     ap.add_argument("--cols", type=int, default=9,
-                    help="board squares across (see docs/CALIBRATION.md)")
+                    help="board squares across (see docs/Calibration.md)")
     ap.add_argument("--rows", type=int, default=11)
     ap.add_argument("--nominal-hfov", type=float, default=60.0,
                     help="rough horizontal FOV, used ONLY to judge board tilt")

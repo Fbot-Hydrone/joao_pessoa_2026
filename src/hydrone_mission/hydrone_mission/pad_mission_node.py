@@ -437,7 +437,7 @@ class PadMissionNode(Node):
             if self._takeoff_tries > 3:
                 self.get_logger().error(
                     "takeoff refused three times — check EKF origin/home "
-                    "(see docs/DEVELOP-PIPELINES.md: no origin -> no home -> "
+                    "(see docs/Develop Pipelines.md: no origin -> no home -> "
                     "NAV_TAKEOFF fails). Aborting.")
                 self._enter(self.ABORTED)
                 return

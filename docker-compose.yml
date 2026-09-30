@@ -9,32 +9,17 @@ services:
       - DISPLAY=${DISPLAY}
       # Private DDS domain so other ROS 2 apps on this host (default domain 0)
       # can't reach the micro-ROS agent. Match this on the host via env.sh.
-      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-63}
-      # OFF, and do not turn it on while ROS_DOMAIN_ID is set above: the two
-      # together isolate this container's DDS from the host, so rviz2 on the
-      # host lists no topics at all while the stack inside is publishing ~176.
-      # It was briefly enabled here (the LAN-discovery stall it fixes is real)
-      # and that is exactly what broke rviz. Pick one.
-      #- ROS_LOCALHOST_ONLY=1
-      # Fast DDS without shared memory. With SHM, any process that joins after
-      # the stack has been up receives NOTHING — rviz2 included, which is what
-      # made the octomap "flicker" and topics look empty. See the XML for the
-      # measurements. Nodes launched together are unaffected either way, which
-      # is why the drone flies while nothing outside can see it.
-      - FASTRTPS_DEFAULT_PROFILES_FILE=/ws/docker/fastdds_udp_only.xml
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-42}
+      # - ROS_LOCALHOST_ONLY=1
       # Asset backend used by `biguasim.install(...)`; set on the host if used.
       - BS_WORLDS_URL=${BS_WORLDS_URL:-}
-      # Overrides the base layout seed in biguasim's config.yaml, so a SEED
-      # SWEEP needs no rebuild between runs. Empty = whatever config.yaml says.
-      # scripts/seed_sweep.sh is what sets it.
-      - BASES_SEED=${BASES_SEED:-}
+      # Empty (the default) runs the simulator inside this container, as ever.
+      # Set, it runs SITL and the autonomy stack against a world process
+      # elsewhere -- sources_sim.launch.py reads these and swaps ardubridge_node
+      # for remote_ardubridge_node. scripts/docker_up.sh --world sets them.
+      - WORLD_ADDRESS=${WORLD_ADDRESS:-}
+      - WORLD_PORT=${WORLD_PORT:-8770}
     volumes:
-      # Where runs write their logs. odom_error_node's drift CSV lands here,
-      # and it is the ONLY record of how far the VO wanders — without this
-      # mount it is written inside the container and lost on `down`.
-      - ./logs:/ws/logs
-      # The DDS profile above, read at startup by every node in the container.
-      - ./docker/fastdds_udp_only.xml:/ws/docker/fastdds_udp_only.xml:ro
       # UE5 viewport on the host X server (run `xhost +local:docker` first,
       # or use scripts/docker_up.sh)
       - /tmp/.X11-unix:/tmp/.X11-unix
@@ -44,27 +29,34 @@ services:
       # Reuse the worlds/packages already downloaded on the host (the
       # entrypoint drops to the unprivileged 'hydrone' user, uid 1000)
       - ${HOME}/.local/share/biguasim:/home/hydrone/.local/share/biguasim
+      # Phase 4 persistent maps (lio_map_node), kept across container runs
+      - ./maps:/ws/maps
     devices:
       # GPU access for the UE5 binary (Intel/AMD via mesa). For NVIDIA install
       # nvidia-container-toolkit and add:  gpus: all
       - /dev/dri:/dev/dri
     # HYDRONE_LAUNCH picks what runs. Default is the bare sim bring-up (sensors
     # + SITL + MAVROS, no autonomy) so `docker_up.sh` still gives a vehicle you
-    # fly yourself from QGC. `docker_up.sh --landing-sites` sets it to
-    # landing_sites_sim.launch.py, which adds the pad detectors, the maps and
-    # the autonomous land/take-off mission on top.
+    # fly yourself from QGC. `docker_up.sh --phase1` sets it to
+    # phase1_sim.launch.py (docs/Phase 1 Mission.md) and `--landing-sites` to
+    # landing_sites_sim.launch.py (docs/Landing Sites.md); both add the pad
+    # detectors, the maps and a mission on top.
     #
-    # odom_error_print defaults ON here (the sim is where you want to see VO
-    # drift), unlike the launch file's own default. scripts/docker_up.sh flips
-    # ODOM_ERROR_PRINT to false when given --no-odom-print.
-    #
-    # ODOM_SOURCE selects what the EKF navigates on (docker_up.sh --ground-truth
-    # sets it to ground_truth). Default vo — the estimator the real drone will
-    # fly on; ground_truth is a debugging aid only. See sources_sim.launch.py.
     # HYDRONE_LAUNCH_ARGS is whatever `name:=value` pairs were passed to
     # docker_up.sh, joined with spaces, and is normally empty. It is
     # deliberately UNQUOTED below: compose interpolates it into this string and
     # then splits shell-style, which is how several pairs become several
-    # arguments — and how an empty value adds nothing at all. Drop it and every
-    # `name:=value` given to docker_up.sh is discarded without a word.
-    command: ros2 launch hydrone_bringup ${HYDRONE_LAUNCH:-hydrone_sim.launch.py} odom_error_print:=${ODOM_ERROR_PRINT:-true} odom_source:=${ODOM_SOURCE:-vo} ${HYDRONE_LAUNCH_ARGS}
+    # arguments — and how an empty value adds nothing at all.
+    #
+    # HYDRONE_ODOM_ARGS carries the two arguments only the Holybro launches
+    # declare: odom_error_print (which defaults ON here, unlike the launch
+    # file's own default — the sim is where you want to see VO drift; flipped
+    # by docker_up.sh --no-odom-print) and odom_source (what the EKF navigates
+    # on; docker_up.sh --ground-truth sets ground_truth, a debugging aid only —
+    # see sources_sim.launch.py).
+    #
+    # Written with `-` and not `:-`, so an UNSET variable takes the default
+    # pair and an EMPTY one takes nothing: docker_up.sh empties it for
+    # --phase4, whose aircraft has one sensor and no estimator to choose
+    # between, while a plain `docker compose up` still gets the defaults.
+    command: ros2 launch hydrone_bringup ${HYDRONE_LAUNCH:-hydrone_sim.launch.py} ${HYDRONE_ODOM_ARGS-odom_error_print:=true odom_source:=vo} ${HYDRONE_LAUNCH_ARGS:-}

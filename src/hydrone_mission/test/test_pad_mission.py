@@ -16,7 +16,7 @@ the handful of decisions whose failure is silent and expensive:
 
 The flight states themselves (arming, takeoff, landing) are not covered here —
 they are conversations with ArduPilot, and mocking one proves nothing about the
-real vehicle. They are exercised by flying the sim; see docs/LANDING-SITES.md.
+real vehicle. They are exercised by flying the sim; see docs/Landing Sites.md.
 
 Run inside the stack container, with the workspace built:
 

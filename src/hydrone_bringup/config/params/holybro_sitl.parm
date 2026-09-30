@@ -45,7 +45,7 @@ ARSPD_BUS 2
 # loop (angle P 4.5->1.5, INPUT_TC 0.15->0.4, rate P/I/D -41%, lean cap 30->10 deg),
 # which made the attitude loop too slow for the position controller to track and
 # capped the authority to recover. The block is kept verbatim, with the re-apply
-# order, in docs/PARAMS-DIFF-SITL.md - it was never committed, so that is the only copy.
+# order, in docs/Params Diff SITL.md - it was never committed, so that is the only copy.
 ATC_RAT_YAW_P 0.3
 ATC_RAT_YAW_I 0.02
 BATT_MONITOR    4
@@ -179,7 +179,7 @@ MOT_BAT_VOLT_MAX 12.8
 # LAND 			9 !
 # --- Phase 1: slow, bounded motion in a 5x5 m arena -------------------------
 # These are LIMITS on the position controller's output, not tuning gains. They
-# are deliberately NOT the block that was bisected out above (docs/PARAMS-DIFF-
+# are deliberately NOT the block that was bisected out above (docs/Params Diff
 # SITL.md): that one softened the attitude loop itself — angle P, ATC_INPUT_TC,
 # rate P/I/D, PSC_ANGLE_MAX — until the loop was too slow for the position
 # controller to track and had no authority left to recover. Nothing here touches
@@ -199,16 +199,16 @@ MOT_BAT_VOLT_MAX 12.8
 # neither useful nor survivable indoors. 0.5 m/s puts a 2 m leg at ~4 s plus
 # ramps: slow enough to watch, slow enough that a bad position estimate produces
 # a slow wander rather than a dash into a wall.
-WP_SPD          0.6
+WP_SPD          1.5
 # Default 2.5 m/s/s. The acceleration is what the airframe feels when a new
 # setpoint appears, and BiguaSim's ~0.3-0.5 s actuation lag is what turns a
 # sharp demand into an oscillation (see ~/work/biguasim-problems.md, 2026-08-18).
-WP_ACC          0.6
+WP_ACC          1.5
 # Yaw slew rate, deg/s. Default 60 deg/s puts a 45 deg search turn at 0.75 s,
 # fast enough to smear the visual odometry through the whole step. 25 deg/s
 # makes it ~1.8 s, and the mission's settle pause then has something already
 # nearly stationary to wait on.
-ATC_RATE_WPY_MAX 15
+ATC_RATE_WPY_MAX 25
 #
 # NOT touched, on purpose: WP_SPD_UP / WP_SPD_DN and PILOT_SPEED_UP. The climb
 # is the one part of the flight that already behaves, and GUIDED takeoff takes

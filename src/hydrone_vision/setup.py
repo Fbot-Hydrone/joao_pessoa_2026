@@ -12,7 +12,6 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        (os.path.join('share', package_name, 'models'), glob('models/*.pt')), #yolo arquivo .pt
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -24,6 +23,7 @@ setup(
         'console_scripts': [
             'vision_node = hydrone_vision.vision_node:main',
             'pad_detector_node = hydrone_vision.pad_detector_node:main',
+            'gesture_detector_node = hydrone_vision.gesture_detector_node:main',
         ],
     },
 )

@@ -2,7 +2,8 @@
 # Bring up the full simulation stack in Docker.
 #
 # Usage: scripts/docker_up.sh [--dev] [--no-build] [--phase1] [--landing-sites]
-#                             [--ground-truth] [--no-odom-print]
+#                             [--phase3] [--phase4] [--ground-truth] [--no-odom-print]
+#                             [--world HOST[:PORT]] [--world-port PORT]
 #                             [name:=value ...] [docker compose up args...]
 #   --dev             mount the project packages from the host into the
 #                     container (docker-compose.dev.yml) and skip the image
@@ -11,37 +12,50 @@
 #                     Use scripts/dev_rebuild.sh for .msg / setup.py / new-file
 #                     changes. Implies --no-build.
 #   --no-build        don't pass --build to compose (reuse the current image).
-#   --phase1          run the Phase 1 mission: take off, MAP the arena with a
-#                     closed perimeter, mow it with the belly camera, land on
-#                     every base found, come home. The ZED does odometry and
-#                     mapping only; the belly camera is the detector AND the
-#                     position source, placing each pad by casting its pixel
-#                     into the occupancy map. See docs/PHASE1-MISSION.md and
-#                     docs/MAP-SWEEP-2026-09-02.md.
+#   --phase1          run the Phase 1 mission (take off, turn on the spot until
+#                     a landing base is found, fly over it, confirm it on the
+#                     belly camera, land, repeat, come home) instead of the bare
+#                     sim bring-up. See docs/Phase 1 Mission.md.
 #   --landing-sites   run the earlier landing-site mission (fly forward and land
-#                     on whatever the belly camera sees). See docs/LANDING-SITES.md.
-#   --zed-detect      run the OLDER division of labour, where the forward ZED
-#                     both finds a base across the arena and says where it is,
-#                     the belly camera only votes yes/no, and the search is a
-#                     three-sided U flown twice. This was --phase1 until
-#                     2026-09-02. Kept because it places pads better (2-16 cm
-#                     against 45 cm) while finding fewer of them, so it is both
-#                     the fallback and the comparison. See
-#                     src/hydrone_bringup/launch/phase1_zed_detect.launch.py.
+#                     on whatever the belly camera sees). See docs/Landing Sites.md.
+#   --phase3          the Phase 3 gesture mission on the Kopis X8: the Phase 4
+#                     LIO stack plus a forward camera (config-KopisX8Cam.yaml),
+#                     gesture_detector_node and phase3_gesture_node (takeoff,
+#                     1 m forward, 90 deg right, obey the operator's arms).
+#                     The sim has no person: type gestures on
+#                     /hydrone/gesture/inject. See docs/Phase 3 Gesture Mission.md.
+#   --phase4          bring up the OTHER AIRCRAFT: the Kopis X8 flying on its
+#                     Livox Mid-360 (config-KopisX8.yaml, an engine raycast
+#                     lidar). FAST-LIO odometry is the EKF's external nav; the
+#                     persistent map node runs too. Local simulator only.
+#                     --ground-truth and --no-odom-print don't apply.
+#                     See phase4_sim.launch.py and docs/LIO Odometry.md.
 #   --ground-truth    fly the EKF on BiguaSim ground truth instead of the real
 #                     visual odometry (odom_source:=ground_truth). A DEBUGGING
 #                     AID for separating autonomy bugs from localization bugs —
 #                     a green run on ground truth proves nothing about the real
-#                     drone, which has none. See docs/LANDING-SITES.md §10.
-#   --debug           open the windows: rviz2 preloaded with the mission's
-#                     layout (octomap, vehicle pose, the pad map, the belly
-#                     camera's coverage/footprint/trajectory, the planned
-#                     route) and rqt_image_view on the belly detector's
-#                     annotated view. Both run INSIDE the container and draw on
-#                     this machine's X server, so there is no ROS_DOMAIN_ID to
-#                     match and nothing else to start. Needs a display.
+#                     drone, which has none. See docs/Landing Sites.md.
 #   --no-odom-print   silence odom_error_node's 1 Hz VO-drift line (the CSV is
 #                     still written either way). On by default.
+#   --world HOST[:PORT]
+#                     fly against a BiguaSim world running in ANOTHER process,
+#                     instead of starting the simulator in this container.
+#                     SITL and the whole autonomy stack still run here; only the
+#                     physics, the sensor rendering and the collision checking
+#                     move. Several machines can then share one simulation and
+#                     SEE each other in it, which a local sim cannot do.
+#                     PORT defaults to 8770 (the world's request port; it also
+#                     uses PORT+1 to publish state).
+#                     Start the world with, on the other machine:
+#                       python tools/serve_world.py --package Competition \
+#                              --world CompetionMap --port 8770
+#   --world-port PORT the same port, given separately. Handy for an IPv6
+#                     literal, where HOST:PORT is ambiguous.
+#
+# Running against a world needs the world PACKAGE installed here too
+# (~/.local/share/biguasim, already bind-mounted): the client refuses to connect
+# unless its copy of the world matches the server's, because mismatched
+# collision geometry looks like broken physics rather than a version problem.
 #
 # Any argument containing ':=' is a LAUNCH argument and is appended to the
 # ros2 launch command inside the container, so the mission can be tuned without
@@ -49,8 +63,8 @@
 #
 #   scripts/docker_up.sh --phase1 target_bases:=2 takeoff_alt:=1.5
 #
-# --phase1, --landing-sites and --zed-detect are mutually exclusive; the last
-# one given wins.
+# --phase1, --landing-sites, --phase3 and --phase4 all pick the launch file, so they are
+# mutually exclusive; the last one given wins.
 # Anything else is forwarded untouched to `docker compose up` (-d, --force-recreate, ...).
 set -e
 cd "$(dirname "$0")/.."
@@ -62,15 +76,41 @@ HYDRONE_LAUNCH=hydrone_sim.launch.py
 ODOM_SOURCE=vo
 DEV_MODE=false
 DO_BUILD=true
+WORLD_ADDRESS="${WORLD_ADDRESS:-}"
+WORLD_PORT="${WORLD_PORT:-8770}"
 launch_args=()
 compose_args=()
+# --world and --world-port take a value, so the next argument belongs to them
+# rather than to compose. Tracked with a flag instead of shift/getopts to leave
+# the existing pass-everything-else-through behaviour exactly as it was.
+want_value=
 for arg in "$@"; do
+    if [ -n "$want_value" ]; then
+        case "$want_value" in
+            world)
+                # host:port, but only when the colon is unambiguous. An IPv6
+                # literal is full of colons and is left alone -- use
+                # --world-port for those, or bracket the address.
+                case "$arg" in
+                    \[*\]:*) WORLD_ADDRESS="${arg%:*}"; WORLD_PORT="${arg##*:}" ;;
+                    *:*:*)    WORLD_ADDRESS="$arg" ;;
+                    *:*)      WORLD_ADDRESS="${arg%:*}"; WORLD_PORT="${arg##*:}" ;;
+                    *)        WORLD_ADDRESS="$arg" ;;
+                esac
+                ;;
+            world-port) WORLD_PORT="$arg" ;;
+        esac
+        want_value=
+        continue
+    fi
     case "$arg" in
         --no-odom-print) ODOM_ERROR_PRINT=false ;;
-        --debug)         launch_args+=("debug:=true") ;;
+        --world)         want_value=world ;;
+        --world-port)    want_value=world-port ;;
         --phase1)        HYDRONE_LAUNCH=phase1_sim.launch.py ;;
         --landing-sites) HYDRONE_LAUNCH=landing_sites_sim.launch.py ;;
-        --zed-detect)    HYDRONE_LAUNCH=phase1_zed_detect_sim.launch.py ;;
+        --phase3)        HYDRONE_LAUNCH=phase3_sim.launch.py ;;
+        --phase4)        HYDRONE_LAUNCH=phase4_sim.launch.py ;;
         --ground-truth)  ODOM_SOURCE=ground_truth ;;
         --dev)           DEV_MODE=true; DO_BUILD=false ;;
         --no-build)      DO_BUILD=false ;;
@@ -86,73 +126,27 @@ done
 # STRING and then splits it shell-style. That also means a launch argument whose
 # value contains a space would not survive; none of ours do.
 HYDRONE_LAUNCH_ARGS="${launch_args[*]}"
-export ODOM_ERROR_PRINT     # interpolated into `command:` in docker-compose.yml
-export HYDRONE_LAUNCH       # ditto — selects which launch file the container runs
-export ODOM_SOURCE          # ditto — what the EKF navigates on (vo|ground_truth)
-export HYDRONE_LAUNCH_ARGS  # ditto — extra name:=value pairs, possibly empty
 
-# ── Reap what the last run leaked ────────────────────────────────────────────
-#
-# Two things grow without bound across bring-ups, and both have filled this
-# machine's disk or RAM:
-#
-#   .utrace   Unreal Insights writes one profiling capture per run into
-#             ~/UnrealEngine/UnrealTrace/Store. They are pure diagnostics —
-#             nothing reads them, and re-running regenerates them. MEASURED
-#             2026-09-02: a single long run left an 87 GB file, and a month of
-#             runs had accumulated 512 GB and taken the disk to 100%, at which
-#             point nothing on the machine can write at all.
-#
-#   /dev/shm  every bring-up leaks HOLODECK_MEM<uuid>_* segments through
-#             ipc:host. They are RAM, not disk: 1098 of them held 491 MB.
-#
-#             The same leak has a SECOND half that costs more than RAM: the
-#             POSIX semaphores, which the kernel stores as /dev/shm/sem.*.
-#             HOLODECK_SEMAPHORE_SERVER<uuid>, _CLIENT<uuid> and
-#             HOLODECK_LOADING_SEM<uuid> survive a crashed run, and the next
-#             bring-up does not merely waste memory — it FAILS:
-#
-#               posix_ipc.BusyError: Semaphore is busy
-#               (biguasim/environments.py, __linux_start_process__)
-#
-#             ardubridge_node dies there, so no physics is ever produced, and
-#             the symptom further downstream says nothing about the cause:
-#             SITL repeats "No JSON sensor message received, resending servos"
-#             and the mission waits forever on "waiting for MAVROS link and a
-#             local position...". MEASURED 2026-09-14: five stale sem.HOLODECK_*
-#             entries, left by runs on 2026-09-08 and -09, blocked every
-#             bring-up on this machine until they were removed.
-#
-# Both are reaped here rather than after a run, because a run that crashes or
-# is killed never gets to clean up after itself — and that is exactly the run
-# that leaves the biggest trace behind.
-TRACE_DIR="$HOME/UnrealEngine/UnrealTrace/Store"
-if [ -d "$TRACE_DIR" ]; then
-    traces=$(find "$TRACE_DIR" -name '*.utrace' 2>/dev/null | wc -l)
-    if [ "$traces" -gt 0 ]; then
-        size=$(du -sh "$TRACE_DIR" 2>/dev/null | cut -f1)
-        echo "Reaping $traces Unreal trace(s), $size — profiling only, regenerated on demand."
-        find "$TRACE_DIR" -name '*.utrace' -delete 2>/dev/null
-    fi
-fi
-shm=$(ls /dev/shm 2>/dev/null | grep -c HOLODECK_MEM || true)
-if [ "${shm:-0}" -gt 0 ]; then
-    echo "Reaping $shm leaked HOLODECK_MEM segment(s) from /dev/shm."
-    rm -f /dev/shm/HOLODECK_MEM* 2>/dev/null || true
-fi
-# The semaphores, which is the half that BLOCKS the next run rather than just
-# wasting RAM. Only reaped when nothing is holding them: with the stack down
-# there is no owner, and removing them is what makes the next bring-up work.
-sems=$(ls /dev/shm 2>/dev/null | grep -c '^sem\.HOLODECK' || true)
-if [ "${sems:-0}" -gt 0 ]; then
-    if docker compose ps --status running 2>/dev/null | grep -q hydrone; then
-        echo "WARNING: $sems stale HOLODECK semaphore(s) in /dev/shm, but the" >&2
-        echo "  stack is RUNNING — not touching them. Stop it and re-run." >&2
-    else
-        echo "Reaping $sems leaked HOLODECK semaphore(s) from /dev/shm"
-        echo "  (these make the next run die with 'Semaphore is busy')."
-        rm -f /dev/shm/sem.HOLODECK* 2>/dev/null || true
-    fi
+# odom_source and odom_error_print belong to the Holybro launches, which choose
+# between two estimators and measure one against the other. phase4_sim declares
+# neither: that aircraft carries one sensor and has no estimator yet. Launch
+# accepts an undeclared argument silently (it just becomes a launch
+# configuration nobody reads), so passing them would not error — it would only
+# leave the command line, and this script's summary, describing a vehicle this
+# is not. Empty for phase 4, and UNSET is what docker-compose.yml falls back on
+# for a plain `docker compose up`.
+HYDRONE_ODOM_ARGS="odom_error_print:=$ODOM_ERROR_PRINT odom_source:=$ODOM_SOURCE"
+case "$HYDRONE_LAUNCH" in phase3_sim.launch.py|phase4_sim.launch.py) HYDRONE_ODOM_ARGS= ;; esac
+
+export HYDRONE_LAUNCH       # interpolated into `command:` in docker-compose.yml
+export HYDRONE_ODOM_ARGS    # ditto — the odom pair above, or empty for phase 4
+export HYDRONE_LAUNCH_ARGS  # ditto — extra name:=value pairs, possibly empty
+export WORLD_ADDRESS        # empty = simulate here; set = use a world elsewhere
+export WORLD_PORT           # its request port; state is published on PORT+1
+
+if [ -n "$want_value" ]; then
+    echo "ERROR: --$want_value needs a value" >&2
+    exit 1
 fi
 
 # Let the containerized UE5 viewport open on the host X server
@@ -164,9 +158,7 @@ mkdir -p "$HOME/.local/share/biguasim"
 # Locate the BiguaSim repo (mounted into the container). Set BS_SIM_DIR to
 # override; otherwise try the common sibling locations.
 if [ -z "${BS_SIM_DIR:-}" ]; then
-    for candidate in ../bs-competition/bs-drone-competition \
-                     ../biguasim-competicao/bs-drone-competition \
-                     ../bs-drone-competition; do
+    for candidate in ../bs-competition/bs-drone-competition ../bs-drone-competition; do
         if [ -d "$candidate" ]; then
             BS_SIM_DIR=$candidate
             break
@@ -184,40 +176,10 @@ echo "BiguaSim repo: $BS_SIM_DIR"
 # Use the NVIDIA dGPU when the container runtime is available (see
 # docker-compose.nvidia.yml for the host setup), otherwise fall back to
 # the integrated GPU via /dev/dri.
-#
-# BOTH conditions are checked, and the second one is the lesson: the runtime
-# being REGISTERED with docker says nothing about the driver working. After a
-# driver upgrade without a reboot, the kernel module and the userspace library
-# disagree, `docker info` still lists the nvidia runtime, and the container
-# dies at startup with
-#
-#   failed to fulfil mount request: open /run/nvidia-persistenced/socket:
-#   no such file or directory
-#
-# which names a socket and not the real cause. `nvidia-smi -L` fails cleanly in
-# that state ("Driver/library version mismatch"), so it is the honest probe:
-# ask whether the driver WORKS, not whether it is installed. Falling back to
-# the iGPU keeps the simulator runnable until the machine is rebooted, which is
-# what actually fixes the mismatch.
 compose_files=(-f docker-compose.yml)
 if docker info 2>/dev/null | grep -qi 'runtimes:.*nvidia'; then
-    if nvidia-smi -L >/dev/null 2>&1; then
-        echo "NVIDIA container runtime detected — rendering on the dGPU"
-        compose_files+=(-f docker-compose.nvidia.yml)
-    else
-        echo "NVIDIA runtime is registered but the driver is NOT usable:" >&2
-        nvidia-smi -L 2>&1 | sed 's/^/  /' >&2
-        echo "" >&2
-        echo "  The kernel module and the userspace library disagree, which is" >&2
-        echo "  what a driver upgrade without a reboot leaves behind. Compare:" >&2
-        echo "    kernel:    $(sed -n 's/^NVRM version:.*Module  \([0-9.]*\).*/\1/p' /proc/driver/nvidia/version 2>/dev/null)" >&2
-        echo "    userspace: $(nvidia-smi -L 2>&1 | sed -n 's/.*NVML library version: //p')" >&2
-        echo "" >&2
-        echo "  Falling back to whatever /dev/dri offers. If this machine has NO" >&2
-        echo "  second GPU, that is llvmpipe (SOFTWARE rendering) and UE5 will" >&2
-        echo "  NOT start: Holodeck dies immediately and the run hangs on" >&2
-        echo "  'No JSON sensor message received'. REBOOT to fix it." >&2
-    fi
+    echo "NVIDIA container runtime detected — rendering on the dGPU"
+    compose_files+=(-f docker-compose.nvidia.yml)
 else
     echo "No NVIDIA container runtime — rendering on the iGPU (see README for dGPU setup)"
 fi
@@ -227,12 +189,31 @@ if [ "$DEV_MODE" = true ]; then
     compose_files+=(-f docker-compose.dev.yml)
 fi
 
+if [ -n "$WORLD_ADDRESS" ]; then
+    # Bracket a bare IPv6 literal for display only; ZeroMQ's endpoint builder
+    # does the same thing to the real address. Without it the port looks like
+    # one more group of the address.
+    shown="$WORLD_ADDRESS"
+    case "$shown" in
+        \[*\]) ;;                      # already bracketed
+        *:*:*) shown="[$shown]" ;;     # a bare IPv6 literal
+    esac
+    echo "World        : $shown:$WORLD_PORT (remote — physics and sensors run there)"
+else
+    echo "World        : local (this container runs the simulator)"
+fi
 echo "Launch file  : $HYDRONE_LAUNCH"
 if [ -n "$HYDRONE_LAUNCH_ARGS" ]; then
     echo "Launch args  : $HYDRONE_LAUNCH_ARGS"
 fi
-echo "Odom source  : $ODOM_SOURCE$([ "$ODOM_SOURCE" = ground_truth ] && echo ' (DEBUGGING AID — proves nothing about the real drone)')"
-echo "VO drift print: $ODOM_ERROR_PRINT (CSV is written either way)"
+if [ -z "$HYDRONE_ODOM_ARGS" ]; then
+    echo "Aircraft     : Kopis X8 + Livox Mid-360"
+    echo "Nav          : FAST-LIO on the Mid-360 as external nav (ground truth"
+    echo "               only feeds the drift log). See docs/LIO Odometry.md."
+else
+    echo "Odom source  : $ODOM_SOURCE$([ "$ODOM_SOURCE" = ground_truth ] && echo ' (DEBUGGING AID — proves nothing about the real drone)')"
+    echo "VO drift print: $ODOM_ERROR_PRINT (CSV is written either way)"
+fi
 
 build_arg=(--build)
 [ "$DO_BUILD" = true ] || build_arg=()

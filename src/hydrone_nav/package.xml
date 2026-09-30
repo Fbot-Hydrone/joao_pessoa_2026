@@ -2,7 +2,7 @@
 <package format="3">
   <name>hydrone_nav</name>
   <version>1.0.0</version>
-  <description>Navigation: route planning and route execution (the maps live in hydrone_map)</description>
+  <description>Navigation: route planning, precision landing, maze traversal</description>
   <maintainer email="team@hydrone.com">Hydrone Team</maintainer>
   <license>MIT</license>
 

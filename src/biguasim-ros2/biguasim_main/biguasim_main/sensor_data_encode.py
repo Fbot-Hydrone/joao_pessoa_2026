@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from sensor_msgs.msg import Imu, MagneticField, Image, CameraInfo, LaserScan, PointCloud2
+from sensor_msgs.msg import Imu, MagneticField, Image, CameraInfo, LaserScan, PointCloud2, PointField
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Vector3Stamped, PoseWithCovarianceStamped, TwistWithCovarianceStamped
 from biguasim_interfaces.msg import DVLSensorRange, ImagingSonar
@@ -12,7 +12,6 @@ import array
 multi_publisher_sensors = {
     'DVLSensor': ['Velocity', 'Range'],
     'DynamicsSensor': ['Odom', 'IMU'],
-    'IMUSensor': ['', 'Bias'],
     'RGBCamera': ['', 'camera_info'],
     'DepthCamera': ['', 'camera_info'],
     'AnnotationComponent' : ['', 'camera_info'],
@@ -323,19 +322,7 @@ class DynamicsIMUEncoder(SensorPublisher):
         msg.linear_acceleration.y = float(sensor_data[1])
         msg.linear_acceleration.z = float(sensor_data[2])
 
-        # Assign angular velocity. Indices 12-14, NOT 9-11.
-        #
-        # DynamicsSensor returns, per its own docstring:
-        #   [acceleration, velocity, position, angular accel., angular vel., rpy]
-        #      0-2           3-5       6-8      9-11            12-14        15-18
-        #
-        # This read 9-11 until 2026-08-27, so every consumer of /DynamicsSensor/IMU
-        # was handed angular ACCELERATION in the angular_velocity field. Nothing
-        # noticed because both are small 3-vectors that go to zero when the
-        # vehicle is still. It surfaced when visual_odometry_node started
-        # integrating the field as a rate to fuse with vision: integrating an
-        # acceleration as if it were a velocity does not give an angle, and the
-        # VIO's yaw error came out at 178 deg against 4 deg without it.
+        # Assign angular velocity
         msg.angular_velocity.x = float(sensor_data[12])
         msg.angular_velocity.y = float(sensor_data[13])
         msg.angular_velocity.z = float(sensor_data[14])
@@ -662,6 +649,39 @@ class ImagingSonarEncoder(SensorPublisher):
         
         return msg
         
+class RaycastLidarEncoder(SensorPublisher):
+    """RaycastLidar hits as a PointCloud2 (x, y, z, intensity).
+
+    The engine gives points in the AGENT body frame (not the sensor's), in UE's
+    left-handed axes, so y is flipped here to land in base_link (FLU).
+    """
+    FIELDS = [
+        PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
+        PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
+        PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1),
+        PointField(name='intensity', offset=12, datatype=PointField.FLOAT32, count=1),
+    ]
+
+    def __init__(self, sensor_dict):
+        super().__init__(sensor_dict)
+        self.message_type = PointCloud2
+
+    def encode(self, sensor_data):
+        pts = np.array(sensor_data, dtype=np.float32).reshape(-1, 4)
+        pts[:, 1] *= -1.0
+        msg = PointCloud2()
+        # body frame whatever socket the sensor sits on, see the docstring
+        msg.header.frame_id = 'base_link'
+        msg.height = 1
+        msg.width = len(pts)
+        msg.fields = self.FIELDS
+        msg.is_bigendian = False
+        msg.point_step = 16
+        msg.row_step = 16 * len(pts)
+        msg.is_dense = True
+        msg.data = array.array('B', pts.tobytes())
+        return msg
+
 # Define other encoders similarly...
 
 
@@ -685,6 +705,7 @@ encoders = {
     'AnnotationComponent' : ImageEncoder,
     'AnnotationComponentcamera_info' : CameraInfoEncoder,
     'RangeFinderSensor': LaserScanEncoder,
+    'RaycastLidar': RaycastLidarEncoder,
     'ImagingSonar' : ImagingSonarEncoder
     # Add other sensor type encoders here...
 }

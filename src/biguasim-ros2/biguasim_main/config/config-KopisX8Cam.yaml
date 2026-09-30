@@ -1,0 +1,80 @@
+# KopisX8 + FrontCamera, for Phase 3 (phase3_sim.launch.py). Everything
+# else must stay identical to config-KopisX8.yaml.
+/**:
+  ros_parameters:
+    biguasim_scenario:
+      package_name: Competition
+      world: CompetionMap
+      # Must match an agent_name below — biguasim matches this against
+      # '<agent_name>-id0' to flag the main agent (environments.py). It read
+      # 'auv0' while the agent is 'uav0', so no agent was ever the main one.
+      main_agent: uav0
+      ticks_per_sec: 200
+      frames_per_sec: 60
+      octree_min: 0.1
+      octree_max: 5
+      draw_arrow: true
+      show_viewport: true
+      agents:
+        - agent_name: uav0
+          agent_type: KopisX8
+          publish_commands: false
+          sensors:
+            - sensor_type: DynamicsSensor
+              ros_publish: true
+              configuration:
+                UseCOM: true
+                UseRPY: false
+            - sensor_type: LocationSensor
+              ros_publish: true
+            - sensor_type: RotationSensor
+              ros_publish: true
+            - sensor_type: VelocitySensor
+              ros_publish: true
+            # The bridge builds this one for ArduPilot; listing it here only
+            # turns on its ROS topic, which livox_mimic republishes as the
+            # Mid-360's own IMU.
+            - sensor_type: IMUSensor
+              ros_publish: true
+            # The Livox Mid-360: real engine raycasts. 40 rings, 200k pts/s,
+            # 10 Hz head. FOV is the real -7..52 minus the bridge's +-3 deg
+            # wobble, which is what breaks up the fixed rings.
+            # Points come back in the body frame, not the sensor's.
+            # Mounted like the real drone: centered on top of the ~11 cm
+            # frame, a little above it (was 0.5 m, a pole nobody would fly).
+            - sensor_type: RaycastLidar
+              sensor_name: Mid360
+              ros_publish: true
+              location: [0, 0, 0.1]
+              configuration:
+                Channels: 40
+                Range: 70
+                PointsPerSecond: 200000
+                RotationFrequency: 10
+                UpperFovLimit: 49
+                LowerFovLimit: -4
+                HorizontalFov: 360
+                # attenuation is per cm in the engine; 0 keeps intensity sane
+                AtmospAttenRate: 0.0
+                NoiseStdDev: 0.0
+                DropOffGenRate: 0.0
+                DropOffIntensityLimit: 1.0
+                DropOffAtZeroIntensity: 0.0
+                ShowDebugPoints: false
+            # Phase 3: the forward camera the gesture reader looks through
+            # (config-KopisX8Cam.yaml only; phase 4 flies without it, a render
+            # costs sim speed). Real drone: a plain USB camera on the nose,
+            # read straight by gesture_detector_node. UE renders at 90 deg.
+            # Hz must divide ticks_per_sec; 10 Hz is plenty for held gestures.
+            - sensor_type: RGBCamera
+              sensor_name: FrontCamera
+              ros_publish: true
+              Hz: 10
+              location: [0.12, 0, -0.02]
+              configuration: {CaptureWidth: 640, CaptureHeight: 480}
+          dynamics:
+            batch_size : 1
+          control_abstraction : 'accel'
+          location: [3, 3.4, 0.78]
+          # location: [3, -9.4, 0.22]
+          rotation: [0, 0, -90]

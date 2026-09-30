@@ -1,0 +1,61 @@
+# kopis_sitl.parm — SITL overlay for the Kopis X8 / Livox airframe.
+#
+# An OVERLAY, not a param set: phase4_sim.launch.py passes
+#   holybro_sitl.parm , dds_udp.parm , kopis_sitl.parm
+# and ArduPilot applies them in order, so everything here wins over the shared
+# file and everything not mentioned is inherited from it. That keeps the EKF /
+# external-nav / scheduler block in ONE place instead of forking 200 lines that
+# would then drift.
+#
+# What is inherited and load-bearing (holybro_sitl.parm):
+#   GPS1_TYPE 0, VISO_TYPE 1, EK3_SRC1_POSXY/VELXY 6 — GPS-denied flight on
+#   external nav, which is what phase4_sim feeds from BiguaSim ground truth.
+
+# No rangefinder on this airframe. The shared file turns on a MAVLink
+# rangefinder (RNGFND1_TYPE 10) because the Holybro carries a VL53L1X and the
+# sim feeds it through MAVROS. The Kopis carries the Mid-360 and nothing else,
+# so leaving the driver enabled would have ArduPilot waiting on a sensor that
+# will never report — a prearm complaint about hardware that does not exist.
+RNGFND1_TYPE    0
+EK3_RNG_USE_HGT -1
+
+# NOT SET HERE, and this is the open question when this airframe first flies:
+# frame class/type and the whole tuning block are still the Holybro's, and as of
+# config-KopisX8.yaml declaring `agent_type: KopisX8` they no longer describe
+# what is being flown. BiguaSim models the KopisX8 as a plain QuadCopterX
+# (agents.py: only the four top rotors of the X8 are simulated) but with a far
+# stronger motor — thruster max 2950 against the X500's 592.4 — so the inherited
+# MOT_THST_HOVER and every rate gain are wrong for it, and the first hover will
+# be twitchy or worse. Nothing in phase 4 commands the vehicle, so this is a
+# note rather than a guess: measure a hover before writing numbers here.
+
+# Yaw from the LIO, not the compass. The LIO's odom frame starts at the spawn
+# heading, so a compass yaw would disagree with its positions by a fixed angle
+# and the EKF would fly sideways. Indoors a magnetometer is a liar anyway.
+EK3_SRC1_YAW    6
+COMPASS_USE     0
+COMPASS_USE2    0
+COMPASS_USE3    0
+
+# --- Kopis flight tune (2026-09-17) -----------------------------------------
+# Flight 1 on the inherited Holybro/firmware-default tune swung +-4 m and flung
+# the vehicle 8 m in 1.6 s: ground truth, so the airframe, not the LIO.
+# BiguaSim's Kopis maps PWM linearly to rotor speed and thrust = k*omega^2, so
+# the thrust curve is fully quadratic (expo 1), and hover is 19.6 N of 66.1 N
+# max, ~0.3 of thrust. Names checked against this 4.8-dev source.
+MOT_THST_EXPO   1.0
+MOT_THST_HOVER  0.3
+# Rate loop. With firmware defaults (P/I 0.135, D 0.0036) the Kopis hovered in a
+# 6.8 Hz roll/pitch limit cycle, gyro std 2.3 rad/s: invisible in position
+# (+-8 cm) but 100 rad/s^2 of angular acceleration, which wrecked the LIO.
+# Tuned live in hover 2026-09-17: P/I 0.07, D 0.0015 -> gyro std 0.004 rad/s.
+ATC_RAT_RLL_P   0.07
+ATC_RAT_RLL_I   0.07
+ATC_RAT_RLL_D   0.0015
+ATC_RAT_PIT_P   0.07
+ATC_RAT_PIT_I   0.07
+ATC_RAT_PIT_D   0.0015
+# Speed limits for the maze: corridors are ~1 m wide. GUIDED targets take their
+# limits from these (see holybro_sitl.parm).
+WP_SPD          0.7
+WP_ACC          1.0

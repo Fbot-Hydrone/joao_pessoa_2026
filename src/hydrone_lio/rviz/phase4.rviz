@@ -1,0 +1,90 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Reference Frame: odom
+      Plane Cell Count: 20
+      Value: true
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Show Names: true
+      Value: true
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Mid360 scan
+      Topic:
+        Value: /livox/lidar_pc
+        Depth: 5
+        Reliability Policy: Reliable
+      Style: Points
+      Size (Pixels): 2
+      Color Transformer: AxisColor
+      Axis: Z
+      Decay Time: 0
+      Value: true
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Map voxels
+      Topic:
+        Value: /hydrone/map/voxels
+        Depth: 1
+        Reliability Policy: Reliable
+      Style: Points
+      Size (Pixels): 2
+      Color Transformer: AxisColor
+      Axis: Z
+      Value: true
+    - Class: rviz_default_plugins/Odometry
+      Name: LIO odometry
+      Topic:
+        Value: /hydrone/lio/odom_raw
+        Depth: 10
+        Reliability Policy: Reliable
+      Keep: 200
+      Shape:
+        Value: Arrow
+      Value: true
+    - Class: rviz_default_plugins/Map
+      Name: Maze grid
+      Topic:
+        Value: /hydrone/maze/grid
+        Depth: 1
+        Reliability Policy: Reliable
+      Color Scheme: costmap
+      Alpha: 0.7
+      Value: true
+    - Class: rviz_default_plugins/Path
+      Name: Maze path
+      Topic:
+        Value: /hydrone/maze/path
+        Depth: 1
+        Reliability Policy: Reliable
+      Color: 255; 255; 0
+      Line Style: Lines
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Maze markers
+      Topic:
+        Value: /hydrone/maze/markers
+        Depth: 1
+        Reliability Policy: Reliable
+      Value: true
+  Global Options:
+    Fixed Frame: odom
+    Frame Rate: 15
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 18
+      Focal Point: {X: 0, Y: -3, Z: 0}
+      Pitch: 0.9
+      Yaw: 2.4
+Window Geometry:
+  Width: 1400
+  Height: 900

@@ -5,7 +5,7 @@ decide where the vehicle goes.
 
 The flight states themselves (arming, takeoff, landing) are NOT covered here —
 they are conversations with ArduPilot, and mocking one proves nothing about the
-real vehicle. They are exercised by flying the sim; see docs/PHASE1-MISSION.md.
+real vehicle. They are exercised by flying the sim; see docs/Phase 1 Mission.md.
 
 What IS worth pinning is the handful of decisions whose failure is silent and
 expensive:
@@ -40,8 +40,6 @@ import rclpy
 from geometry_msgs.msg import PoseStamped
 
 from hydrone_msgs.msg import Pad, PadDetection, PadMap
-from sensor_msgs.msg import CameraInfo
-from hydrone_nav import servo as servo_module
 from hydrone_mission.phase1_mission_node import (
     Phase1MissionNode, wrap_pi, yaw_of)
 
@@ -65,12 +63,6 @@ def node():
         rclpy.parameter.Parameter("confirm_confidence", value=0.60),
     ])
     n.home = (0.0, 0.0)
-    # The belly CameraInfo, because the landing gate converts pixels to
-    # centimetres with it. fx 320 is the simulator's belly lens; at the 1.0 m
-    # hover below that makes one pixel 3.1 mm on the ground.
-    info = CameraInfo()
-    info.k = [320.0, 0.0, 320.0, 0.0, 320.0, 240.0, 0.0, 0.0, 1.0]
-    n._sweep_cam_info = info
     set_pose(n, 0.0, 0.0, 1.0)
     n.setpoint = [0.0, 0.0, 1.0, 0.0]
     yield n
@@ -91,12 +83,9 @@ def set_pose(node, x, y=0.0, z=1.0, yaw=0.0):
 
 
 def pad(pad_id, x, y, observations=5, visited=False, takeoff_base=False,
-        confidence=0.9, height=None):
+        confidence=0.9):
     p = Pad()
     p.id = int(pad_id)
-    if height is not None:
-        p.height = float(height)
-        p.height_measured = True
     p.position.x = float(x)
     p.position.y = float(y)
     p.observations = int(observations)
@@ -113,22 +102,12 @@ def set_map(node, *pads):
     node.pad_map = m
 
 
-def see_pad(node, confidence=0.9, age_s=0.0, uv=None, radius_px=100.0):
-    """Pretend the belly camera just reported a pad.
-
-    Defaults to a pad sitting exactly where it should in the image, because
-    that is the ordinary case and every test that is not ABOUT centring wants
-    it: landing is gated on the pad being roughly centred, so a detection with
-    u = v = 0 would read as 400 px off and refuse to land.
-    """
+def see_pad(node, confidence=0.9, age_s=0.0):
+    """Pretend the belly camera just reported a pad."""
     det = PadDetection()
     det.camera = "down"
     det.confidence = float(confidence)
     det.position_valid = True
-    u0, v0 = node._servo.target_uv if uv is None else uv
-    det.u = float(u0)
-    det.v = float(v0)
-    det.radius_px = float(radius_px)
     node._last_down = det
     node._last_down_t = node._now() - age_s
 
@@ -171,15 +150,11 @@ def test_a_blacklisted_pad_is_never_a_candidate(node):
     assert not node._is_candidate(pad(7, 2.0, 0.0))
 
 
-def test_a_pad_seen_only_once_is_never_a_candidate(node):
-    """One frame of blue noise reaches the map. Two frames is a thing that was
-    there both times, and the confirmation hover is what settles it — a metre
-    up, where the pad is hundreds of pixels across instead of a handful.
-    Requiring three across the arena only meant the better judge never voted,
-    and it cost real bases (see route.MIN_OBSERVATIONS)."""
+def test_an_unconfirmed_pad_is_never_a_candidate(node):
+    """Two sightings is not a base. The map confirms at three."""
     node.home = (9.0, 9.0)
-    assert not node._is_candidate(pad(1, 2.0, 0.0, observations=1))
-    assert node._is_candidate(pad(1, 2.0, 0.0, observations=2))
+    assert not node._is_candidate(pad(1, 2.0, 0.0, observations=2))
+    assert node._is_candidate(pad(1, 2.0, 0.0, observations=3))
 
 
 def test_anything_sitting_where_we_armed_is_never_a_candidate(node):
@@ -216,7 +191,6 @@ def test_the_map_is_not_read_before_the_settle_window_closes(node):
 
 
 def test_a_candidate_found_after_settling_is_taken(node):
-    node.survey_done = True               # the landing phase
     node.home = (9.0, 9.0)
     set_map(node, pad(1, 2.0, 0.0))
     enter(node, node.SETTLE, age_s=5.0)
@@ -225,9 +199,6 @@ def test_a_candidate_found_after_settling_is_taken(node):
 
 
 def test_settling_with_nothing_in_the_map_starts_a_turn(node):
-    node.survey_circuit = False     # this pins the local turn
-    node.survey_done = True
-    node.max_search_level = 1       # and the ladder must not climb
     set_map(node)
     enter(node, node.SETTLE, age_s=5.0)
     node._do_settle()
@@ -236,9 +207,6 @@ def test_settling_with_nothing_in_the_map_starts_a_turn(node):
 
 def test_the_turn_is_clockwise(node):
     """ENU yaw runs counter-clockwise from east, so clockwise SUBTRACTS."""
-    node.survey_circuit = False     # this pins the local turn
-    node.survey_done = True
-    node.max_search_level = 1       # and the ladder must not climb
     set_map(node)
     node.setpoint = [0.0, 0.0, 1.0, 0.0]
     enter(node, node.SETTLE, age_s=5.0)
@@ -247,9 +215,6 @@ def test_the_turn_is_clockwise(node):
 
 
 def test_the_turn_wraps_rather_than_winding_up(node):
-    node.survey_circuit = False     # this pins the local turn
-    node.survey_done = True
-    node.max_search_level = 1       # and the ladder must not climb
     set_map(node)
     node.setpoint = [0.0, 0.0, 1.0, math.radians(-170.0)]
     enter(node, node.SETTLE, age_s=5.0)
@@ -258,8 +223,6 @@ def test_the_turn_wraps_rather_than_winding_up(node):
 
 
 def test_the_turn_does_not_move_the_vehicle(node):
-    node.survey_circuit = False
-    node.survey_done = True
     set_map(node)
     node.setpoint = [1.3, -0.7, 1.0, 0.0]
     enter(node, node.SETTLE, age_s=5.0)
@@ -287,28 +250,19 @@ def test_a_turn_that_never_arrives_still_counts(node):
 
 
 def test_the_search_terminates(node):
-    """Eight turns is a full circle, and with nothing left to look at the run
-    has to end. It ends by flying HOME, never by landing here: an off-base
-    landing is eliminatory, and "where the vehicle happens to be when the
-    search gives up" is the arena floor."""
+    """Eight turns is a full circle. Past that there is nothing new to see."""
     set_map(node)
-    node.survey_done = True              # the sweep is already over
-    node.max_search_level = 1            # and the ladder must not climb
     node.rotations_done = node.max_rotations
-    node.coverage_search = False         # nothing left to look at
     enter(node, node.SETTLE, age_s=5.0)
     node._do_settle()
-    assert node.state == node.TRAVEL
-    assert node.landing_for == node.LAND_FINAL
-    assert node.target_id is None
+    assert node.state == node.LAND
+    assert node.landing_for == node.LAND_FALLBACK
+    assert not node.stream_setpoint      # the FCU owns the descent now
 
 
 def test_a_full_search_makes_exactly_max_rotations_turns(node):
     """Walk the real loop rather than trusting the counter arithmetic."""
     set_map(node)
-    node.survey_done = True               # pin the ending, not the sweep
-    node.max_search_level = 1             # the ladder would reset the counter
-    node.coverage_search = False          # no map here; pin the turn count
     enter(node, node.SETTLE, age_s=5.0)
     for _ in range(200):
         if node.state == node.SETTLE:
@@ -320,9 +274,7 @@ def test_a_full_search_makes_exactly_max_rotations_turns(node):
         else:
             break
     assert node.rotations_done == node.max_rotations
-    # It ends by flying home, never by landing where the search ran out.
-    assert node.state == node.TRAVEL
-    assert node.landing_for == node.LAND_FINAL
+    assert node.state == node.LAND
 
 
 # ── Choosing what to do with the air ─────────────────────────────────────────
@@ -396,93 +348,18 @@ def test_arriving_home_lands_without_confirming(node):
     assert node.state == node.LAND
 
 
-def stall(node, seconds=None):
-    """Pretend the leg last got closer `seconds` ago."""
-    node._travel_progress_t = node._now() - (
-        seconds if seconds is not None else node.travel_stall_s + 1.0)
-
-
 def test_a_long_leg_is_not_given_up_on(node):
-    """Elapsed time alone never abandons a leg. A 60 s budget used to blacklist
-    pad 4 while the vehicle was 0.70 m away and still closing, so CONFIRM was
-    never entered and the belly camera never voted on a base that was there.
+    """No travel timeout: a base the ZED found is flown to until it arrives.
 
-    What replaces it tests PROGRESS, so this case is still safe: the leg below
-    has been running forever and is still closing on every tick.
+    A 60 s budget used to blacklist pad 4 while the vehicle was 0.70 m away and
+    still closing, so CONFIRM was never entered and the belly camera never got
+    to vote on a base that was right there.
     """
     node.target_id = 4
     node.landing_for = node.LAND_PAD
     node.setpoint = [20.0, 0.0, 1.0, 0.0]
+    set_pose(node, 0.0, 0.0)
     enter(node, node.TRAVEL, age_s=99999.0)
-    for x in (0.0, 2.0, 4.0, 6.0, 8.0):        # closing, slowly, for ever
-        set_pose(node, x, 0.0)
-        node._do_travel()
-    assert node.blacklist == set()
-    assert node.state == node.TRAVEL
-
-
-def test_a_leg_that_stops_closing_is_given_up_on(node):
-    """MEASURED 2026-08-27 on a plain --phase1 run: the pose drifted 4-5 m in
-    an 8 m arena, so the target sat permanently 4 m from where the vehicle
-    believed it was, `d` could never reach arrive_tol, and the mission sat in
-    TRAVEL for four and a half minutes — one leg, no landings, no message."""
-    node.target_id = 4
-    node.landing_for = node.LAND_PAD
-    node.setpoint = [20.0, 0.0, 1.0, 0.0]
-    set_pose(node, 0.0, 0.0)
-    enter(node, node.TRAVEL)
-    node._do_travel()                          # records the first distance
-    stall(node)
-    node._do_travel()
-    assert 4 in node.blacklist
-    assert node.state == node.SELECT
-    assert node.target_id is None
-
-
-def test_hovering_noise_does_not_count_as_progress(node):
-    """Otherwise a dead leg stays alive forever on estimate jitter alone."""
-    node.target_id = 4
-    node.landing_for = node.LAND_PAD
-    node.setpoint = [20.0, 0.0, 1.0, 0.0]
-    enter(node, node.TRAVEL)
-    set_pose(node, 0.0, 0.0)
-    node._do_travel()
-    stall(node)
-    set_pose(node, 0.001, 0.0)                 # a millimetre is not an approach
-    node._do_travel()
-    assert 4 in node.blacklist
-
-
-def test_the_return_leg_is_never_blacklisted(node):
-    """There is no other candidate to fall back to and the run has to end on
-    the takeoff base. Stalling there is reported and the leg is left running,
-    which is the old behaviour kept where it was the right one."""
-    node.landing_for = node.LAND_FINAL
-    node.target_id = None
-    node.setpoint = [20.0, 0.0, 1.0, 0.0]
-    set_pose(node, 0.0, 0.0)
-    enter(node, node.TRAVEL)
-    node._do_travel()
-    stall(node)
-    node._do_travel()
-    assert node.state == node.TRAVEL
-    assert node.blacklist == set()
-
-
-def test_each_leg_gets_a_fresh_progress_record(node):
-    """A new leg starts FARTHER from its target than the last one ended from
-    its own, so carrying the previous best over would make it look stalled on
-    its first tick."""
-    node.target_id = 4
-    node.landing_for = node.LAND_PAD
-    node.setpoint = [1.0, 0.0, 1.0, 0.0]
-    set_pose(node, 0.5, 0.0)
-    enter(node, node.TRAVEL)
-    node._do_travel()                          # best distance is now 0.5 m
-    node.target_id = 5
-    node.setpoint = [20.0, 0.0, 1.0, 0.0]
-    enter(node, node.TRAVEL)                   # a new, much longer leg
-    set_pose(node, 0.0, 0.0)
     node._do_travel()
     assert node.blacklist == set()
     assert node.state == node.TRAVEL
@@ -499,104 +376,6 @@ def test_confirmation_needs_several_looks(node):
     node._do_confirm()
     assert node.state == node.LAND
     assert node.landing_for == node.LAND_PAD
-
-
-def test_a_pad_far_off_centre_does_not_trigger_a_landing(node):
-    """The 5/6 abort of 2026-09-14, as a test.
-
-    Counting looks is not the same as being over the pad. This gate did not
-    exist, and the run that found it landed with the pad at (448, 438) against
-    a (320, 240) target — 236 px out, against 8-21 px on the four landings that
-    worked. It touched down 0.40 m from the centre of a pad whose edge is
-    0.50 m out, balanced on the lip for six seconds, slid off, fell 1.1 m, and
-    the FCU refused every takeoff after that. The attempt ended at 5 of 6.
-    """
-    node.target_id = 4
-    enter(node, node.CONFIRM)
-    for _ in range(node.confirm_detections * 3):
-        see_pad(node, confidence=0.9, uv=(448.0, 438.0), radius_px=100.0)
-        node._do_confirm()
-    # The looks were all counted — the pad IS there and IS confident.
-    assert node._confirm_hits >= node.confirm_detections
-    # But the vehicle is not over it, so it must still be hovering.
-    assert node.state == node.CONFIRM
-
-
-def test_a_centred_pad_lands_on_the_first_look_that_completes_the_quota(node):
-    """The gate is a veto, not an alignment target: one centred look is enough.
-
-    It must not wait for the pad to be centred SEVERAL times, or a vehicle
-    drifting a few pixels either side of the target never commits.
-    """
-    node.target_id = 4
-    enter(node, node.CONFIRM)
-    for _ in range(node.confirm_detections - 1):
-        see_pad(node, confidence=0.9, uv=(340.0, 250.0), radius_px=100.0)
-        node._do_confirm()
-        assert node.state == node.CONFIRM
-    see_pad(node, confidence=0.9, uv=(340.0, 250.0), radius_px=100.0)
-    node._do_confirm()
-    assert node.state == node.LAND
-
-
-def test_the_budget_is_centimetres_on_the_ground_not_pixels(node):
-    """The same pixel offset is a different distance from two heights.
-
-    This is the whole reason the budget is in centimetres. The hover sits
-    `takeoff_alt` above the pad TOP, and tops in one arena range from 0.12 m to
-    1.6 m, so a fixed pixel budget would be tight on a tall pad — camera close,
-    everything large in frame — and slack on a low one. It also travels: the
-    simulator's belly lens measures fx 320 and the real one 814.6.
-    """
-    u0, v0 = node._servo.target_uv
-    det = PadDetection()
-    det.u, det.v, det.radius_px = u0 + 64.0, v0, 100.0
-    # A pad whose top the map has measured, so the height below is the height
-    # over THAT TOP and not over the arena floor.
-    node.target_id = 4
-    set_map(node, pad(4, 1.0, 0.0, height=0.0))
-
-    set_pose(node, 0.0, 0.0, 1.0)          # 1.0 m over the pad top
-    near = node._centre_offset_cm(det)
-    set_pose(node, 0.0, 0.0, 3.0)          # 3.0 m over the pad top
-    far = node._centre_offset_cm(det)
-
-    # 64 px at fx 320 is a fifth of the height, whatever the height is.
-    assert near == pytest.approx(20.0, abs=0.5)     # 0.20 m
-    assert far == pytest.approx(60.0, abs=0.5)      # 0.60 m
-    # So the same picture is inside the budget from low down and outside it
-    # from high up — which is the point.
-    assert near < node.land_centre_max_cm < far
-
-
-def test_without_camera_info_the_gate_does_not_veto(node):
-    """The gate is a safety veto, not a dependency. No CameraInfo, no judgement.
-
-    It must not become a way to block every landing if the topic is late or
-    missing — the mission already refuses the map sweep outright in that case,
-    which is where that failure belongs.
-    """
-    node._sweep_cam_info = None
-    node.target_id = 4
-    enter(node, node.CONFIRM)
-    for _ in range(node.confirm_detections):
-        see_pad(node, confidence=0.9, uv=(448.0, 438.0), radius_px=100.0)
-        node._do_confirm()
-    assert node.state == node.LAND
-
-
-def test_a_pad_that_never_centres_is_eventually_blacklisted(node):
-    """The gate must not become a way to hover forever.
-
-    Refusing to land is only safe because `confirm_timeout` is already the
-    escape — the same one that catches a candidate which never confirms.
-    """
-    node.target_id = 4
-    enter(node, node.CONFIRM, age_s=node.confirm_timeout + 1.0)
-    see_pad(node, confidence=0.9, uv=(448.0, 438.0), radius_px=100.0)
-    node._do_confirm()
-    assert 4 in node.blacklist
-    assert node.state != node.LAND
 
 
 def test_one_frame_cannot_satisfy_the_whole_quota(node):
@@ -651,24 +430,29 @@ def test_a_rejection_restarts_the_search_from_scratch(node):
     assert node.setpoint[:3] == pytest.approx([2.0, 1.0, 1.0])
 
 
-# ── Never land off a base ────────────────────────────────────────────────────
+# ── The fallback ─────────────────────────────────────────────────────────────
 
-def test_an_exhausted_search_flies_home_instead_of_landing_in_place(node):
-    """There is no "land where you are" ending any more. It existed, reasoned
-    that a drifted estimate made a cross-arena leg risky — but that trade is
-    backwards against an eliminatory rule: a risky leg to a real base beats a
-    CERTAIN touchdown on the floor."""
-    set_map(node, pad(0, 1.0, -0.5, takeoff_base=True))
-    node.survey_done = True
-    node.max_search_level = 1
-    node.rotations_done = node.max_rotations
-    node.coverage_search = False
-    enter(node, node.SETTLE, age_s=5.0)
-    node._do_settle()
-    assert node.state == node.TRAVEL
-    assert node.setpoint[0] == pytest.approx(1.0)
-    assert node.setpoint[1] == pytest.approx(-0.5)
-    assert node.landing_for == node.LAND_FINAL, "must land ON the base, at home"
+def test_the_fallback_hops_once_and_stops(node):
+    """Land, take off, land again, done — and no leg home: the whole reason we
+    are in the fallback is that the search stopped producing anything."""
+    node.landing_for = node.LAND_FALLBACK
+    enter(node, node.DWELL, age_s=999.0)
+    node._do_dwell()
+    assert node.state == node.ARMING
+    assert node._land_after_takeoff
+    assert node.landing_for == node.LAND_FINAL
+
+    # ... the hop: takeoff completes and goes straight back down, in place.
+    set_pose(node, 1.7, -0.4, z=0.0)
+    enter(node, node.TAKEOFF)
+    set_pose(node, 1.7, -0.4, z=1.0)      # climbed takeoff_alt
+    node._do_takeoff()
+    assert node.state == node.LAND
+    assert not node._land_after_takeoff
+
+    enter(node, node.DWELL, age_s=999.0)
+    node._do_dwell()
+    assert node.state == node.DONE
 
 
 def test_an_ordinary_takeoff_searches_instead_of_landing(node):
@@ -761,686 +545,3 @@ def test_nothing_is_published_once_the_fcu_owns_the_descent(node):
     node.pub_sp.publish = published.append
     node._stream()
     assert published == []
-
-
-# ── The landing anchor ───────────────────────────────────────────────────────
-#
-# The only measurement of drift against the WORLD this stack can make.
-# landmark.py's re-observation compares two things projected through the same
-# drifting pose; this compares the pose against a base the vehicle is
-# physically resting on.
-
-def test_the_landing_anchor_measures_the_pose_against_where_we_armed(node,
-                                                                    capfd):
-    """capfd, not caplog: rclpy's logger writes to the process's stderr, which
-    pytest's logging capture never sees."""
-    node.home = (1.0, -0.5)
-    set_pose(node, 1.4, -0.2)
-    capfd.readouterr()
-    node._report_landing_anchor()
-    text = "".join(capfd.readouterr())
-    assert "LANDING ANCHOR" in text
-    assert "0.50 m" in text                 # hypot(0.4, 0.3)
-
-
-def test_the_anchor_says_nothing_without_a_home(node, capfd):
-    """Registration can fail. Reporting a drift against a home that was never
-    captured would invent a number, and inventing one here is worse than
-    having none: this is the measurement everything else is checked against."""
-    node.home = None
-    set_pose(node, 5.0, 5.0)
-    capfd.readouterr()
-    node._report_landing_anchor()
-    assert "LANDING ANCHOR" not in "".join(capfd.readouterr())
-
-
-# ── Coverage search ──────────────────────────────────────────────────────────
-#
-# MEASURED 2026-08-27: without this the vehicle spends the whole mission
-# turning at the point it took off from — ONE travel leg in 5.5 minutes — so a
-# base outside that cone never existed to it.
-
-def exhaust_the_turns(node):
-    node._harvest_relief = lambda: None
-    node.rotations_done = node.max_rotations
-    enter(node, node.SETTLE, age_s=node.settle_s + 1.0)
-    set_map(node)                       # no candidate to distract SELECT
-
-
-def test_a_coverage_search_that_throws_does_not_take_the_mission_with_it(node):
-    """The fallback is what the mission did before coverage existed."""
-    def boom():
-        raise RuntimeError("octree exploded")
-    node.octree_tree = None
-    node._octomap_msg = None
-    assert node._next_viewpoint() is None      # no map: quietly nothing
-
-
-def test_coverage_can_be_turned_off(node):
-    """coverage_search:=false restores the pure turn-in-place search."""
-    node.coverage_search = False
-    assert node._next_viewpoint() is None
-
-
-def test_a_pad_leg_is_not_treated_as_a_viewpoint_leg(node):
-    """The flag has to be cleared by whoever starts a normal leg, or the pad
-    that follows a coverage trip would never be blacklisted."""
-    node._viewpoint_leg = True
-    node.landed_count = 0
-    set_map(node, pad(4, 3.0, 0.0))
-    set_pose(node, 0.0, 0.0)
-    enter(node, node.SELECT)
-    node._do_select()
-    assert node.state == node.TRAVEL
-    assert not node._viewpoint_leg
-
-
-def test_arriving_with_no_target_pad_refuses_to_land(node):
-    """Belt and braces behind the viewpoint check: nothing may descend without
-    a pad it is descending ONTO. "over pad None" is how the vehicle ends up on
-    the floor, and that ends the run."""
-    node.target_id = None
-    node.landing_for = node.LAND_PAD
-    node._viewpoint_leg = False
-    node.setpoint = [2.0, 1.0, 1.0, 0.0]
-    set_pose(node, 2.0, 1.0)
-    enter(node, node.TRAVEL)
-    node._do_travel()
-    assert node.state == node.SETTLE
-    assert node.state != node.CONFIRM
-
-
-# ── Never fly into a wall ────────────────────────────────────────────────────
-
-def test_a_blocked_leg_with_no_way_round_is_refused_not_flown(node):
-    """This used to fly the straight line anyway and "rely on the supervisor".
-    What that produced was the drone hitting a wall — there is no supervisor
-    input inside a 2 m leg at cruise. Refusing costs one target; flying it
-    costs the aircraft, and in the competition the attempt."""
-    node.target_id = 4
-    node.landing_for = node.LAND_PAD
-    node._blocked_target = True
-    node.setpoint = [3.0, 0.0, 1.0, 0.0]
-    set_pose(node, 0.0, 0.0)
-    enter(node, node.TRAVEL)
-    node._do_travel()
-    assert node.state == node.SETTLE
-    assert 4 in node.blacklist
-    assert node.target_id is None
-
-
-def test_a_blocked_viewpoint_is_remembered_not_blacklisted_as_a_pad(node):
-    node._viewpoint_leg = True
-    node._blocked_target = True
-    node.setpoint = [3.0, 2.0, 1.0, 0.0]
-    set_pose(node, 0.0, 0.0)
-    enter(node, node.TRAVEL)
-    node._do_travel()
-    assert node.state == node.SETTLE
-    assert node.blacklist == set()
-    assert (3.0, 2.0) in node._failed_viewpoints
-
-
-def test_planning_never_crosses_unmapped_space_by_default(node):
-    """It did, on the argument that the straight-line fallback crosses unknown
-    space anyway. But a straight line to a pad is short and aimed where the
-    camera has been looking; a PLANNED path may detour anywhere, and with
-    unknown traversable the cheapest detour runs through the part of the arena
-    nothing has mapped — which is where the unseen walls are."""
-    assert node.plan_allow_unknown is False
-
-
-# ── Survey first, land second ────────────────────────────────────────────────
-
-def test_the_same_candidate_is_taken_once_the_survey_is_done(node):
-    node.survey_done = True
-    node.home = (9.0, 9.0)
-    set_map(node, pad(1, 2.0, 0.0))
-    enter(node, node.SETTLE, age_s=5.0)
-    node._do_settle()
-    assert node.state == node.SELECT
-
-
-def test_an_abort_restarts_the_survey(node):
-    """A new attempt has not swept anything, whatever the last one learned."""
-    node.survey_done = True
-    node._relief_seen.append((1.0, 1.0))
-    node._reset()
-    assert not node.survey_done
-    assert node._relief_seen == []
-
-
-# ── Relief leads ─────────────────────────────────────────────────────────────
-
-def test_relief_is_published_below_the_detector_s_own_floor(node):
-    """Relief is a reason to go LOOK, not a sighting of a pad — nothing has
-    said this is blue. It must not outvote the camera in the map's fusion."""
-    assert node.relief_confidence < 0.5
-
-
-def test_relief_can_be_turned_off(node):
-    node.relief_leads = False
-    node.pub_relief = None
-    node._harvest_relief()          # must not raise
-
-
-def test_the_survey_stops_when_it_stops_learning(node):
-    """The predicted gain is optimistic — it credits everything in range with
-    line of sight, while the octomap only integrates what the depth camera
-    actually swept. MEASURED 2026-08-28: 28, 27, 27 across three trips and
-    never near zero, so a survey that waits for it to run out never ends."""
-    node.survey_max_stalls = 2
-    node.survey_progress_cells = 5
-    assert node._survey_gain_is_real(28)      # first, nothing to compare
-    assert node._survey_gain_is_real(27)      # no real progress: strike 1
-    assert not node._survey_gain_is_real(27)  # strike 2 -> the sweep is over
-
-
-def test_real_progress_resets_the_patience(node):
-    node.survey_max_stalls = 2
-    node.survey_progress_cells = 5
-    assert node._survey_gain_is_real(40)
-    assert node._survey_gain_is_real(39)      # strike 1
-    assert node._survey_gain_is_real(20)      # learned something: reset
-    assert node._survey_gain_is_real(19)      # strike 1 again
-    assert not node._survey_gain_is_real(19)
-
-
-def test_the_survey_flies_instead_of_spinning(node):
-    """Turning on the spot cannot map an arena: what limits the map is not
-    where the camera POINTS but where it has PARALLAX, and a camera that never
-    translates never sees behind anything."""
-    node.survey_done = False
-    node.survey_circuit = True
-    set_map(node)
-    enter(node, node.SETTLE, age_s=5.0)
-    node._do_settle()
-    assert node.state == node.TRAVEL
-    assert node._viewpoint_leg, "a circuit leg must never confirm or land"
-    assert node._survey_path is not None
-
-
-def test_the_sweep_ends_the_survey_when_it_has_found_the_quota(node):
-    node.survey_done = False
-    node.survey_circuit = True
-    node.target_bases = 1
-    node.home = (9.0, 9.0)
-    node._survey_path = []                 # already flown
-    set_map(node, pad(1, 2.0, 0.0))
-    enter(node, node.SETTLE, age_s=5.0)
-    node._do_settle()
-    assert node.survey_done
-    assert node.state == node.SELECT
-
-
-def test_an_abort_forgets_the_sweep(node):
-    node._survey_path = [(1.0, 1.0, 1.0, 0.0)]
-    node._reset()
-    assert node._survey_path is None
-
-
-def test_the_relief_is_the_reserve_when_the_quota_is_not_met(node,
-                                                             monkeypatch):
-    """Only once the blue candidates are exhausted. An elevated base is the one
-    the ground-plane projection places wrongly however well it is seen, so it
-    is exactly the base most likely to still be missing by now."""
-    node.survey_done = True
-    node.survey_circuit = False
-    node.landed_count = 1
-    node.target_bases = 6
-    node.home = (9.0, 9.0)
-    node.coverage_search = False
-    node.rotations_done = node.max_rotations
-
-    found = {"n": 0}
-
-    def harvest():
-        found["n"] = 1                     # the relief becomes a candidate
-
-    monkeypatch.setattr(node, "_harvest_relief", harvest)
-    monkeypatch.setattr(node, "_best_candidate",
-                        lambda: pad(9, 2.0, 0.0) if found["n"] else None)
-
-    enter(node, node.SETTLE, age_s=5.0)
-    node._do_settle()
-    assert found["n"], "went home without investigating the relief"
-    assert node.state == node.SELECT
-
-
-def test_the_relief_is_not_consulted_while_blue_candidates_remain(node,
-                                                                  monkeypatch):
-    """It is a weaker signal — nothing said this lump is blue. Spending a hover
-    on it while a real sighting is waiting is the wrong order."""
-    node.survey_done = True
-    node.survey_circuit = False
-    node.home = (9.0, 9.0)
-    called = {}
-    monkeypatch.setattr(node, "_harvest_relief",
-                        lambda: called.setdefault("yes", True))
-    set_map(node, pad(1, 2.0, 0.0))
-    enter(node, node.SETTLE, age_s=5.0)
-    node._do_settle()
-    assert node.state == node.SELECT
-    assert "yes" not in called
-
-def test_arriving_on_a_sweep_leg_never_confirms_or_lands(node):
-    """The worst failure this mission has had. MEASURED 2026-08-27: a run that
-    reported "6 of 6 bases" had landed on ONE. The other five were a look-leg
-    arriving and being treated as an arrival over a pad — "over pad None —
-    confirming on the belly camera" — putting the vehicle down mid-arena on
-    whatever looked blue from 1 m. Off-base landings are eliminatory."""
-    node.survey_done = False
-    node.survey_circuit = True
-    set_map(node)
-    enter(node, node.SETTLE, age_s=5.0)
-    node._do_settle()
-    assert node.state == node.TRAVEL and node._viewpoint_leg
-
-    set_pose(node, node.setpoint[0], node.setpoint[1])      # arrive
-    node._do_travel()
-    assert node.state == node.SETTLE, "a look-leg arrival reached CONFIRM"
-    assert not node._viewpoint_leg
-
-
-def test_an_unreachable_look_leg_is_not_blacklisted_as_a_pad(node):
-    """A look-leg has no pad to blame when it stalls. The first flight that
-    exercised this printed "pad None stopped getting closer"."""
-    node._viewpoint_leg = True
-    node.setpoint = [3.0, 2.0, 1.0, 0.0]
-    set_pose(node, 0.0, 0.0)
-    enter(node, node.TRAVEL)
-    node._do_travel()
-    node._travel_progress_t = node._now() - node.travel_stall_s - 1.0
-    node._do_travel()
-    assert node.blacklist == set(), "blacklisted a pad for a look-leg's sake"
-    assert node.state == node.SETTLE
-    assert (3.0, 2.0) in node._failed_viewpoints
-
-
-def test_a_candidate_is_not_chased_before_the_sweep_is_flown(node):
-    """Running at the first sighting is explore-nothing/exploit-everything in
-    the worst order: the battery goes on whichever base happened to be in
-    front of the camera at takeoff."""
-    node.survey_done = False
-    node.survey_circuit = True
-    node.home = (9.0, 9.0)
-    set_map(node, pad(1, 2.0, 0.0))
-    enter(node, node.SETTLE, age_s=5.0)
-    node._do_settle()
-    assert node.state == node.TRAVEL and node._viewpoint_leg, \
-        "chased a pad before sweeping the arena"
-
-
-def test_level_1_climbs_above_the_house(node):
-    """The passes cross the house, whose roof is 1.5 m in the competition
-    arena, and the cruise height is 1 m. Taking the sweep altitude from
-    takeoff_alt would fly the drone into it."""
-    node.survey_done = False
-    node.survey_circuit = True
-    set_map(node)
-    enter(node, node.SETTLE, age_s=5.0)
-    node._do_settle()
-    assert node.survey_alt > 1.5
-    assert node.setpoint[2] == pytest.approx(node.survey_alt)
-
-
-def test_level_1_holds_one_heading_per_leg(node):
-    """The U turns twice, at its corners. The rectangle it replaced re-aimed
-    the camera at every step, so it turned continuously along every edge."""
-    node.survey_done = False
-    node.survey_circuit = True
-    set_map(node)
-    enter(node, node.SETTLE, age_s=5.0)
-    node._do_settle()
-    yaws = [p[3] for p in ([(0, 0, 0, node.setpoint[3])] + node._survey_path)]
-    turns = sum(1 for a, b in zip(yaws, yaws[1:]) if abs(a - b) > 1e-9)
-    assert turns == 2, f"turned {turns} times; the U turns twice"
-
-def test_a_refused_takeoff_gives_up_instead_of_looping_for_ever(node):
-    """TAKEOFF bounces back to ARMING on every refusal. Clearing the counter on
-    the way through means the three-strike abort never accumulates — MEASURED
-    2026-08-28: after landing on an elevated base at z=0.89 m the FCU refused
-    takeoff and the mission sat in ARMING <-> TAKEOFF for the rest of the
-    flight, retrying every two seconds."""
-    node.dry_run = False
-    node.base_registered = True
-    node.mav_state.mode = "GUIDED"
-    node.mav_state.armed = True
-    node._takeoff_tries = 3
-    enter(node, node.ARMING)
-    node._do_arming()
-    assert node.state == node.TAKEOFF
-    assert node._takeoff_tries == 3, "the retry counter was cleared on the way"
-
-
-def test_a_new_landing_cycle_gets_its_takeoff_tries_back(node):
-    """DWELL is the place that means 'this is a fresh attempt'."""
-    node._takeoff_tries = 3
-    node.landed_count = 1
-    node.target_bases = 6
-    node.landing_for = node.LAND_PAD
-    enter(node, node.DWELL, age_s=999.0)
-    node._do_dwell()
-    assert node._takeoff_tries == 0
-
-
-# ── The search ladder ────────────────────────────────────────────────────────
-#
-# Each level exists because the one before it can miss a base, and each costs
-# more — which is the whole reason for a ladder rather than starting with the
-# thorough one.
-
-def fly_the_whole_level(node):
-    """Consume the current level's path without moving the vehicle."""
-    node._survey_path = []
-
-
-def test_a_level_that_finds_everything_stops_the_search(node):
-    node.survey_done = False
-    node.target_bases = 2
-    node.home = (9.0, 9.0)
-    set_map(node, pad(1, 2.0, 0.0), pad(2, -2.0, 1.0))
-    node._begin_level()
-    fly_the_whole_level(node)
-    enter(node, node.SETTLE, age_s=5.0)
-    node._do_settle()
-    assert node.survey_done
-    assert node.state == node.SELECT
-    assert node._level == 1, "escalated despite having found everything"
-
-
-def test_a_level_that_falls_short_escalates(node):
-    node.survey_done = False
-    node.target_bases = 6
-    node.home = (9.0, 9.0)
-    set_map(node, pad(1, 2.0, 0.0))
-    node._begin_level()
-    fly_the_whole_level(node)
-    enter(node, node.SETTLE, age_s=5.0)
-    node._do_settle()
-    assert node._level == 2
-    assert not node.survey_done
-    assert node._survey_path is None, "must rebuild the path for the new level"
-
-
-def test_level_2_is_the_same_shape_half_a_metre_higher(node):
-    """A base seen edge-on from below, or hidden by the house, opens up from
-    higher — raising the camera changes the geometry without changing the
-    flight."""
-    node._level = 1
-    node._begin_level()
-    low = [p[2] for p in node._survey_path]
-    node._level = 2
-    node._begin_level()
-    high = [p[2] for p in node._survey_path]
-    assert high[0] == pytest.approx(low[0] + node.level2_climb_m)
-    assert len(high) == len(low), "level 2 is the same shape, not a new one"
-
-
-def test_level_3_has_no_path_and_hands_over_to_rotate_and_relief(node):
-    """That is where an ELEVATED base is caught: the ground-plane projection
-    cannot place one, so the blue detector's answer for it is in the wrong
-    place however well it was seen."""
-    node._level = 3
-    assert node._begin_level()
-    assert node._survey_path == []
-    assert node.survey_done
-
-
-def test_level_4_is_the_lawnmower_and_costs_much_more(node):
-    node._level = 1
-    node._begin_level()
-    u = len(node._survey_path)
-    node._level = 4
-    node._begin_level()
-    assert len(node._survey_path) > u
-
-
-def test_the_ladder_stops_at_the_top(node):
-    node._level = 99
-    assert not node._begin_level()
-
-
-def test_the_ladder_can_be_capped(node):
-    """Lower max_search_level to cap what an attempt may cost."""
-    node.max_search_level = 1
-    node.survey_done = True
-    node.survey_circuit = False
-    node.landed_count = 0
-    node.target_bases = 6
-    node.home = (9.0, 9.0)
-    node.coverage_search = False
-    node.relief_leads = False
-    node.pub_relief = None
-    node.rotations_done = node.max_rotations
-    set_map(node, pad(0, 1.0, -0.5, takeoff_base=True))
-    enter(node, node.SETTLE, age_s=5.0)
-    node._do_settle()
-    assert node.state == node.TRAVEL
-    assert node.landing_for == node.LAND_FINAL, "kept climbing past the cap"
-
-
-def test_the_sweep_starts_at_the_corner_the_drone_is_nearest(node):
-    """So it starts where it already is instead of transiting first."""
-    set_pose(node, 3.5, 3.5)
-    node._level = 1
-    node._begin_level()
-    assert node._survey_path[0][0] > 0
-    assert node._survey_path[0][1] > 0
-
-
-def test_an_abort_returns_to_level_one(node):
-    node._level = 4
-    node._reset()
-    assert node._level == 1
-
-
-def test_level_3_actually_runs_instead_of_being_judged_flown_at_once(node):
-    """It has no path of its own — it is the rotate-and-investigate behaviour
-    further down _do_settle. MEASURED 2026-08-28: without the hand-over,
-    level 3 escalated 0.08 s after starting and never ran."""
-    node._level = 3
-    node.survey_done = False
-    node.survey_circuit = True
-    node._survey_path = None
-    node.target_bases = 6
-    node.home = (9.0, 9.0)
-    set_map(node)
-    enter(node, node.SETTLE, age_s=5.0)
-    node._do_settle()
-    assert node._level == 3, "escalated past level 3 without running it"
-    assert node.survey_done
-
-
-# ── Investigate before climbing ──────────────────────────────────────────────
-
-def test_unconfirmed_leads_are_investigated_before_the_next_level(node):
-    """MEASURED 2026-08-28: a run ended a level with 4 confirmed and 2
-    unconfirmed candidates and escalated anyway. Investigating those two would
-    have completed the quota there and then; instead two more levels were
-    flown and still came back 5 of 6."""
-    node.survey_done = False
-    node.survey_circuit = True
-    node.target_bases = 6
-    node.landed_count = 0
-    node.home = (9.0, 9.0)
-    node._survey_path = []                       # the level is flown
-    node._harvest_relief = lambda: None
-    set_map(node,
-            pad(1, 2.0, 0.0, observations=5),    # confirmed
-            pad(2, -2.0, 1.0, observations=1))   # a lead nobody looked at
-    enter(node, node.SETTLE, age_s=5.0)
-    node._do_settle()
-    assert node._level == 1, "climbed a level with a lead still unlooked at"
-    assert node.investigating
-    assert node.state == node.SELECT
-
-
-def test_investigating_drops_the_bar_to_a_single_sighting(node):
-    """Not the bar being wrong the rest of the time — the cost of being wrong
-    has changed. A doubtful lead now competes only with flying the whole U
-    again half a metre up."""
-    node.home = (9.0, 9.0)
-    node.investigating = False
-    assert not node._is_candidate(pad(1, 2.0, 0.0, observations=1))
-    node.investigating = True
-    assert node._is_candidate(pad(1, 2.0, 0.0, observations=1))
-
-
-def test_a_lead_that_fails_its_hover_stops_being_one(node):
-    """The blacklist is what keeps the investigation from looping."""
-    node.home = (9.0, 9.0)
-    node.investigating = True
-    node.blacklist.add(2)
-    set_map(node, pad(2, -2.0, 1.0, observations=1))
-    assert node._uninvestigated() == []
-
-
-def test_the_takeoff_base_is_never_a_lead_to_investigate(node):
-    node.home = (9.0, 9.0)
-    set_map(node, pad(0, 1.0, 1.0, observations=1, takeoff_base=True))
-    assert node._uninvestigated() == []
-
-
-def test_escalating_leaves_investigation_mode(node):
-    """Otherwise the next level would target one-sighting noise as it flies."""
-    node.survey_done = True
-    node.survey_circuit = False
-    node.investigating = True
-    node.landed_count = 0
-    node.target_bases = 6
-    node.home = (9.0, 9.0)
-    node.coverage_search = False
-    node.relief_leads = False
-    node.pub_relief = None
-    node.rotations_done = node.max_rotations
-    set_map(node)
-    enter(node, node.SETTLE, age_s=5.0)
-    node._do_settle()
-    assert not node.investigating
-    assert node._level == 2
-
-
-# ── Centring on the pad ──────────────────────────────────────────────────────
-
-def see_pad_at(node, u, v, confidence=0.9):
-    det = PadDetection()
-    det.camera = "down"
-    det.confidence = float(confidence)
-    det.position_valid = True
-    det.u, det.v = float(u), float(v)
-    node._last_down = det
-    node._last_down_t = node._now()
-
-
-def test_the_hover_nudges_towards_the_pad_it_sees(node):
-    """The position came from a projection made across the arena; the belly
-    camera at 1 m is the only sensor that can say where the pad actually is
-    relative to the vehicle."""
-    node.target_id = 4
-    node.setpoint = [2.0, 1.0, 1.0, 0.0]
-    set_pose(node, 2.0, 1.0)
-    enter(node, node.CONFIRM)
-    see_pad_at(node, 500.0, 240.0)          # well off centre
-    node._do_confirm()
-    assert node.setpoint[:2] != [2.0, 1.0], "hovered without centring"
-
-
-def test_a_centred_pad_is_left_alone(node):
-    """Moving again would only add drift."""
-    node.target_id = 4
-    node.setpoint = [2.0, 1.0, 1.0, 0.0]
-    set_pose(node, 2.0, 1.0)
-    enter(node, node.CONFIRM)
-    see_pad_at(node, 320.0, 240.0)
-    node._do_confirm()
-    assert node.setpoint[:2] == pytest.approx([2.0, 1.0])
-
-
-def test_centring_can_be_turned_off(node):
-    node.centre_on_pad = False
-    node.target_id = 4
-    node.setpoint = [2.0, 1.0, 1.0, 0.0]
-    set_pose(node, 2.0, 1.0)
-    enter(node, node.CONFIRM)
-    see_pad_at(node, 500.0, 240.0)
-    node._do_confirm()
-    assert node.setpoint[:2] == pytest.approx([2.0, 1.0])
-
-
-def test_the_nudge_is_rotated_by_the_vehicle_s_heading(node):
-    """The servo knows about pixels and the airframe, not about where north
-    is. The same pixel error at two headings must move the setpoint two
-    different ways."""
-    steps = []
-    for yaw in (0.0, math.pi / 2.0):
-        node._servo = servo_module.VisualServo(target_uv=(320.0, 240.0))
-        node.setpoint = [0.0, 0.0, 1.0, yaw]
-        set_pose(node, 0.0, 0.0, yaw=yaw)
-        enter(node, node.CONFIRM)
-        see_pad_at(node, 500.0, 240.0)
-        node._do_confirm()
-        steps.append(tuple(node.setpoint[:2]))
-    assert steps[0] != pytest.approx(steps[1])
-
-
-def test_the_target_pixel_is_a_parameter_for_an_off_centre_lens(node):
-    """What the servo cannot learn is where the camera points when the vehicle
-    is level — that is what "centred" means. On a misaligned airframe it is
-    measured once by hovering over a known pad."""
-    assert node.get_parameter("pad_target_uv").value == [320.0, 240.0]
-
-
-# ── The U's legs, stated in metres ───────────────────────────────────────────
-
-def u_node(**kw):
-    params = [rclpy.parameter.Parameter("auto_start", value=False)]
-    params += [rclpy.parameter.Parameter(k, value=v) for k, v in kw.items()]
-    return Phase1MissionNode(parameter_overrides=params)
-
-
-def test_the_u_side_can_be_set_in_metres(node):
-    """Set it when the sweep should be a particular size for a reason the
-    arena dimensions do not express."""
-    n = u_node(u_side_x_m=4.0, u_side_y_m=3.0)
-    n._level = 1
-    n._begin_level()
-    xs = [p[0] for p in n._survey_path]
-    ys = [p[1] for p in n._survey_path]
-    assert max(xs) - min(xs) == pytest.approx(4.0)
-    assert max(ys) - min(ys) == pytest.approx(3.0)
-    n.destroy_node()
-
-
-def test_zero_keeps_deriving_the_side_from_the_arena(node):
-    """leg = arena_size - 2 * survey_inset_m, which is what it always did."""
-    n = u_node(u_side_x_m=0.0, u_side_y_m=0.0, survey_inset_m=1.2)
-    n._level = 1
-    n._begin_level()
-    xs = [p[0] for p in n._survey_path]
-    lo, hi = n.plan_bounds
-    assert max(xs) - min(xs) == pytest.approx((hi[0] - lo[0]) - 2 * 1.2)
-    n.destroy_node()
-
-
-def test_level_2_uses_the_same_side_as_level_1(node):
-    """It is the SAME U half a metre higher — a different shape would make the
-    two levels test different things."""
-    n = u_node(u_side_x_m=4.0, u_side_y_m=4.0)
-    n._level = 1
-    n._begin_level()
-    one = [p[:2] for p in n._survey_path]
-    n._level = 2
-    n._begin_level()
-    assert [p[:2] for p in n._survey_path] == one
-    n.destroy_node()
-
-
-def test_the_u_flies_one_setpoint_per_leg(node):
-    """GUIDED stops dead at every position target, so a point in the middle of
-    a straight leg only costs a full decelerate-and-accelerate."""
-    n = u_node()
-    n._level = 1
-    n._begin_level()
-    assert len(n._survey_path) == 6
-    n.destroy_node()

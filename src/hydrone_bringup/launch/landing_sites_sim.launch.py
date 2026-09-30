@@ -28,7 +28,7 @@ the sources side: make the sim produce what the real drone produces.
 
 Give it ~30 s after start before expecting movement. With GPS disabled the EKF
 needs the vision pose and a global origin before it will accept a takeoff — see
-docs/DEVELOP-PIPELINES.md. pad_mission waits for exactly that on its own and
+docs/Develop Pipelines.md. pad_mission waits for exactly that on its own and
 logs what it is waiting for.
 """
 
@@ -70,7 +70,7 @@ def generate_launch_description():
         # Sim-only VO drift logger; see sources_sim.launch.py.
         DeclareLaunchArgument("odom_error", default_value="true"),
         DeclareLaunchArgument("odom_error_print", default_value="false"),
-        DeclareLaunchArgument("odom_error_dir", default_value="/ws/logs"),
+        DeclareLaunchArgument("odom_error_dir", default_value=""),
     ]
 
     sources = IncludeLaunchDescription(

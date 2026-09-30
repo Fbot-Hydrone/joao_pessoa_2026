@@ -123,7 +123,7 @@ def generate_launch_description():
     # ring coverage is 1.0, arms 4, concentricity offset 0.005.
     #
     # SIM VALUES. The library defaults and its tests are unchanged; retune
-    # against the real arena lighting per docs/LANDING-SITES.md §3.
+    # against the real arena lighting per docs/Pad Detector.md.
     blue_hsv_low = [95, 30, 50]
     yellow_hsv_low = [18, 30, 90]
 
@@ -167,7 +167,7 @@ def generate_launch_description():
     )
 
     pad_map = Node(
-        package="hydrone_map",
+        package="hydrone_nav",
         executable="pad_map_node",
         name="pad_map",
         output="screen",
@@ -189,7 +189,7 @@ def generate_launch_description():
     # where back-projection belongs. Coverage has no counterpart on the ZED, so
     # it lives here.
     feature_map = Node(
-        package="hydrone_map",
+        package="hydrone_nav",
         executable="feature_map_node",
         name="feature_map",
         output="screen",
@@ -243,7 +243,7 @@ def generate_launch_description():
     # different meanings — set publish_map_tf:=false there, or set this argument
     # false and let the ZED own it. See sources_real.launch.py.
     map_odom_tf = Node(
-        package="hydrone_localization",
+        package="hydrone_bringup",
         executable="map_odom_node",
         name="map_odom",
         output="screen",

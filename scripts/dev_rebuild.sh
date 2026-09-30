@@ -21,13 +21,9 @@
 set -e
 cd "$(dirname "$0")/.."
 
-# Derived from the disk, not written by hand: a new package under src/ is
-# picked up here, in the Dockerfile and in the chown below without an edit.
-PKG_DIRS=(src/hydrone_* src/biguasim-ros2/*)
-ALL_PKGS=()
-for d in "${PKG_DIRS[@]}"; do
-    [ -f "$d/package.xml" ] && ALL_PKGS+=("$(basename "$d")")
-done
+ALL_PKGS=(hydrone_msgs biguasim_interfaces biguasim_main hydrone_bringup
+          hydrone_vision hydrone_controller hydrone_nav hydrone_mission
+          hydrone_lio)
 
 RESTART=false
 pkgs=()
@@ -57,10 +53,9 @@ docker compose exec -w /ws -e PYTHONDONTWRITEBYTECODE=1 hydrone bash -c \
     ". /opt/ros/humble/setup.sh && colcon build --symlink-install --packages-select ${pkgs[*]}"
 # Only the bind-mounted project trees — never /ws/src/ardupilot & friends,
 # which are image-internal and legitimately root-owned.
-MOUNTED_SRC=(/ws/src/biguasim-ros2)
-for d in src/hydrone_*; do
-    [ -f "$d/package.xml" ] && MOUNTED_SRC+=("/ws/${d}")
-done
+MOUNTED_SRC=(/ws/src/hydrone_bringup /ws/src/hydrone_controller
+             /ws/src/hydrone_mission /ws/src/hydrone_msgs /ws/src/hydrone_nav
+             /ws/src/hydrone_vision /ws/src/biguasim-ros2)
 docker compose exec -w /ws hydrone bash -c \
     "find ${MOUNTED_SRC[*]} ! -uid $(id -u) -exec chown $(id -u):$(id -g) {} + 2>/dev/null; true"
 

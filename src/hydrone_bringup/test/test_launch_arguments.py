@@ -66,13 +66,6 @@ WRAPPER_PAIRS = [
     # The real-hardware wrapper includes TWO files and must not shadow either.
     ("phase1_real.launch.py", "phase1.launch.py"),
     ("phase1_real.launch.py", "sources_real.launch.py"),
-    # Same shape, one camera's job swapped: the real-hardware wrapper for the
-    # older ZED-detects mission. Added 2026-09-05 alongside the YOLO backend —
-    # this is the file that made phase1_zed_detect.launch.py runnable on the
-    # drone at all, and it is exactly the shape the 2026-08-22 bug hit, so it
-    # gets the same two checks as its sibling.
-    ("phase1_zed_detect_real.launch.py", "phase1_zed_detect.launch.py"),
-    ("phase1_zed_detect_real.launch.py", "sources_real.launch.py"),
     # phase1_dry is here for the SHADOWING test only — it must not re-declare
     # anything either. It is exempt from the forwarding test, because
     # forwarding is the entire reason it exists; see FORWARDING_EXEMPT and
@@ -80,6 +73,7 @@ WRAPPER_PAIRS = [
     # tightly than "nothing" would.
     ("phase1_dry.launch.py", "phase1.launch.py"),
     ("phase1_dry.launch.py", "sources_real.launch.py"),
+    ("phase3_sim.launch.py", "phase4_sim.launch.py"),
 ]
 
 # {wrapper: {inner: allowed forwards}}. Every entry needs the argument written
@@ -90,10 +84,6 @@ FORWARDING_EXEMPT = {
     # wrapper knows and the shared autonomy file cannot. Forwarded without
     # being declared, so a command-line value still wins.
     ("phase1_real.launch.py", "phase1.launch.py"): {"field_mode"},
-    # Same exemption, same reason, one camera over: a fact about the pad in
-    # front of whichever camera is doing the detecting in THIS mission.
-    ("phase1_zed_detect_real.launch.py", "phase1_zed_detect.launch.py"):
-        {"field_mode"},
     # The dry launch exists to override its includes. Neither is tuning
     # somebody would edit elsewhere and expect to win, and dry_run is asserted
     # to actually arrive by test_the_dry_launch_really_is_dry.
@@ -101,6 +91,11 @@ FORWARDING_EXEMPT = {
         {"field_mode", "dry_run"},
     ("phase1_dry.launch.py", "sources_real.launch.py"):
         {"zed_point_cloud"},
+    # Phase 3 IS phase4_sim with another airframe file and mission: phase and
+    # mission are fixed; agent_name (the camera scenario) and map_name forward
+    # with a fallback default and are not declared, so the command line wins.
+    ("phase3_sim.launch.py", "phase4_sim.launch.py"):
+        {"agent_name", "map_name", "phase", "mission"},
 }
 
 
@@ -265,12 +260,25 @@ LAUNCH_FILES = [
     "landing_sites_sim.launch.py",
     "hydrone_sim.launch.py",
     "hydrone_bringup.launch.py",
-    "phase1_zed_detect_real.launch.py",
+    # The Kopis/Livox airframe. Shares only the bridge, SITL and MAVROS with
+    # everything above it, which is why it is one entry and not a pair.
+    "phase4_sim.launch.py",
+    # Phase 3 on the same airframe; phase3_sim is a pure include of phase4_sim.
+    "phase3_real.launch.py",
 ]
 
 
-def _nodes_of(description: LaunchDescription):
-    """Every Node in a description, including inside group/conditional actions."""
+def _nodes_of(description: LaunchDescription, context: LaunchContext = None):
+    """Every Node in a description, including inside group/conditional actions.
+
+    OpaqueFunctions are EXECUTED when a `context` is given, because a launch
+    file that builds its nodes inside one (sources_sim.launch.py does, so that
+    `agent_name` is resolved before the biguasim config is read) otherwise
+    presents an entity list with no Node in it at all — and every check below
+    would pass by finding nothing. Without a context they are skipped: running
+    one needs the declared arguments to already carry their defaults.
+    """
+    from launch.actions import OpaqueFunction
     from launch_ros.actions import Node
 
     seen = []
@@ -279,6 +287,8 @@ def _nodes_of(description: LaunchDescription):
         for entity in entities:
             if isinstance(entity, Node):
                 seen.append(entity)
+            if context is not None and isinstance(entity, OpaqueFunction):
+                walk(entity.execute(context) or [])
             # GroupAction and friends hold their children in different
             # attributes; try the two that matter and ignore the rest.
             for attr in ("entities", "_GroupAction__actions"):
@@ -317,7 +327,11 @@ def test_every_node_parameter_evaluates(launch_file):
         if default is not None:
             context.launch_configurations[name] = default
 
-    for node in _nodes_of(description):
+    try:
+        nodes = _nodes_of(description, context)
+    except PackageNotFoundError as exc:
+        pytest.skip(f"{launch_file} needs a package absent from this image: {exc}")
+    for node in nodes:
         for entry in (node._Node__parameters or []):
             if not isinstance(entry, dict):
                 continue          # a YAML path; nothing to type-check
@@ -400,7 +414,7 @@ def test_dry_run_reaches_the_mission_node():
         if default is not None:
             context.launch_configurations[name] = default
 
-    mission = [n for n in _nodes_of(description)
+    mission = [n for n in _nodes_of(description, context)
                if n._Node__node_executable == "phase1_mission_node"]
     assert mission, "phase1.launch.py no longer starts phase1_mission_node."
 

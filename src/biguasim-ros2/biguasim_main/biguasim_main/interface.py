@@ -1,13 +1,12 @@
+from rclpy.time import Time
 import biguasim
 import json
-import os
 import yaml
 
 import numpy as np
 
 from pathlib import Path
 
-from biguasim_main.bases import sample_bases
 from biguasim_main.sensor_data_encode import encoders, multi_publisher_sensors
 
 #TODO: Maybe add sensor data encode to this file
@@ -47,6 +46,10 @@ class BiguaSimInterface():
 
         #TODO: Make a parameter to use the system time
         self.system_time = True
+        # When set (ns), stamps become anchor + simulation time instead of the
+        # wall clock. Needed by anything that integrates over stamps (an IMU
+        # into a LIO) while the sim runs slower than real time.
+        self.sim_clock_anchor_ns = None
         
         self.r2b = str.maketrans('_', '-')
         self.b2r = str.maketrans('-', '_')
@@ -54,76 +57,14 @@ class BiguaSimInterface():
         self.command = dict()
 
         #TODO: make sure dynamics sensor is enabled 
-        # 'bases' não faz parte do schema do BiguaSim — sai daqui antes do make.
-        # Com init=False quem cria o env é o ardubridge_node, e é ele que chama
-        # spawn_bases() depois; por isso a config fica guardada.
-        self.bases_cfg = scenario.pop('bases', None)
-
         if init:
             self.env = biguasim.make(scenario_cfg=scenario)
             self.scenario = self.env._scenario
-            if self.bases_cfg:
-                self.spawn_bases(self.bases_cfg)
             self.initialized = True
             self.sensors = self.create_sensor_list()
         else:
             self.scenario = scenario
             self.initialized = False
-
-    def spawn_bases(self, cfg=None):
-        """Sorteia e spawna as bases móveis antes do primeiro tick."""
-        cfg = cfg or self.bases_cfg
-        if not cfg:
-            return
-
-        # BASES_SEED overrides config.yaml, and exists so a seed SWEEP costs
-        # nothing: the same arena layout question — "does this algorithm work
-        # on more than the one arena it was tuned on" — needs a different
-        # layout per run, and editing the tracked config.yaml between runs
-        # would either dirty the tree or require a rebuild to take effect. An
-        # environment variable reaches the container at RUN time, so a sweep is
-        # a loop over `BASES_SEED=n docker_up.sh` with no build in between.
-        seed = cfg['seed']
-        override = os.environ.get('BASES_SEED', '').strip()
-        if override:
-            try:
-                seed = int(override)
-            except ValueError:
-                print(f"[bases] BASES_SEED={override!r} is not an integer; "
-                      f"keeping config.yaml's {seed}")
-
-        positions = sample_bases(
-            count=cfg['count'],
-            seed=seed,
-            z_min=cfg.get('z_min', 0.0),
-            z_max=cfg.get('z_max', 1.5),
-            min_spacing=cfg.get('min_spacing', 1.5),
-            house=cfg['house'],
-            house_height=cfg['house_height'],
-            takeoff=cfg['takeoff'],
-        )
-
-        for x, y, z in positions:
-            # Y INVERTIDO: o SpawnMesh do mapa usa o eixo Y com sinal oposto ao
-            # do 'location' do agente, que é o frame em que a arena foi medida
-            # (casinha x[-4,2] y[2,4], takeoff x[2,4] y[2,4]). Sem o sinal, uma
-            # base sorteada em y=-2.89 aparecia em +2.89, ou seja, em cima da
-            # base de decolagem — enquanto o keep-out, que trabalha no frame
-            # medido, a considerava livre. Diagnosticado espelhando as
-            # coordenadas do log contra o viewport (2026-08-26).
-            self.env.send_world_command(
-                "CustomCommand",
-                string_params=["SpawnMesh", cfg['blueprint']],
-                num_params=[x, -y, z],
-            )
-
-        self.env.tick()
-
-        if self.node is not None:
-            self.node.get_logger().info(
-                f"{len(positions)} bases spawnadas (seed {seed}): "
-                + ", ".join(f"[{x:.2f}, {y:.2f}, {z:.2f}]" for x, y, z in positions)
-            )
 
     def _get_agent_id(self, agent_name : str):
         split = agent_name.find('_')
@@ -135,9 +76,46 @@ class BiguaSimInterface():
         control_abstraction = self.env._dynamics_dict[agent_name].control_abstraction
         
         if control_abstraction == 'cmd_motor_speeds' or control_abstraction == 'cmd_motor_speed':
-            return MOTOR_SPEEDS[agent_type]
+            return self._num_motors(agent_type)
             
         return COMMAND_MAP[control_abstraction]
+
+    @staticmethod
+    def _num_motors(agent_type):
+        """How many motor commands this airframe takes.
+
+        MOTOR_SPEEDS above is a local table, and it goes stale every time
+        BiguaSim gains an airframe: an agent_type it does not list arrives here
+        as a bare `KeyError: '<type>'` raised from inside sensor-list
+        construction, which reads like a broken scenario file rather than a
+        missing row (measured on KopisX8, 2026-09-04).
+
+        BiguaSim already knows the answer — ardubridge_node matches the same
+        agent_type against VEHICLE_REGISTRY to pick the vehicle profile, and
+        that profile carries num_motors. So ask the registry before giving up.
+        The table is kept, and consulted FIRST, so an airframe whose registry
+        entry is wrong can still be overridden here.
+
+        The import is local and guarded because this module is also used by
+        biguasim_node, which has nothing to do with ArduPilot and should not
+        start needing the ardubridge package to import.
+        """
+        if agent_type in MOTOR_SPEEDS:
+            return MOTOR_SPEEDS[agent_type]
+
+        try:
+            from biguasim.ardubridge import VEHICLE_REGISTRY
+        except ImportError:
+            VEHICLE_REGISTRY = {}
+        match = next((k for k in VEHICLE_REGISTRY
+                      if k.upper() == agent_type.upper()), None)
+        if match is not None:
+            return VEHICLE_REGISTRY[match].num_motors
+
+        raise RuntimeError(
+            f"no motor count for agent_type '{agent_type}': it is in neither "
+            f"MOTOR_SPEEDS ({', '.join(sorted(MOTOR_SPEEDS))}) nor biguasim's "
+            "VEHICLE_REGISTRY. Add it to whichever one describes the airframe.")
 
 
     def parse_scenario(self, path):
@@ -176,7 +154,31 @@ class BiguaSimInterface():
         if biguasim_scenario_yaml is None:
             raise KeyError("Could not find 'biguasim_scenario' in the YAML file.")
 
+        biguasim_scenario_yaml.update(self.load_sim_settings(Path(scenario_path).parent))
         return biguasim_scenario_yaml
+
+    @staticmethod
+    def load_sim_settings(config_dir):
+        """Scenario keys from sim_settings.yaml. Missing file -> biguasim defaults."""
+        path = Path(config_dir) / 'sim_settings.yaml'
+        if not path.exists():
+            return {}
+        with open(path, 'r') as file:
+            settings = yaml.safe_load(file) or {}
+
+        out = {}
+        viewport = settings.get('viewport')
+        if viewport is not None:
+            width, height = viewport.get('width'), viewport.get('height')
+            # a bad value here would only show up as a weird UE5 window, so fail loud
+            for key, value in (('width', width), ('height', height)):
+                if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                    raise ValueError(
+                        f"{path}: viewport.{key} must be a positive integer, got {value!r}")
+            # biguasim reads these straight from the scenario (environments.py)
+            out['window_width'] = width
+            out['window_height'] = height
+        return out
 
     def create_sensor_list(self):
         scenario = self.scenario
@@ -241,17 +243,18 @@ class BiguaSimInterface():
 
     def publish_sensor_data(self, state : dict):
         self._state = state.copy()
+        # one stamp per tick, so every sensor of the same tick agrees
+        if self.sim_clock_anchor_ns is not None and 't' in state:
+            stamp = Time(nanoseconds=self.sim_clock_anchor_ns + int(state['t'] * 1e9)).to_msg()
+        elif self.system_time:
+            stamp = self.node.get_clock().now().to_msg()
+        else:
+            stamp = Time(nanoseconds=int(state['t'] * 1e9)).to_msg()
         for sensor in self.sensors:
             try:
                 agent_name, idx = sensor.agent_name.split('_id')
                 msg = sensor.encode(state[agent_name][int(idx)][sensor.state_name])
-
-                # Header
-                if self.system_time:
-                    msg.header.stamp = self.node.get_clock().now().to_msg()
-                else:
-                    msg.header.stamp.sec = int(state['t'])  # Set seconds part from state['t']
-                    msg.header.stamp.nanosec = int((state['t'] - msg.header.stamp.sec) * 1e9)
+                msg.header.stamp = stamp
 
                 sensor.publisher.publish(msg)
             except KeyError:

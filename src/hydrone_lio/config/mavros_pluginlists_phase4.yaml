@@ -1,0 +1,18 @@
+# MAVROS apm_pluginlists.yaml with vision_speed_estimate allowed (phase 4 sends LIO velocity).
+/**:
+  ros__parameters:
+    plugin_denylist:
+      # common
+      - actuator_control
+      - ftp
+      - hil
+      # extras
+      - altitude
+      - debug_value
+      - image_pub
+      - px4flow
+      - vibration
+      - wheel_odometry
+
+    # plugin_allowlist:
+    #   - 'sys_*'

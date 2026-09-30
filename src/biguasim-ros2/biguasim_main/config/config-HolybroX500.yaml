@@ -1,0 +1,128 @@
+/**:
+  ros_parameters:
+    biguasim_scenario:
+      package_name: Competition
+      world: CompetionMap
+      # Must match an agent_name below — biguasim matches this against
+      # '<agent_name>-id0' to flag the main agent (environments.py). It read
+      # 'auv0' while the agent is 'uav0', so no agent was ever the main one.
+      main_agent: uav0
+      ticks_per_sec: 200
+      frames_per_sec: 60
+      octree_min: 0.1
+      octree_max: 5
+      draw_arrow: true
+      show_viewport: true
+      agents:
+        - agent_name: uav0
+          agent_type: HolybroX500
+          publish_commands: false
+          sensors:
+            - sensor_type: DynamicsSensor
+              ros_publish: true
+              configuration:
+                UseCOM: true
+                UseRPY: false
+            - sensor_type: LocationSensor
+              ros_publish: true
+            - sensor_type: RotationSensor
+              ros_publish: true
+            - sensor_type: VelocitySensor
+              ros_publish: true
+            # Cameras throttled via Hz (must divide ticks_per_sec). With the
+            # array.array encode fix the loop sustains ~82 Hz with both 640x480
+            # cameras, so ticks_per_sec=90 runs ~0.92x real-time (lower the camera
+            # Hz or resolution for more headroom). Dropping the cameras lets the
+            # loop reach ~260 Hz (raise ticks_per_sec + SCHED_LOOP_RATE for crisper
+            # attitude control).
+            # Resolution key is CaptureWidth/CaptureHeight — plain Width/Height is
+            # silently ignored by the BiguaSim sensor (defaults to 256x256). FOV
+            # feeds the CameraInfo intrinsics; RGBCamera/DepthCamera render at UE's
+            # default 90 deg (they don't support FovAngle), so 90 keeps fx/fy
+            # correct. Matching the real ZED 2's 110 deg needs a FovAngle-capable
+            # sensor (RGBDCamera/CameraSensor) — a separate change.
+            # Cameras ON. Rendering caps the loop at ~82 Hz, but with synthetic
+            # clock the attitude loop runs in sim-time, so keeping ticks_per_sec=200
+            # + SCHED_LOOP_RATE=100 keeps flight STABLE — the cost is the sim runs
+            # slow-motion wall-clock while the cameras are on (more so at higher Hz).
+            # Hz must divide ticks_per_sec (200/20=10). For real-time flight w/o vision,
+            # comment these out and the loop reaches ~260 Hz (real-time at ticks 200).
+            # Hz 20 -> 10 (2026-08-18): with the third (down) camera added, the
+            # total render load pushed the sim loop far enough below real time
+            # that the FDM loop picked up ~0.3-0.5 s of actuation lag — measured
+            # in the dataflash RATE stream as the actual rate trailing the
+            # demanded rate by that much, which made the attitude controller
+            # oscillate to a flip within seconds of the first real maneuver
+            # ("Crash: AngErr=170>30"). 2x640x480@20 was the proven-stable
+            # budget; 3 renders must fit in the same budget, so the ZED pair
+            # drops to 10 Hz. VO and detection both close fine at 10 Hz.
+            - sensor_type: RGBCamera
+              ros_publish: true
+              Hz: 10
+              location: [0.14, 0, -0.08]
+              configuration: {CaptureWidth: 640, CaptureHeight: 480}
+            - sensor_type: DepthCamera
+              ros_publish: true
+              Hz: 10
+              location: [0.14, 0, -0.08
+              ]
+              configuration: {CaptureWidth: 640, CaptureHeight: 480, FOV: 90}
+            # Down-facing RGB camera (nadir). The ZED faces forward, so it can
+            # SPOT a landing pad ahead but loses it under the airframe exactly
+            # when precision matters — during the final descent. This is the
+            # camera the drone lands on. On the real drone it is a plain USB/CSI
+            # RGB camera on the belly; here it is a second RGBCamera.
+            #
+            # sensor_name is what makes a second camera of the same type
+            # possible: BiguaSim keys sensors by name (defaulting to the type),
+            # and the ROS bridge publishes under that name — so this one lands on
+            # /biguasim/<agent>/DownCamera instead of colliding with the ZED's
+            # /biguasim/<agent>/RGBCamera.
+            #
+            # rotation is [roll, pitch, yaw] in DEGREES. VERIFIED IN UE
+            # 2026-08-18: pitch +90 aims the lens at the ground (checked by
+            # eye on /down_cam/image_raw — the camera sees the pad below, per
+            # docs/Landing Sites.md's one-time check). BiguaSim's docs read
+            # pitch as rotation about the RIGHT axis (right-handed), which is
+            # why the sign is opposite to the nose-up-positive guess.
+            # down_cam_mimic_node derives the ROS mount TF from this same
+            # value — see _down_cam_rpy_deg() in sources_sim.launch.py.
+            #
+            # Hz 10, half the ZED's: a third render is the single most expensive
+            # thing on this list, and the landing loop closes fine at 10 Hz.
+            - sensor_type: RGBCamera
+              sensor_name: DownCamera
+              ros_publish: true
+              Hz: 10
+              # z must clear the airframe: at -0.12 the camera renders
+              # from INSIDE the body mesh and sees the frame instead of
+              # the ground. Check once in RViz on /down_cam/image_raw.
+              location: [0.0, 0, -0.1]
+              rotation: [0, 90, 0]
+              # 640x480 (2026-08-18, second pass): 320x240 was tried first to
+              # save render budget, but at cruise the pad shrinks to ~64 px
+              # and the thin ring/cross no longer survive thresholding —
+              # measured in flight: detected at 1.6 m on climb-out, silent by
+              # 2.25 m. At 640x480 the pad is ~128 px at 2.5 m and the
+              # structure resolves. The budget stays ~40% below the original
+              # 3-camera load because the ZED pair now runs at 10 Hz.
+              configuration: {CaptureWidth: 640, CaptureHeight: 480, FOV: 90}
+            # Down-facing rangefinder (nadir altimeter) — Phase 1&2 sensor config.
+            # Holodeck's RangeFinderSensor is a LaserScan scanner; LaserCount:1 +
+            # LaserAngle:-90 aims the single beam straight down. Published as
+            # LaserScan on /biguasim/<agent>/RangeFinderSensor; rangefinder_bridge
+            # converts it to a MAVLink DISTANCE_SENSOR for ArduPilot (landing/flare
+            # Z ref, NOT EKF height).
+            - sensor_type: RangeFinderSensor
+              ros_publish: true
+              Hz: 20
+              configuration:
+                LaserCount: 1
+                LaserAngle: -90        # feixe reto pra baixo
+                LaserMaxDistance: 40
+          dynamics:
+            batch_size : 1
+          control_abstraction : 'accel'
+          location: [3, 3.4, 0.78]
+          # location: [3, -9.4, 0.22]
+          rotation: [0, 0, -90]

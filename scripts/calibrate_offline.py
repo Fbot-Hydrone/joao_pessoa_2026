@@ -318,7 +318,7 @@ def main():
     elif err < 1.0:
         verdict = "acceptable"
     else:
-        verdict = "HIGH -- suspect board flatness, see docs/CALIBRATION.md 5"
+        verdict = "HIGH -- suspect board flatness, see docs/Calibration.md"
     print(f"\nreprojection error: {err:.4f} px ({verdict})")
     print(f"resolution        : {size[0]}x{size[1]}")
     print(f"fx {fx:.3f}  fy {fy:.3f}  cx {cx:.3f}  cy {cy:.3f}")

@@ -3,7 +3,7 @@
 #
 #   ./scripts/rviz_remote.sh                 # markers, TF, pose
 #   ./scripts/rviz_remote.sh -d my.rviz      # with a saved config
-#   ./scripts/rviz_remote.sh --wifi          # if the cable is unplugged
+#   ./scripts/rviz_remote.sh --wifi          # force the wifi
 #
 # WHY NOT ON THE JETSON
 # rviz2 is deliberately not in the drone's image. A Tegra X1 renders it badly,
@@ -18,17 +18,24 @@
 # Use rqt_image_view on a single topic if you need to see a camera, or better,
 # look at the debug images on the drone's own screen.
 #
-# On --cable (the default) that warning is largely lifted: the direct
-# 10.10.0.0/24 gigabit link is dedicated, so a camera display costs the drone's
-# wifi nothing. The point cloud is still a lot of data for rviz itself to draw.
+# When the link ends up being the cable that warning is largely lifted: the
+# direct 10.10.0.0/24 gigabit link is dedicated, so a camera display costs the
+# drone's wifi nothing. The point cloud is still a lot of data for rviz itself
+# to draw. The line this script prints on startup says which link you got, and
+# it repeats the warning whenever that link is the wifi.
 #
 # ── WHICH LINK ──────────────────────────────────────────────────────────────
-#   --cable  (default)  pin DDS to the direct cable
-#   --wifi              pin DDS to the wireless interface
+#   --auto  (default)   the cable if it is plugged in and carrying a link, the
+#                       wifi otherwise. jetson_up.sh defaults to --auto too and
+#                       tests the same physical fact, so both ends decide alike
+#                       without anyone typing a flag.
+#   --cable             insist on the direct cable
+#   --wifi              insist on the wireless interface
 #   --any               no pinning; whatever DDS negotiates (old behaviour)
 #
-# --cable requires jetson_up.sh --cable on the other end, or nothing is
-# publishing there and rviz shows an empty scene with no error.
+# An explicit --cable requires jetson_up.sh --cable on the other end, or
+# nothing is publishing there and rviz shows an empty scene with no error --
+# the reason the default measures the link instead. See scripts/dds_iface.sh.
 #
 # DOMAIN IDS HAVE TO MATCH, and the two halves of this project do not agree by
 # default: docker-compose.yml sets ROS_DOMAIN_ID=42 for the simulator, while
@@ -45,14 +52,15 @@ cd "$(dirname "$0")/.."
 IMAGE="${IMAGE:-joao_pessoa_2026-hydrone:latest}"
 DOMAIN="${ROS_DOMAIN_ID:-0}"
 CONFIG=""
-MODE=cable
+MODE=auto
 while [ $# -gt 0 ]; do
     case "$1" in
         -d|--config) CONFIG="${2:-}"; shift 2 ;;
+        --auto)      MODE=auto;  shift ;;
         --cable)     MODE=cable; shift ;;
         --wifi)      MODE=wifi;  shift ;;
         --any)       MODE=any;   shift ;;
-        -h|--help)   sed -n '2,44p' "$0"; exit 0 ;;
+        -h|--help)   sed -n '2,47p' "$0"; exit 0 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
@@ -106,12 +114,10 @@ if [ -n "$CONFIG" ]; then
     inner+=" -d /tmp/rviz.rviz"
 fi
 
-if [ -n "$DDS_PROFILE" ]; then
-    echo "link: $MODE  ($DDS_IFACE $DDS_ADDR)"
-else
-    echo "link: any (DDS picks; may use the wifi)"
-fi
+dds_iface_report
 echo "rviz2 on ROS_DOMAIN_ID=$DOMAIN  (the drone must match)"
 echo "add:  /hydrone/pads/markers   TF   /mavros/local_position/pose"
-[ "$MODE" = cable ] || echo "avoid: raw images and point clouds -- this is a wifi link"
+# DDS_MODE, not MODE: with --auto the flag says nothing about which link this
+# actually got, and the warning is about the link.
+[ "$DDS_MODE" = cable ] || echo "avoid: raw images and point clouds -- this is not the cable"
 exec docker run "${run_args[@]}" "$IMAGE" bash -lc "$inner"
