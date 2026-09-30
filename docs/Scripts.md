@@ -264,3 +264,13 @@ Written against the simulator: the default topic is
 conventions the sim's mimic nodes use (655.04 m vs NaN). `--topic` points it
 anywhere, so it works on the real ZED too, but the defaults and the reasoning
 are sim-era.
+
+## Phase 4 tools (`tools/phase4/`)
+| Tool | What |
+|---|---|
+| `sim_known.py` | The known-map Phase 4 stack in the kinematic sim, headless, no ROS. Options: `--degen 0.15` (LIO slides inside), `--closed <passage>`, `--yaw-error`, `--viz` (to the [[Maze Viewer]]), `--realtime`. Prints the log, the result and the pose error. See [[Phase 4 Known Maze]]. |
+| `survey_teleport.py` | Teleport survey of the BiguaSim structure: puts the Kopis at a grid of poses and records ground-truth scans. Runs inside the stack image, no SITL. |
+| `survey_to_map.py` | Survey → measured KnownMap + height slices. **Work in progress:** scans from different poses disagree by up to ~1 m, so only single scans are trusted for now. |
+| `replay_maze_bag.py`, `plot_map.py`, `slice_map.py`, `plan_offline.py` | Bag/map tools of the [[Phase 4 Maze Explorer]]. |
+
+`ros2 launch hydrone_bringup phase4_simple.launch.py` runs the same stack on ROS against `kinematic_sim_node` instead of BiguaSim (see [[Confined Navigation]]).
