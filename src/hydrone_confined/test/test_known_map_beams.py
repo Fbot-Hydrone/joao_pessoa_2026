@@ -210,6 +210,38 @@ def test_mux_matches_map_poses_at_their_scan_stamp():
     assert np.allclose(mux.T, 0.0, atol=1e-6)
 
 
+def test_mux_flies_on_the_map_when_odometry_dies_and_absorbs_its_jump():
+    mux = PoseMux()
+    mux.request('map')
+    truth = lambda t: np.array([2.0 + 0.1 * t, 1.0, 0.7, 0.0])  # noqa: E731  moving 0.1 m/s
+    out = _run_mux(mux, 0.0, 5.0, truth, truth)
+    # LIO goes silent for 4 s (map poses keep coming): the output follows the map
+    t, prev = 5.0, mux.pose().copy()
+    steps = []
+    while t < 9.0:
+        alone = mux.on_map(t, truth(t), True, stamp=t)
+        assert alone == (t - 4.9 > mux.p.odom_timeout + 1e-9)
+        steps.append(np.linalg.norm(mux.pose()[:2] - prev[:2]))
+        prev = mux.pose().copy()
+        t += 0.1
+    assert mux.mode == 'map-only'
+    assert abs(mux.pose()[0] - truth(t - 0.1)[0]) < 0.03
+    assert max(steps) < 0.05
+    # it comes back 2.8 m off (FAST-LIO after "No Effective Points"): no jump
+    before = mux.pose().copy()
+    mux.on_odom(t, truth(t) + [2.8, 0.0, 0.0, 0.0])
+    assert np.linalg.norm(mux.pose()[:2] - before[:2]) < 0.05
+    assert any('re-anchored' in m for _, m in mux.events)
+    # and a jump in mid-flight is absorbed too
+    t += 0.1
+    mux.on_odom(t, truth(t) + [2.8, 0.0, 0.0, 0.0])
+    before = mux.pose().copy()
+    t += 0.1
+    mux.on_odom(t, truth(t) + [4.3, 0.0, 0.0, 0.0])
+    assert np.linalg.norm(mux.pose()[:2] - before[:2]) < 0.05
+    assert any('jumped' in m for _, m in mux.events)
+
+
 def test_mux_anchor_tracks_map_slowly_on_odometry():
     mux = PoseMux()
     mux.track = True

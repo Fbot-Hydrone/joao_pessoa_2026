@@ -12,9 +12,10 @@ GOTO       fly to a point inside a room (planner on the known raster)
 LOOK       turn around once (camera sees every wall), or just hold
 ALIGN      stand in front of a passage at its own height (holes are low,
            windows high)
-VERIFY     the forward beam must see through it; if not, SEARCH along the
-           wall (soft passages may sit elsewhere), else it's walled up:
-           replan without it
+VERIFY     the beam through it, and the ones 15 deg either side, must see
+           past the wall; if not, SEARCH: sweep the wall at pass height and
+           centre on the longest open stretch (soft passages may sit
+           elsewhere); nothing open: walled up, replan without it
 CRAWL      straight through at a crawl
 GO_LAND    out of the exit, back on LIO, to the landing pad; LAND
 EXPLORE    the prior was wrong enough that no route is left: the generic
@@ -60,7 +61,8 @@ class KnownParams:
     qr_target: int = 5
     verify_s: float = 1.5
     passage_clear: float = 0.3      # forward beam must reach this past the wall line
-    search_offsets: tuple = (0.2, -0.2, 0.4, -0.4, 0.6, -0.6)
+    search_span: float = 0.6       # sweep this far either side of where the gap should be
+    search_step: float = 0.2
     map_wait_s: float = 8.0         # waiting for a flyable map pose before going in
     pad_wait_s: float = 6.0         # and on the pad before taking off
     goal_tol: float = 0.12
@@ -115,6 +117,7 @@ class KnownMission:
         self._blocked_since = None
         self._search = []
         self._shift = {}                        # passage name -> offset found along its wall
+        self._search_open = []
         self._crawl_fails = {}
         self._goal = None
         self._pos = None
@@ -397,60 +400,95 @@ class KnownMission:
             self._replan(pos, f'could not line up with {self._cross["p"].name}')
         return cmd
 
-    def _forward_range(self, yaw, n):
-        """The beam most nearly along world direction n, and its range."""
+    def _beam_along(self, yaw, d):
+        """Range of the beam most nearly along world direction d (unit 2-vector)."""
         b = self.fix.beams if self.fix is not None else None
         if b is None:
             return None
-        want = np.arctan2(n[1], n[0]) - yaw
+        want = np.arctan2(d[1], d[0]) - yaw
         k = int(np.argmin(np.abs((b.angles - want + np.pi) % (2 * np.pi) - np.pi)))
         return float(b.ranges[k])
+
+    def _passage_open(self, pos, yaw, gap_center, n):
+        """(open, centre range): the beam through the gap and the ones 15 deg to
+        either side all reach past the wall line. One beam alone passes along
+        the edge of a gap the body won't fit through."""
+        depth = (gap_center - pos[:2]) @ n          # to the wall line
+        r0 = None
+        ok = True
+        for da in (0.0, np.deg2rad(15.0), -np.deg2rad(15.0)):
+            c, s_ = np.cos(da), np.sin(da)
+            d = np.array([c * n[0] - s_ * n[1], s_ * n[0] + c * n[1]])
+            r = self._beam_along(yaw, d)
+            if da == 0.0:
+                r0 = r
+            if r is None or r <= depth / np.cos(da) + self.p.passage_clear:
+                ok = False
+        return ok, r0
+
+    def _start_search(self, name):
+        base = self._shift.get(name, 0.0)
+        k = int(round(self.p.search_span / self.p.search_step))
+        self._search = [base + i * self.p.search_step for i in range(-k, k + 1)]
+        self._search_open = []
 
     def _ph_verify(self, pos, yaw):
         center, n, t = self._cross_frame()
         z = self._cross['p'].opening.pass_z
         a = center - n * self.p.align_dist
-        r = self._forward_range(yaw, n)
-        depth = (center - pos[:2]) @ n          # to the wall line
-        open_ = r is not None and r > depth + self.p.passage_clear
+        open_, r = self._passage_open(pos, yaw, center, n)
         if open_ and self.elapsed() > 0.5:
             self.go('CRAWL', f'{self._cross["p"].name} is open (beam {r:.2f} m)')
         elif self.elapsed() > self.p.verify_s:
-            self._search = [o + self._shift.get(self._cross['p'].name, 0.0) for o in self.p.search_offsets]
-            self.say(f'{self._cross["p"].name} looks closed (beam {r if r is None else round(r, 2)} m), searching along the wall')
+            self._start_search(self._cross['p'].name)
+            self.say(f'{self._cross["p"].name} looks closed (beam {r if r is None else round(r, 2)} m), '
+                     'sweeping along the wall')
             self.go('SEARCH')
         return self._hover(pos, a, z, self.p.v_crawl)
 
     def _ph_search(self, pos, yaw):
+        """Sweep the wall at pass height, then centre on the longest open stretch."""
         p = self._cross['p']
         _, n, t = self._cross_frame()
         base = p.center
         if not self._search:
-            self.graph_block(p)
-            self._replan(pos, f'{p.name} is walled up')
+            opens = [o for o, ok in self._search_open if ok]
+            # longest run of consecutive open offsets
+            best, run = [], []
+            for o, ok in self._search_open:
+                run = run + [o] if ok else []
+                if len(run) > len(best):
+                    best = run
+            if not best:
+                self.graph_block(p)
+                self._replan(pos, f'{p.name} is walled up')
+                return self._hover(pos, pos[:2], pos[2], self.p.v_crawl)
+            off = 0.5 * (best[0] + best[-1])
+            if abs(off - self._shift.get(p.name, 0.0)) > 0.05:
+                self.fallback_used.append(f'moved:{p.name}')
+            self._shift[p.name] = off
+            self.say(f'{p.name}: open from {best[0]:+.1f} to {best[-1]:+.1f} m along its wall '
+                     f'({len(opens)} of {len(self._search_open)} looks), centring at {off:+.2f}')
+            self.go('ALIGN')
             return self._hover(pos, pos[:2], pos[2], self.p.v_crawl)
         off = self._search[0]
-        a = base + t * off - n * self.p.align_dist
+        gap = base + t * off
+        a = gap - n * self.p.align_dist
         z = p.opening.pass_z
         cmd = self._hover(pos, a, z, self.p.v_crawl)
-        if np.linalg.norm(a - pos[:2]) < self.p.goal_tol and abs(pos[2] - z) < self.p.z_tol:
-            r = self._forward_range(yaw, n)
-            depth = ((base + t * off) - pos[:2]) @ n
-            if r is not None and r > depth + self.p.passage_clear:
-                self._shift[p.name] = off
-                self.fallback_used.append(f'moved:{p.name}')
-                self.say(f'{p.name} found {off:+.1f} m along its wall')
-                self.go('ALIGN')
-                return cmd
+        there = np.linalg.norm(a - pos[:2]) < self.p.goal_tol and abs(pos[2] - z) < self.p.z_tol
+        if there:
             if self._blocked_since is None:
                 self._blocked_since = self.t
-            if self.t - self._blocked_since > 1.0:
+            if self.t - self._blocked_since > 0.8:
+                self._search_open.append((off, self._passage_open(pos, yaw, gap, n)[0]))
                 self._search.pop(0)
                 self._blocked_since = None
-        elif self.elapsed() > 60.0:
-            self._search = []
+        elif self.t - self.t_phase > 15.0 * (len(self._search_open) + 1):
+            # can't get to this spot: count it as closed and move on
+            self._search_open.append((off, False))
+            self._search.pop(0)
         return cmd
-
 
     def graph_block(self, passage):
         for e in self.graph.edges:
@@ -479,8 +517,8 @@ class KnownMission:
             if self._crawl_fails[name] >= 2:
                 # open to the beam but not to the drone: narrower or off-centre
                 # from the map; look for the real gap along the wall
-                self._search = [o + self._shift.get(name, 0.0) for o in self.p.search_offsets]
-                self.say(f'crossing {name} failed twice, searching along the wall')
+                self._start_search(name)
+                self.say(f'crossing {name} failed twice, sweeping along the wall')
                 self._crawl_fails[name] = 0
                 self.go('SEARCH')
             else:

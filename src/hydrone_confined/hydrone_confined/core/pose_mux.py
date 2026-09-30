@@ -17,6 +17,16 @@ what made the drone swing in BiguaSim when the raw map pose was fed through.
 The map pose is matched against odometry *at its own timestamp* (the scan's),
 from a short odometry history, so processing latency doesn't turn into error.
 
+When odometry fails, the map pose carries on alone ('map-only'):
+  - silent for odom_timeout (FAST-LIO "No Effective Points" in a 1 m room,
+    or the motion-prior gate holding it back): the output becomes the map
+    pose, smoothed, emitted on each map pose
+  - a jump (a step faster than max_odom_speed): absorbed into the anchor, so
+    the output doesn't move
+  - back again: re-anchored so it continues from where the output is
+In BiguaSim the EKF lost external nav when LIO went silent inside, failed
+safe to LAND and the drone crashed; that's what this is for.
+
 Poses are (x, y, z, yaw). Pure logic, no ROS.
 """
 from collections import deque
@@ -58,6 +68,9 @@ class MuxParams:
     map_timeout: float = 1.0            # s without a map pose: stop correcting
     rejoin_s: float = 0.5               # healthy this long before corrections resume
     history_s: float = 3.0              # odometry kept to match map stamps
+    odom_timeout: float = 0.35          # s without odometry: fly on the map pose alone
+    max_odom_speed: float = 2.0         # m/s; a faster odometry step is a jump, absorbed
+    map_only_tau: float = 0.2           # s, smoothing of the map pose when it flies alone
 
 
 class PoseMux:
@@ -106,6 +119,19 @@ class PoseMux:
         stamp: the pose's own time (defaults to t) for matching map poses."""
         pose = np.asarray(pose, dtype=float)
         st = t if stamp is None else stamp
+        if self.odom is not None and self.out is not None:
+            gap = t - self.odom[0]
+            step = float(np.hypot(*(pose[:2] - self.odom[1][:2])))
+            if self.mode == 'map-only' or gap > self.p.odom_timeout:
+                # odometry is back: carry on from where the output is
+                self.T = between(self.out[1], pose)
+                self._hist.clear()
+                self.say(t, f'odometry back after {gap:.1f} s, re-anchored')
+                self.mode = 'odom'
+            elif step > self.p.max_odom_speed * max(gap, 0.05) + 0.05:
+                self.T = between(self.out[1], pose)
+                self._hist.clear()
+                self.say(t, f'odometry jumped {step:.2f} m in {gap:.2f} s: absorbed')
         self._hist.append((st, pose))
         while self._hist and st - self._hist[0][0] > self.p.history_s:
             self._hist.popleft()
@@ -122,22 +148,42 @@ class PoseMux:
             self.vel = (1 - a) * self.vel + a * v
         self.out = (t, out)
 
+    def odom_alive(self, t):
+        return self.odom is not None and t - self.odom[0] <= self.p.odom_timeout
+
     def on_map(self, t, pose, healthy=True, stamp=None):
-        """t: arrival time (freshness); stamp: when the scan behind it was taken."""
+        """t: arrival time (freshness); stamp: when the scan behind it was taken.
+        Returns True when it moved the output by itself (map-only)."""
         pose = np.asarray(pose, dtype=float)
         self.map = (t, pose, bool(healthy))
         if not healthy:
             self._ok_since = None
         elif self._ok_since is None:
             self._ok_since = t
+        if not self.odom_alive(t) and self.out is not None and healthy:
+            # no odometry: the map pose flies on its own, smoothed
+            if self.mode != 'map-only':
+                self.say(t, 'odometry silent: flying on the map pose alone')
+                self.mode = 'map-only'
+            dt = float(np.clip(t - self.out[0], 1e-3, 0.5))
+            k = min(1.0, dt / self.p.map_only_tau)
+            d = pose - self.out[1]
+            d[3] = wrap(d[3])
+            new = self.out[1] + k * d
+            new[3] = wrap(new[3])
+            self.vel = (new[:3] - self.out[1][:3]) / dt
+            self.out = (t, new)
+            return True
+        if self.mode == 'map-only':
+            return False                    # wait for odometry to come back (it re-anchors)
         self._update_mode(t)
         fast = self.mode == 'map'
         if not (fast or (self.track and self.map_ok(t))):
             self._t_corr = None
-            return
+            return False
         od = self._odom_at(t if stamp is None else stamp)
         if od is None:
-            return
+            return False
         dt = 0.1 if self._t_corr is None else float(np.clip(t - self._t_corr, 1e-3, 0.5))
         self._t_corr = t
         target = between(pose, od)
@@ -160,6 +206,7 @@ class PoseMux:
         self.T[3] = wrap(self.T[3])
         if self.odom is not None:
             self.out = (self.out[0] if self.out else t, compose(self.T, self.odom[1]))
+        return False
 
     # ── internals ───────────────────────────────────────────────────────────
     def _odom_at(self, st):
@@ -180,6 +227,8 @@ class PoseMux:
         return h[-1][1]
 
     def _update_mode(self, t):
+        if self.mode == 'map-only':
+            return
         mode = 'map' if (self.want == 'map' and self.map_ok(t)) else 'odom'
         if mode != self.mode:
             if mode == 'map':

@@ -53,12 +53,14 @@ class SimParams:
     qr_fov: float = np.deg2rad(70.0)     # full horizontal FOV of the camera
     qr_max_incidence: float = np.deg2rad(60.0)
     camera_yaw: float = 0.0         # camera heading in the body frame
+    lio_blackout: tuple = ()        # (t0, t1): no odometry in between, then it comes back
+    lio_jump: tuple = (0.0, 0.0)    # ...this far off (m, world), like FAST-LIO after losing it
 
 
 @dataclass
 class SensorFrame:
     t: float
-    odom: tuple                     # (xyz (3,), yaw) in odom = the takeoff pose frame
+    odom: tuple                     # (xyz (3,), yaw) in odom = the takeoff pose frame; None = LIO down
     odom_vel: np.ndarray            # (3,) odom frame
     attitude: tuple                 # (roll, pitch) as the FCU reports them
     scan_body: np.ndarray = None    # (N,3) sensor frame, tilted with the body
@@ -180,6 +182,8 @@ def run(world, stack, sparams=None, on_step=None, landing_world=None):
         err = err + degen
         est_world = p + err
         yaw_true = world.yaw0 + psi
+        if sp.lio_blackout and t >= sp.lio_blackout[1]:
+            est_world = est_world + np.array([sp.lio_jump[0], sp.lio_jump[1], 0.0])
         frame = SensorFrame(t=t, odom=(world.to_odom(est_world), psi + yaw_bias),
                             odom_vel=world.to_odom(v + world.takeoff) - world.to_odom(world.takeoff),
                             attitude=(0.0, 0.0), truth=np.array([p[0], p[1], p[2], yaw_true]))
@@ -201,6 +205,8 @@ def run(world, stack, sparams=None, on_step=None, landing_world=None):
             eye = p + np.array([0, 0, 0.05])
             frame.qr = qr_in_view(world, eye, yaw_true + sp.camera_yaw, sp)
             res.qr_seen.update(frame.qr)
+        if sp.lio_blackout and sp.lio_blackout[0] <= t < sp.lio_blackout[1]:
+            frame.odom, frame.scan_reg = None, None
         cmd = stack(frame)
         phase = getattr(stack, 'phase', None)
         if phase != last_phase:

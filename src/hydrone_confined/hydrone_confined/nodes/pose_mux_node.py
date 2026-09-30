@@ -113,7 +113,8 @@ class PoseMuxNode(Node):
 
     def _map(self, m):
         # arrival time for freshness, the scan's stamp to match it against odometry
-        self.mux.on_map(self._now(), self._pose(m), self.healthy, stamp=stamp_s(m.header))
+        if self.mux.on_map(self._now(), self._pose(m), self.healthy, stamp=stamp_s(m.header)):
+            self._publish(m.header.stamp)       # odometry is silent: the map pose flies alone
 
     def _publish(self, stamp):
         pose = self.mux.pose()

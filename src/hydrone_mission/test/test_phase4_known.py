@@ -31,6 +31,9 @@ SCENARIOS = {
     'passage_moved': (dict(perturb={'t2_r5': {'u': (0.68, 1.42)}}), dict()),
     # the drone was put down 12 deg and 15 cm off the takeoff prior
     'start_off': (dict(yaw_error=np.deg2rad(12.0), xy_error=(0.15, -0.1)), dict()),
+    # LIO dies in the middle of the maze for 40 s and comes back 2.8 m off
+    # (FAST-LIO "No Effective Points" in a small room, seen in BiguaSim)
+    'lio_dies': (dict(), dict(lio_blackout=(95.0, 135.0), lio_jump=(2.8, 0.0))),
     # a passage the map has is walled up: no route left, the explorer takes over
     'passage_closed': (dict(perturb={'b2_t2': None}), dict(max_time=600.0)),
 }
@@ -99,6 +102,13 @@ def test_soft_passage_found_where_it_really_is():
 def test_start_pose_off_the_prior():
     km, world, stack, res, err = fly('start_off')
     check_common(km, world, stack, res, err)
+
+
+@pytest.mark.slow
+def test_lio_dying_inside_is_flown_through_on_the_map():
+    km, world, stack, res, err = fly('lio_dies')
+    check_common(km, world, stack, res, err)
+    assert any('map pose alone' in m for _, m in res.log)
 
 
 @pytest.mark.slow

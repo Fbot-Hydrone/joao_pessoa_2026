@@ -48,9 +48,9 @@ Heights differ per passage: holes are passed at 0.41 m, windows at 1.1 m, doors 
 3. **The tour**: a depth-first walk over the room graph, nearest first, the exit room last. At each look point it turns once around (0.8 rad/s) so a camera sees every wall. Long rooms get two look points.
 4. **Passages**:
    - **ALIGN** 0.45 m in front, at the passage's own height.
-   - **VERIFY**: the beam straight through must see ≥ 0.3 m past the wall line.
+   - **VERIFY**: the beam straight through, and the beams 15° to either side, must all see ≥ 0.3 m past the wall line. One beam alone can pass along the edge of a gap the body won't fit through.
    - **CRAWL** through at 0.15 m/s.
-   - If the beam sees a wall: **SEARCH** ±0.2/0.4/0.6 m along the wall (soft passages may sit elsewhere). If still nothing, the passage is walled up and the route is replanned without it.
+   - **SEARCH** if VERIFY fails, or if a crawl times out twice: sweep the wall at pass height from −0.6 to +0.6 m in 0.2 m steps, then centre on the middle of the longest open stretch. If nothing is open, the passage is walled up and the route is replanned without it. (The first version took the first offset where one beam saw through, found a passage shifted by 0.4 m at −0.2 m, and crawled into its jamb forever.)
 5. **QR**: every code read counts once. With `qr_target` (5) read, the rest of the tour is dropped for the shortest way out.
 6. **Exit** window → **GO_LAND** on re-anchored LIO → land on the pad.
 7. **No route left** on the known map (the prior is wrong): the generic explorer takes over. It has been fed the scans all along, registered through the flying pose.

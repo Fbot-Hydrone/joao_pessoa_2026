@@ -39,6 +39,7 @@ class KnownStack:
         self.prior = np.array([to['center'][0], to['center'][1], self.z0, to.get('yaw', 0.0)])
         self.yaw_est = self.prior[3]
         self._odom_prev = None
+        self._started = False
         self._cmd_prev = np.zeros(3)
         self.fix = None
         self.cmd = None
@@ -65,18 +66,22 @@ class KnownStack:
 
     def __call__(self, f):
         t = f.t
-        odom = np.array([f.odom[0][0], f.odom[0][1], f.odom[0][2], f.odom[1]])
-        if self._odom_prev is None:
-            self.loc.start(self.prior[:2], self.prior[3], self.prior[2])
-            self.mux.set_anchor(self.prior, odom)
-            self.mux.track = True
-        # LIO into the mux (velocity in odom axes; the mux turns it with the anchor)
-        self.mux.on_odom(t, odom, np.asarray(f.odom_vel, dtype=float))
-        # odometry step in the body frame, for the particle filter's prediction
         step = None
-        if self._odom_prev is not None:
-            d = odom - self._odom_prev
-            step = np.r_[rot2(-self._odom_prev[3]) @ d[:2], d[2], wrap(d[3])]
+        if f.odom is not None:
+            odom = np.array([f.odom[0][0], f.odom[0][1], f.odom[0][2], f.odom[1]])
+            if self._odom_prev is None and not self._started:
+                self.loc.start(self.prior[:2], self.prior[3], self.prior[2])
+                self.mux.set_anchor(self.prior, odom)
+                self.mux.track = True
+                self._started = True
+            # LIO into the mux (velocity in odom axes; the mux turns it with the anchor)
+            self.mux.on_odom(t, odom, np.asarray(f.odom_vel, dtype=float))
+            # odometry step in the body frame, for the particle filter's prediction
+            if self._odom_prev is not None:
+                d = odom - self._odom_prev
+                step = np.r_[rot2(-self._odom_prev[3]) @ d[:2], d[2], wrap(d[3])]
+        else:
+            odom = None
         self._odom_prev = odom
         cmd_body = None
         if self.cmd is not None:
