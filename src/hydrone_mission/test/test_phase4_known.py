@@ -95,7 +95,10 @@ def test_lio_degenerate_inside():
 @pytest.mark.slow
 def test_soft_passage_found_where_it_really_is():
     km, world, stack, res, err = fly('passage_moved')
-    check_common(km, world, stack, res, err)
+    # the map is wrong on purpose here (wall where the door really is): while
+    # sweeping in front of it the beams disagree with it, so the pose may
+    # stray a little more than elsewhere
+    check_common(km, world, stack, res, err, map_err=0.25)
     assert 'moved:r5_r6' in res.fallback_used
 
 
