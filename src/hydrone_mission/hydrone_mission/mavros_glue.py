@@ -7,6 +7,8 @@ planning frame. This base node turns them into MAVROS:
   - a velocity setpoint every cmd_hz tick, whatever else is happening:
     ArduPilot drops GUIDED velocity control after ~1 s of silence
   - hold still when the pose or the sensor stream goes stale
+  - an uncommanded disarm after arming (RC kill) latches the mission as
+    aborted: never re-arm on our own
   - start only once the FCU has a home: before that EKF3 isn't flying on the
     external nav yet (AHRS still on DCM under a slow sim) and a takeoff is
     accepted and then silently not flown
@@ -99,6 +101,16 @@ class MavrosMissionNode(Node):
     def act(self, cmd, t):
         """Take a core command: MAVROS calls now, the velocity on the timer."""
         self.cmd, self.t_tick = cmd, t
+        if self.takeoff_sent and not self.state.armed and not self.land_sent:
+            # disarmed after we armed and took off: the RC kill switch, or the
+            # FCU giving up. The RC only ever disables the drone, so this
+            # latches: never re-arm, never command again
+            if not self.finished:
+                self.get_logger().error('disarmed without being told to: mission ABORTED (not re-arming)')
+            self.finished = True
+            return
+        if self.finished:
+            return
         if cmd.kind == 'takeoff':
             if not self.started:
                 return
@@ -106,11 +118,6 @@ class MavrosMissionNode(Node):
                 self._call(self.cli_mode, SetMode.Request(custom_mode='GUIDED'), 'GUIDED')
                 return
             if not self.state.armed:
-                if self.takeoff_sent:
-                    # the FCU disarmed on the ground (auto-disarm after a takeoff
-                    # that never took): start over
-                    self.get_logger().warn('disarmed before climbing, arming again')
-                    self.takeoff_sent, self.armed_z = False, None
                 self._call(self.cli_arm, CommandBool.Request(value=True), 'arm')
                 return
             if self.armed_z is None:
@@ -133,7 +140,7 @@ class MavrosMissionNode(Node):
 
     def _control(self):
         """Publish a velocity setpoint every tick, whatever else is going on."""
-        if self.pose is None:
+        if self.pose is None or (self.finished and not self.land_sent):
             return
         if not self.started:
             if self.par['auto_start'] and self.t_pose - self.t_first >= self.par['start_delay']:
