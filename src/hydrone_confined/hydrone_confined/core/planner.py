@@ -8,7 +8,7 @@ import math
 
 import numpy as np
 
-from hydrone_mission.maze.morph import dilate
+from hydrone_confined.core.morph import dilate
 
 SQ2 = math.sqrt(2.0)
 MOVES = ((1, 0, 1.0), (-1, 0, 1.0), (0, 1, 1.0), (0, -1, 1.0),

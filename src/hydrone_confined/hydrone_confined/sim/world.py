@@ -1,4 +1,12 @@
-"""Synthetic Phase 4 arena from the rules layout, as axis-aligned boxes.
+"""Box worlds for the kinematic sim: axis-aligned boxes and a floor at z = 0.
+
+Two ways in:
+  build(layout)          hand-written 2 x 6 m box mazes (the explorer's test layouts)
+  from_known_map(km)     any KnownMap with axis-aligned walls, optionally perturbed
+                         (passages moved or closed) so the real thing differs
+                         from what the drone was told, plus QR codes on walls
+
+The hand-written layouts:
 
 Canonical layout (world frame, floor z = 0, metres):
   arena      [0, 8] x [0, 8], walls 0.5 m tall
@@ -184,3 +192,108 @@ def interior_cells(world, res=0.1, z=1.1, clearance=0.15):
         dy = np.maximum(np.maximum(lo[1] - pts[:, 1], 0), pts[:, 1] - hi[1])
         ok &= np.hypot(dx, dy) >= clearance
     return pts[ok]
+
+
+def _wall_boxes(w, gaps, tag):
+    """Boxes of one axis-aligned KnownMap wall, centred on its line."""
+    t = max(w.t, 0.02)
+    if abs(w.a[0] - w.b[0]) < 1e-6:
+        axis, at, a0, a1 = 'x', w.a[0] - t / 2, w.a[1], w.b[1]
+    elif abs(w.a[1] - w.b[1]) < 1e-6:
+        axis, at, a0, a1 = 'y', w.a[1] - t / 2, w.a[0], w.b[0]
+    else:
+        raise ValueError(f'wall {w.name} is not axis-aligned; the box sim needs it to be')
+    sgn = 1.0 if a1 >= a0 else -1.0
+    lo_, hi_ = min(a0, a1), max(a0, a1)
+    g = [(min(a0 + sgn * u0, a0 + sgn * u1), max(a0 + sgn * u0, a0 + sgn * u1), z0, z1)
+         for u0, u1, z0, z1 in gaps]
+    return _wall(axis, at, lo_, hi_, t, g, h=w.z[1], inward=1, tag=tag)
+
+
+def from_known_map(km, yaw_error=0.0, xy_error=(0.0, 0.0), perturb=None, qr=None, seed=0,
+                   event_walls=True):
+    """A World in the map's own frame (world = map frame).
+
+    yaw_error / xy_error: how far the drone really sits from the map's takeoff pose.
+    perturb: {opening name: None (walled up) | {'u': .., 'z': ..} (moved/resized)}.
+    qr: {letter: (xy, z, normal)} or an int n to scatter n codes on inner walls.
+    """
+    perturb = perturb or {}
+    boxes, openings = [], {}
+    for w in km.walls:
+        gaps = []
+        for o in w.openings:
+            if o.name in perturb and perturb[o.name] is None:
+                continue
+            q = perturb.get(o.name) or {}
+            u, z = tuple(q.get('u', o.u)), tuple(q.get('z', o.z))
+            gaps.append((u[0], u[1], z[0], z[1]))
+            openings[o.name] = (w.at(u[0]), w.at(u[1]), z[0], z[1])
+        tag = 'wall' if w.kind == 'outer' else 'inner'
+        boxes += _wall_boxes(w, gaps, tag)
+    x0, x1, y0, y1 = km.structure
+    h = km.roof_z or 1.5
+    boxes.append(((x0, y0, h), (x1, y1, h + 0.06), 'roof'))
+    to = km.takeoff
+    c, sz, top = to['center'], to['size'], float(to.get('top', 0.54))
+    boxes.append(((c[0] - sz[0] / 2, c[1] - sz[1] / 2, 0.0), (c[0] + sz[0] / 2, c[1] + sz[1] / 2, top),
+                  'takeoff_pad'))
+    if km.landing is not None:
+        lp = km.landing
+        boxes.append(((lp[0] - 0.5, lp[1] - 0.5, 0.0), (lp[0] + 0.5, lp[1] + 0.5, 0.02), 'landing_pad'))
+    if event_walls and km.arena is not None:
+        # the hall around the arena: something for the lidar to hit outside
+        a0, a1, b0, b1 = km.arena
+        m = 1.5
+        for lo, hi in (((a0 - m - 0.1, b0 - m - 0.1, 0), (a1 + m + 0.1, b0 - m, 3.0)),
+                       ((a0 - m - 0.1, b1 + m, 0), (a1 + m + 0.1, b1 + m + 0.1, 3.0)),
+                       ((a0 - m - 0.1, b0 - m, 0), (a0 - m, b1 + m, 3.0)),
+                       ((a1 + m, b0 - m, 0), (a1 + m + 0.1, b1 + m, 3.0))):
+            boxes.append((lo, hi, 'event_wall'))
+    lo = np.array([b[0] for b in boxes], dtype=float)
+    hi = np.array([b[1] for b in boxes], dtype=float)
+    tags = [b[2] for b in boxes]
+    takeoff = np.array([c[0] + xy_error[0], c[1] + xy_error[1], top + 0.08])
+    arena_c = (np.array([0.5 * (km.arena[0] + km.arena[1]), 0.5 * (km.arena[2] + km.arena[3])])
+               if km.arena else (km.landing if km.landing is not None else np.zeros(2)))
+    world = World(lo=lo, hi=hi, tags=tags, structure=tuple(km.structure), openings=openings,
+                  arena_center=arena_c, takeoff=takeoff, yaw0=float(to.get('yaw', 0.0)) + yaw_error,
+                  layout=km.name or 'known_map')
+    if isinstance(qr, int):
+        qr = scatter_qr(km, world, qr, seed)
+    world.meta['qr'] = qr or {}
+    return world
+
+
+def scatter_qr(km, world, n, seed=0, letters='ABCDE'):
+    """n QR codes on inner wall faces of distinct rooms, not in openings.
+
+    Each one: (xy on the wall face, z, normal pointing into the room).
+    """
+    from hydrone_confined.sim import lidar
+    rng = np.random.default_rng(seed)
+    rooms = list(km.rooms)
+    rng.shuffle(rooms)
+    out = {}
+    tries = 0
+    while len(out) < n and tries < 500:
+        tries += 1
+        r = rooms[len(out) % len(rooms)] if len(out) < len(rooms) else rooms[rng.integers(len(rooms))]
+        c = r.center
+        side = rng.integers(4)
+        normal = [np.array([1.0, 0.0]), np.array([-1.0, 0.0]), np.array([0.0, 1.0]), np.array([0.0, -1.0])][side]
+        d = -normal            # look from the centre toward that wall
+        z = float(rng.uniform(0.35, 1.15))
+        # where does that wall face sit, at some point along it
+        along = np.array([-d[1], d[0]])
+        half = 0.5 * (abs((r.x[1] - r.x[0]) * along[0]) + abs((r.y[1] - r.y[0]) * along[1])) - 0.15
+        p0 = c + along * rng.uniform(-half, half)
+        eye = np.array([p0[0], p0[1], z])
+        rngs, which = lidar.cast(eye, np.array([[d[0], d[1], 0.0]]), world.lo, world.hi)
+        if not np.isfinite(rngs[0]) or rngs[0] > 1.5 or world.tags[which[0]] not in ('inner', 'wall'):
+            continue
+        xy = p0 + d * (rngs[0] - 0.005)
+        if any(np.linalg.norm(xy - q[0]) < 0.4 for q in out.values()):
+            continue
+        out[letters[len(out)]] = (xy, z, normal)
+    return out

@@ -19,18 +19,18 @@ Commands are velocities in odom with yaw held constant (the lidar is 360 deg).
 """
 from collections import deque
 from dataclasses import dataclass, field, replace
-import math
 import time
 
 import numpy as np
 
-from hydrone_mission.maze import frontiers as fr
-from hydrone_mission.maze import geometry_fallback as gf
-from hydrone_mission.maze.arena import arena_from_grid
-from hydrone_mission.maze.grid import GridParams, OccupancyGrid
-from hydrone_mission.maze.morph import dilate, flood
-from hydrone_mission.maze.openings import OpeningParams, detect_openings, window_extent
-from hydrone_mission.maze.planner import GridPlanner, inflate
+from hydrone_confined.core import frontiers as fr
+from hydrone_confined.core.arena import arena_from_grid
+from hydrone_confined.core.grid import GridParams, OccupancyGrid
+from hydrone_confined.core.morph import dilate, flood
+from hydrone_confined.core.navigator import GridObstacles, Navigator, NavParams
+from hydrone_confined.core.openings import Opening, OpeningParams, detect_openings, window_extent
+from hydrone_confined.core.planner import GridPlanner, inflate
+from hydrone_mission.phase4 import geometry_fallback as gf
 
 
 @dataclass
@@ -122,8 +122,10 @@ class Mission:
         self.roof_top = None
         self._t_perceive = -1e9
         # plans
-        self.path = None
-        self._t_plan = -1e9
+        self.nav = Navigator(NavParams(v_z=self.p.v_z, kp_xy=self.p.kp_xy, kp_z=self.p.kp_z,
+                                       lookahead=self.p.lookahead, goal_tol=self.p.goal_tol,
+                                       replan_s=self.p.replan_s),
+                             GridObstacles(self.grid, self.p.wall_slow, self.p.repulse_gain))
         self.entrance = None
         self.entry_point = None
         self.exit = None
@@ -155,14 +157,18 @@ class Mission:
     def go(self, phase, why=''):
         self.say(f'{self.phase} -> {phase}' + (f' ({why})' if why else ''))
         self.phase, self.t_phase = phase, self.t
-        self.path = None
-        self._t_plan = -1e9
+        self.nav.reset()
         self._blocked_since = None
 
     def elapsed(self):
         return self.t - self.t_phase
 
     # ── the tick ────────────────────────────────────────────────────────────
+    def __call__(self, frame):
+        """Step from a sim/ROS SensorFrame: odometry + registered scan."""
+        self.yaw_est = frame.odom[1]
+        return self.step(frame.t, frame.odom, frame.scan_reg)
+
     def step(self, t, pose, scan=None):
         """pose = (position (3,), yaw); scan = (points (N,3), sensor_origin (3,)) or None."""
         c_step = time.perf_counter()
@@ -184,6 +190,35 @@ class Mission:
         cmd.debug = self.debug()
         self.step_ms.append((time.perf_counter() - c_step) * 1e3)
         return cmd
+
+    def observe(self, t, pose, scan):
+        """Keep the maps warm without flying (another mission is in charge)."""
+        pos = np.asarray(pose[0], dtype=float)
+        self.t = t
+        if self.t0 is None:
+            self.t0, self.t_phase = t, t
+            self.takeoff = pos.copy()
+        if scan is not None:
+            self._ingest(*scan, pos)
+            if t - self._t_perceive >= self.p.perceive_s:
+                self._t_perceive = t
+                self._perceive(pos)
+
+    def take_over(self, t, entrance_xy, inward):
+        """Start flying from inside the structure, entered through entrance_xy."""
+        self.t = t
+        n = np.asarray(inward, dtype=float)
+        if self.covered is not None and self.crop is not None:
+            # the normal must point into the covered region
+            c = self.grid.to_cell(np.asarray(entrance_xy) + n * 0.5) - np.array([self.crop[0], self.crop[2]])
+            if 0 <= c[0] < self.covered.shape[0] and 0 <= c[1] < self.covered.shape[1] \
+                    and not self.covered[c[0], c[1]]:
+                n = -n
+        self.entrance = Opening(center=np.asarray(entrance_xy, dtype=float), width=0.8, normal=n,
+                                confidence=1.0, kind='window')
+        self.entry_point = self.entrance.center.copy()
+        self._t_explore = t
+        self.go('SINK', 'taking over inside')
 
     @property
     def igrid(self):
@@ -230,7 +265,7 @@ class Mission:
 
     def debug(self):
         return {'phase': self.phase, 'grid': self.grid, 'covered': self.covered, 'crop': self.crop,
-                'openings': self.openings, 'frontiers': self.frontiers, 'path': self.path,
+                'openings': self.openings, 'frontiers': self.frontiers, 'path': self.nav.path,
                 'entrance': self.entrance, 'exit': self.exit, 'landing': self.landing,
                 'arena': self.arena, 'fallback_used': list(self.fallback_used)}
 
@@ -299,120 +334,21 @@ class Mission:
         pl.start_from(pos[:2], snap=0.5)
         return pl
 
-    # ── motion ──────────────────────────────────────────────────────────────
-    def _z_rate(self, pos, z):
-        return float(np.clip(self.p.kp_z * (z - pos[2]), -self.p.v_z, self.p.v_z))
-
-    def _walls(self, pos, radius):
-        """(min distance to an occupied cell, repulsion vector) within radius."""
-        g = self.grid
-        r = int(math.ceil(radius / g.p.res))
-        ci, cj = g.to_cell(pos[:2])
-        i0, i1, j0, j1 = max(ci - r, 0), min(ci + r + 1, g.n), max(cj - r, 0), min(cj + r + 1, g.n)
-        cells = np.argwhere(g.occupied()[i0:i1, j0:j1]) + np.array([i0, j0])
-        if not len(cells):
-            return np.inf, np.zeros(2)
-        d = pos[:2] - g.cell_center(cells)
-        dist = np.linalg.norm(d, axis=1)
-        m = dist < radius
-        if not m.any():
-            return float(dist.min()), np.zeros(2)
-        w = (radius - dist[m]) / radius
-        push = (d[m] / np.maximum(dist[m], 1e-3)[:, None] * w[:, None]).sum(axis=0)
-        n = np.linalg.norm(push)
-        push = push / n * min(n, 1.0) if n > 0 else push
-        return float(dist.min()), push * self.p.repulse_gain
-
+    # ── motion (hydrone_confined Navigator on the live grid) ──────────────────
     def _velocity(self, v_xy, pos, z, cap):
-        dmin, push = self._walls(pos, self.p.wall_slow)
-        v = np.asarray(v_xy, dtype=float)
-        if dmin < self.p.wall_slow:
-            v = v * max(0.4, dmin / self.p.wall_slow)
-        s = np.linalg.norm(v)
-        if s > 1e-6:
-            # slide along the wall instead of being pushed back off it: in a
-            # 0.6 m doorway the jambs push straight back down the path, and the
-            # drone sat in front of the gap for a minute and a half
-            d = v / s
-            against = float(push @ d)
-            if against < 0:
-                push = push - against * d
-        v = v + push
-        s = np.linalg.norm(v)
-        if s > cap:
-            v = v / s * cap
-        return Command('velocity', velocity=np.array([v[0], v[1], self._z_rate(pos, z)]))
+        return Command('velocity', velocity=self.nav.velocity(v_xy, pos, z, cap))
 
     def _hover(self, pos, xy, z, cap=None):
-        v = self.p.kp_xy * (np.asarray(xy) - pos[:2])
-        return self._velocity(v, pos, z, cap or self.p.v_out)
+        return Command('velocity', velocity=self.nav.hover(pos, xy, z, cap or self.p.v_out))
 
     def _follow(self, pos, path, z, cap):
-        """Pure pursuit on a polyline; slows to a stop at its end."""
-        pts = np.asarray(path)
-        seg = np.diff(pts, axis=0)
-        if len(pts) < 2:
-            return self._hover(pos, pts[-1], z, cap)
-        # closest point on the polyline, then walk lookahead along it
-        best_k, best_s, best_d = 0, 0.0, np.inf
-        for k, (a, s) in enumerate(zip(pts[:-1], seg)):
-            L2 = float(s @ s) or 1e-9
-            u = float(np.clip((pos[:2] - a) @ s / L2, 0, 1))
-            d = np.linalg.norm(a + u * s - pos[:2])
-            if d < best_d:
-                best_k, best_s, best_d = k, u, d
-        left = self.p.lookahead
-        k, u = best_k, best_s
-        carrot = pts[-1]
-        while k < len(seg):
-            L = np.linalg.norm(seg[k])
-            rest = (1 - u) * L
-            if rest >= left:
-                carrot = pts[k] + seg[k] * (u + left / max(L, 1e-9))
-                break
-            left -= rest
-            k, u = k + 1, 0.0
-        to_goal = np.linalg.norm(pts[-1] - pos[:2])
-        d = carrot - pos[:2]
-        n = np.linalg.norm(d)
-        speed = min(cap, 0.8 * to_goal + 0.03)
-        v = d / n * speed if n > 1e-6 else np.zeros(2)
-        return self._velocity(v, pos, z, cap)
-
-    def _path_blocked(self, pl, path, pos, ahead=1.5):
-        if path is None:
-            return True
-        walked = 0.0
-        prev = pos[:2]
-        for q in path:
-            c = pl.cell(q)
-            h, w = pl.blocked.shape
-            if walked > 0.25 and 0 <= c[0] < h and 0 <= c[1] < w and pl.blocked[c]:
-                return True
-            walked += np.linalg.norm(q - prev)
-            prev = q
-            if walked > ahead:
-                break
-        return False
+        return Command('velocity', velocity=self.nav.follow(pos, path, z, cap))
 
     def _go_to(self, pos, goal, mode, z, cap, allow=None, grid=None):
         """Replanning path follower. Returns (Command, arrived, planned_ok)."""
-        if np.linalg.norm(goal - pos[:2]) < self.p.goal_tol:
-            return self._hover(pos, goal, z, cap), True, True
-        if self.t - self._t_plan >= self.p.replan_s or self.path is None:
-            self._t_plan = self.t
-            pl = self.planner(mode, pos, allow, grid)
-            path = pl.path_to(goal, snap=0.4)
-            if path is not None:
-                path[-1] = goal if np.linalg.norm(path[-1] - goal) < 0.4 else path[-1]
-                self.path = np.vstack([pos[:2], path])
-            elif self.path is not None and not self._path_blocked(pl, self.path, pos):
-                pass    # keep the old one while it's still clear
-            else:
-                self.path = None
-        if self.path is None:
-            return self._hover(pos, pos[:2], z, cap), False, False
-        return self._follow(pos, self.path, z, cap), False, True
+        v, arrived, ok = self.nav.go_to(self.t, pos, goal, z, cap,
+                                        lambda q: self.planner(mode, q, allow, grid))
+        return Command('velocity', velocity=v), arrived, ok
 
     # ── phases ──────────────────────────────────────────────────────────────
     def _takeoff(self, pos):
@@ -724,8 +660,8 @@ class Mission:
         if self.t - self._t_explore > self.p.explore_budget:
             self.go('GO_EXIT', 'exploration budget spent')
             return self._hover(pos, pos[:2], z, self.p.v_in)
-        if self.t - self._t_plan >= self.p.replan_s or self.path is None:
-            self._t_plan = self.t
+        if self.t - self.nav.t_plan >= self.p.replan_s or self.nav.path is None:
+            self.nav.t_plan = self.t
             pl, fs = self._frontiers_on(self.ib, pos)
             self.frontiers = fs
             if not fs:
@@ -757,10 +693,10 @@ class Mission:
                 self._goal_since = self.t
             self.frontier_goal = best.goal
             self._frontier_centroid = best.centroid
-            self.path = pl.path_to_cell(best.goal_cell)
-            if self.path is not None:
-                self.path = np.vstack([pos[:2], self.path])
-        if self.path is None or self.frontier_goal is None:
+            self.nav.path = pl.path_to_cell(best.goal_cell)
+            if self.nav.path is not None:
+                self.nav.path = np.vstack([pos[:2], self.nav.path])
+        if self.nav.path is None or self.frontier_goal is None:
             return self._hover(pos, pos[:2], z, self.p.v_in)
         close = np.linalg.norm(self.frontier_goal - pos[:2]) < self.p.goal_tol + 0.1
         if (close and self.t - self._goal_since > 3.0) or self.t - self._goal_since > self.p.stuck_s:
@@ -773,9 +709,9 @@ class Mission:
             if tries + 1 >= self.p.view_tries:
                 self._ignore.append(c)
                 self.say(f'frontier at {np.round(c, 2)} given up')
-            self.frontier_goal, self.path = None, None
+            self.frontier_goal, self.nav.path = None, None
             return self._hover(pos, pos[:2], z, self.p.v_in)
-        return self._follow(pos, self.path, z, self.p.v_in)
+        return self._follow(pos, self.nav.path, z, self.p.v_in)
 
     def _track_exit(self, locked=False):
         if self.entry_point is None:

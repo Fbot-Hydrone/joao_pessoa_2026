@@ -36,7 +36,7 @@ from sensor_msgs.msg import PointCloud2
 from std_msgs.msg import ColorRGBA, String
 from visualization_msgs.msg import Marker, MarkerArray
 
-from hydrone_mission.maze.mission import Mission, MissionParams
+from hydrone_mission.phase4.explore_mission import Mission, MissionParams
 
 
 def cloud_xyz(msg, stride=1):

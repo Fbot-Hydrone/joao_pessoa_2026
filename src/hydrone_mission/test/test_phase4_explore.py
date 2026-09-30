@@ -1,4 +1,4 @@
-"""The whole Phase 4 mission in the headless sim (test/maze_sim), rules layout + variants.
+"""The generic Phase 4 explorer in the kinematic sim (hydrone_confined.sim), box layouts + variants.
 
 Each scenario flies once (cached) and is checked against the design goals in
 docs/Phase 4 Maze Explorer.md: in through the window and never the door, the
@@ -6,14 +6,14 @@ inside mapped, out through the far window, landing target at the arena middle,
 no contact with any wall. Slow (~30-70 s each): `-m "not slow"` skips them.
 
     docker exec -u hydrone joao_pessoa_2026-hydrone-1 bash -lc 'source /opt/ros/humble/setup.bash; \
-      cd /ws/src/hydrone_mission && python3 -m pytest -q -s -p no:cacheprovider test/test_maze_mission.py'
+      cd /ws/src/hydrone_mission && python3 -m pytest -q -s -p no:cacheprovider test/test_phase4_explore.py'
 """
 import numpy as np
 import pytest
 
-from hydrone_mission.maze.mission import MissionParams
-from maze_sim.runner import SimParams, opening_hit, run
-from maze_sim.world import build
+from hydrone_confined.sim.runner import SimParams, coverage, opening_hit, run
+from hydrone_confined.sim.world import build
+from hydrone_mission.phase4.explore_mission import Mission, MissionParams
 
 SCENARIOS = {
     # (a) rules layout, odom turned a little off the walls
@@ -37,7 +37,13 @@ def fly(name):
     if name not in _cache:
         wkw, skw = SCENARIOS[name]
         world = build(**wkw)
-        res = run(world, MissionParams(), SimParams(**skw))
+        m = Mission(MissionParams())
+
+        def landing(m, frame):
+            lt = m.landing if m.landing is not None else frame.odom[0][:2]
+            return world.to_world(np.array([lt[0], lt[1], 0.0]))[:2]
+        res = run(world, m, SimParams(**skw), landing_world=landing)
+        res.coverage = coverage(world, m.grid, m.p.flight_z)
         _cache[name] = (world, res)
         land_err = np.linalg.norm(res.landing_target - world.arena_center) if res.landing_target is not None else None
         print(f'\n[{name}] done={res.done} t={res.time:.0f}s coverage={res.coverage:.3f} '
