@@ -65,6 +65,7 @@ class KnownParams:
     search_step: float = 0.2
     map_wait_s: float = 8.0         # waiting for a flyable map pose before going in
     pad_wait_s: float = 6.0         # and on the pad before taking off
+    pad_still: float = 0.15         # m the pose may move while sitting on the pad
     goal_tol: float = 0.12
     z_tol: float = 0.06
     goto_timeout: float = 40.0
@@ -125,6 +126,8 @@ class KnownMission:
         self.mode = 'odom'
         self._scan_nav = None
         self._cross = None
+        self._pad_ref = None
+        self._pad_refused = False
 
     # ── bookkeeping ─────────────────────────────────────────────────────────
     def say(self, msg):
@@ -308,9 +311,26 @@ class KnownMission:
 
     # ── phases ──────────────────────────────────────────────────────────────
     def _ph_takeoff(self, pos, yaw):
+        # pre-flight: sitting on the pad, the pose that will fly must sit still.
+        # FAST-LIO can blow up on the ground (seen in BiguaSim on a throttled
+        # CPU: 100 km off within a minute) and the map pose alone isn't
+        # flyable on the pad, so this is the last chance to catch it
+        if self._pad_ref is None:
+            self._pad_ref = pos.copy()
+        # still on the pad until the pose actually rises (the glue may hold the
+        # takeoff back a long time, waiting for the FCU home)
+        if pos[2] - self._pad_ref[2] < 0.1:
+            drift = float(np.hypot(*(pos[:2] - self._pad_ref[:2])))
+            if drift > self.p.pad_still or self._pad_refused:
+                if not self._pad_refused:
+                    self.say(f'REFUSING TAKEOFF: the pose drifted {drift:.2f} m while sitting on the pad '
+                             '(odometry broken?); restart the stack')
+                    self.fallback_used.append('takeoff-refused')
+                    self._pad_refused = True
+                return Command('hold')
+            if self.elapsed() < self.p.pad_wait_s:
+                return Command('hold')          # watch the pad pose for a while first
         healthy = self.fix is not None and self.fix.healthy
-        if not healthy and self.elapsed() < self.p.pad_wait_s:
-            return Command('hold')
         if not healthy and 'takeoff-unlocalized' not in self.fallback_used:
             self.fallback_used.append('takeoff-unlocalized')
             self.say('map pose not healthy on the pad, taking off on odometry')
