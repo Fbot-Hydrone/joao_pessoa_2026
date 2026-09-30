@@ -200,8 +200,9 @@ def _launch_setup(context, *args, **kwargs):
     )
 
     mission = LaunchConfiguration('mission').perform(context)
+    # BiguaSim's maze as measured and flown (its low holes differ from the rulebook render)
     map_yaml = LaunchConfiguration('map_yaml').perform(context) or os.path.join(
-        get_package_share_directory('hydrone_mission'), 'config', 'phase4', 'known_maps', 'rulebook.yaml')
+        get_package_share_directory('hydrone_mission'), 'config', 'phase4', 'known_maps', 'biguasim.yaml')
     if mission == 'known':
         nav_in = '/hydrone/nav/odom'
     elif LaunchConfiguration('ext_nav').perform(context) == 'lio':
@@ -304,7 +305,7 @@ def generate_launch_description():
                         '(rulebook maze by its walls); none just brings the vehicle up.'),
         DeclareLaunchArgument(
             'map_yaml', default_value='',
-            description='known map for mission:=known (default: hydrone_mission rulebook.yaml).'),
+            description='known map for mission:=known (default: hydrone_mission biguasim.yaml).'),
         DeclareLaunchArgument(
             'viz_host', default_value='127.0.0.1',
             description='where tools/maze_viewer listens (mission:=known).'),

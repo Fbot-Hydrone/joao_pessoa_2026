@@ -9,7 +9,7 @@ What a lidar sees at some height depends on that height: a window is a gap at
 [z0, z1]: a wall is solid in the band unless an opening spans all of it. That
 matches a beam taken as the nearest return inside the band.
 
-Loaded from YAML (see hydrone_mission/config/phase4/maps/rulebook.yaml).
+Loaded from YAML (see hydrone_mission/config/phase4/known_maps/rulebook.yaml).
 """
 from dataclasses import dataclass, field
 
