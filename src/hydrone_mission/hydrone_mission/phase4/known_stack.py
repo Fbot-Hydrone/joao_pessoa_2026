@@ -15,7 +15,7 @@ from hydrone_confined.core.beams import level
 from hydrone_confined.core.map_localization import MapLocalization, MapLocParams
 from hydrone_confined.core.pose_mux import MuxParams, PoseMux, wrap
 from hydrone_mission.phase4.explore_mission import Mission, MissionParams
-from hydrone_mission.phase4.known_mission import KnownMission, KnownParams
+from hydrone_mission.phase4.known_mission import HANDOVER_BANDS, KnownMission, KnownParams
 
 
 def rot2(a):
@@ -32,7 +32,7 @@ class KnownStack:
         self.loc = MapLocalization(known_map, self.locp)
         self.mux = PoseMux(mux or MuxParams(), logger=self._log_mux)
         mp = mission or KnownParams()
-        ex = Mission(MissionParams(flight_z=mp.out_z), logger=None) if explore else None
+        ex = Mission(MissionParams(flight_z=mp.out_z, inside_bands=HANDOVER_BANDS), logger=None) if explore else None
         self.mission = KnownMission(known_map, mp, explore=ex, logger=logger)
         to = known_map.takeoff
         self.z0 = float(to.get('top', 0.54)) + 0.08      # base_link on the pad, map z
@@ -70,9 +70,8 @@ class KnownStack:
             self.loc.start(self.prior[:2], self.prior[3], self.prior[2])
             self.mux.set_anchor(self.prior, odom)
             self.mux.track = True
-        # LIO into the mux, velocity turned into the map frame by the anchor
-        v_nav = np.r_[rot2(self.mux.T[3]) @ np.asarray(f.odom_vel)[:2], f.odom_vel[2]]
-        self.mux.on_odom(t, odom, v_nav)
+        # LIO into the mux (velocity in odom axes; the mux turns it with the anchor)
+        self.mux.on_odom(t, odom, np.asarray(f.odom_vel, dtype=float))
         # odometry step in the body frame, for the particle filter's prediction
         step = None
         if self._odom_prev is not None:
@@ -84,7 +83,7 @@ class KnownStack:
             cmd_body = np.r_[rot2(-self.yaw_est) @ self._cmd_prev[:2], self._cmd_prev[2]]
         if f.scan_body is not None:
             self.fix = self.loc.step(t, f.scan_body, f.attitude, step, cmd_body)
-            self.mux.on_map(t, self.fix.pose, self.fix.healthy)
+            self.mux.on_map(t, self.fix.pose, self.fix.healthy, stamp=t)
         pose = self.mux.pose()
         # the scan in the map frame, through the pose that flies (for the explorer)
         scan_nav = None

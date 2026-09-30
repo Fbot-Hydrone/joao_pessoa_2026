@@ -9,6 +9,7 @@ passages moved or walled up and QR codes scattered on inner walls.
 out  <cloud>                       PointCloud2 in the sensor frame, tilted with the body
      /mavros/imu/data              attitude (roll/pitch from the acceleration)
      /mavros/state                 connected / armed / mode
+     /mavros/home_position/home    once a second (the mock's EKF is always ready)
      /mavros/local_position/pose   what the FCU believes (echo of vision_pose)
      <odom_raw>, <odom>            drifting LIO-like odometry in 'odom' (optionally
                                    sliding along a corridor while inside)
@@ -31,7 +32,7 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 
 from geometry_msgs.msg import PoseStamped, Twist
-from mavros_msgs.msg import State
+from mavros_msgs.msg import HomePosition, State
 from mavros_msgs.srv import CommandBool, CommandTOL, SetMode
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu, PointCloud2, PointField
@@ -120,6 +121,7 @@ class KinematicSimNode(Node):
         self.pub_odom_raw = self.create_publisher(Odometry, p['odom_raw'], sq)
         self.pub_odom = self.create_publisher(Odometry, p['odom'], sq)
         self.pub_qr = self.create_publisher(String, '/hydrone/qr', rel)
+        self.pub_home = self.create_publisher(HomePosition, '/mavros/home_position/home', sq)
         self.pub_truth = self.create_publisher(Odometry, '/hydrone/sim/truth', sq)
         latched = QoSProfile(reliability=ReliabilityPolicy.RELIABLE, depth=1,
                              durability=DurabilityPolicy.TRANSIENT_LOCAL)
@@ -138,6 +140,7 @@ class KinematicSimNode(Node):
 
     # ── FCU mock ────────────────────────────────────────────────────────────
     def _state(self):
+        self.pub_home.publish(HomePosition())       # the mock's EKF is always up
         self.pub_state.publish(State(connected=True, armed=self.armed, guided=self.mode == 'GUIDED',
                                      mode=self.mode))
 

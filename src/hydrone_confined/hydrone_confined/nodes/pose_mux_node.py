@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-pose_mux_node — the one pose that flies: odometry re-anchored to a map, or the map pose.
+pose_mux_node — the one pose that flies: odometry held to a map by a smooth correction.
 
 Thin wrapper around core.pose_mux (docs/Confined Navigation.md).
 
@@ -11,9 +11,10 @@ out  <out>           nav_msgs/Odometry in the map frame (feed vision_odom_bridge
      <mode>          std_msgs/String, the source actually in use
      TF map -> odom  the anchor, so odom-frame things line up in RViz
 
-Freshness is judged on arrival time, not header stamps: what matters is
-that map poses keep coming, and the localizer's stamp is its scan's, which
-lags by however long it took to process.
+Freshness is judged on arrival time (map poses must keep coming); the
+correction matches each map pose against odometry at its scan's stamp, so
+the localizer's processing time doesn't become error. The output is always
+odometry through the anchor: published at the odometry rate, never a step.
 
 Before the first odometry nothing is published. The anchor starts from the
 map's takeoff pose (or start_xy_yaw) and then tracks the map pose at a capped
@@ -36,7 +37,7 @@ from tf2_ros import TransformBroadcaster
 
 from hydrone_confined.core.known_map import KnownMap
 from hydrone_confined.core.pose_mux import MuxParams, PoseMux
-from hydrone_confined.nodes.rosutil import quat_to_rpy, yaw_to_quat
+from hydrone_confined.nodes.rosutil import quat_to_rpy, stamp_s, yaw_to_quat
 
 
 class PoseMuxNode(Node):
@@ -54,11 +55,11 @@ class PoseMuxNode(Node):
             ('start_xy_yaw', [0.0]),
             ('start_z', -1.0),
             ('track', True),
-            ('tau', 1.0),
+            ('tau_map', 0.3),
             ('map_timeout', 1.0),
         ])}
         self.par = p
-        self.mux = PoseMux(MuxParams(tau=p['tau'], map_timeout=p['map_timeout']),
+        self.mux = PoseMux(MuxParams(tau_map=p['tau_map'], map_timeout=p['map_timeout']),
                            logger=lambda m: self.get_logger().info(m))
         self.mux.track = bool(p['track'])
         self.prior = None
@@ -103,21 +104,16 @@ class PoseMuxNode(Node):
             if self.prior is not None:
                 self.mux.set_anchor(self.prior, pose)
             self._anchored = True
-        # body-frame twist -> map axes through the output heading
+        # body-frame twist -> odom axes (the mux turns it on into the map frame)
         v = m.twist.twist.linear
-        yaw = self.mux.T[3] + pose[3]
-        c, s = math.cos(yaw), math.sin(yaw)
-        v_nav = np.array([c * v.x - s * v.y, s * v.x + c * v.y, v.z])
-        mode_before = self.mux.mode
-        self.mux.on_odom(t, pose, v_nav)
-        if self.mux.mode == 'odom' or mode_before != self.mux.mode:
-            self._publish(m.header.stamp)
+        c, s = math.cos(pose[3]), math.sin(pose[3])
+        v_odom = np.array([c * v.x - s * v.y, s * v.x + c * v.y, v.z])
+        self.mux.on_odom(t, pose, v_odom, stamp=stamp_s(m.header))
+        self._publish(m.header.stamp)
 
     def _map(self, m):
-        t = self._now()
-        self.mux.on_map(t, self._pose(m), self.healthy)
-        if self.mux.mode == 'map':
-            self._publish(m.header.stamp)
+        # arrival time for freshness, the scan's stamp to match it against odometry
+        self.mux.on_map(self._now(), self._pose(m), self.healthy, stamp=stamp_s(m.header))
 
     def _publish(self, stamp):
         pose = self.mux.pose()

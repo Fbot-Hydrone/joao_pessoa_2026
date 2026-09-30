@@ -1,19 +1,25 @@
-"""Which pose flies the drone: odometry (re-anchored to a map) or a map pose.
+"""The one pose that flies: odometry, held to a map by a correction that never jumps.
 
-Two sources, one output frame ("nav"):
-  odom  a smooth, fast, drifting odometry (LIO), in its own frame. Out:
-        T_nav_odom * odom. T is the anchor, the map -> odom correction of the
-        usual map/odom split. It can be set outright (at start), or pulled
-        toward the map pose at a capped rate while the map pose is healthy.
-  map   a pose straight from a map localizer, already in nav.
+Output (frame "nav"): T * odom, always. odom (LIO) gives the smooth,
+fast, locally right motion the flight controller's velocity loop needs; the
+map pose (beam localizer) decides where that motion *is*, by pulling the
+anchor T (the usual map -> odom correction) toward map * odom^-1.
 
-Switching never jumps the output: going to map, the offset between the two is
-kept and decays (tau); going back to odom, the anchor is reset so that odom
-continues from where the output was. A stale or unhealthy map pose drops
-back to odom on its own, and says why.
+How hard it pulls depends on what's asked for:
+  'map'   fast (tau 0.3 s, capped at 1 m/s and 45 deg/s, z too): the walls rule.
+          A LIO that slides along a corridor at s m/s is held to ~s * tau.
+  'odom'  slow and planar (tau 2 s, capped 0.25 m/s, 10 deg/s), and only if
+          `track`: LIO rules, the map only keeps it from wandering.
+An unhealthy or stale map pose pulls nothing; the anchor just holds. So the
+output has no steps, ever: the EKF behind it never sees a jump, which is
+what made the drone swing in BiguaSim when the raw map pose was fed through.
+
+The map pose is matched against odometry *at its own timestamp* (the scan's),
+from a short odometry history, so processing latency doesn't turn into error.
 
 Poses are (x, y, z, yaw). Pure logic, no ROS.
 """
+from collections import deque
 from dataclasses import dataclass
 
 import numpy as np
@@ -42,12 +48,16 @@ def between(a, b):
 
 @dataclass
 class MuxParams:
-    tau: float = 1.0                    # s, offset decay after a switch to map
-    anchor_xy_rate: float = 0.25        # m/s the anchor may move while tracking the map
+    tau_map: float = 0.3                # s, correction time constant when the map is asked for
+    map_xy_rate: float = 1.0            # m/s cap
+    map_yaw_rate: float = np.deg2rad(45.0)
+    map_z_rate: float = 0.5
+    tau_odom: float = 2.0               # when odometry is asked for (and track is on)
+    anchor_xy_rate: float = 0.25
     anchor_yaw_rate: float = np.deg2rad(10.0)
-    anchor_z: bool = False              # also pull odom z to the map's
-    map_timeout: float = 1.0            # s without a map pose -> back to odom
-    rejoin_s: float = 0.5               # map pose fresh and healthy this long before (re)joining it
+    map_timeout: float = 1.0            # s without a map pose: stop correcting
+    rejoin_s: float = 0.5               # healthy this long before corrections resume
+    history_s: float = 3.0              # odometry kept to match map stamps
 
 
 class PoseMux:
@@ -55,18 +65,19 @@ class PoseMux:
     def __init__(self, params=None, logger=None):
         self.p = params or MuxParams()
         self.T = np.zeros(4)                # nav <- odom
-        self.mode = 'odom'
         self.want = 'odom'
-        self.track = False                  # pull the anchor toward the map in odom mode
+        self.mode = 'odom'                  # what's actually steering the anchor
+        self.track = False                  # slow map tracking while odom is asked for
         self.odom = None                    # (t, pose)
-        self.map = None                     # (t, pose, healthy)
+        self.map = None                     # (t_arrival, pose, healthy)
         self.out = None                     # (t, pose)
         self.vel = np.zeros(3)
-        self._offset = np.zeros(4)
-        self._t_switch = None
+        self._hist = deque()                # (stamp, pose)
         self._ok_since = None
+        self._t_corr = None
+        self.last_offset = 0.0              # |map - output| at the last correction, m
         self.logger = logger
-        self.events = []                    # (t, message)
+        self.events = []
 
     def say(self, t, msg):
         self.events.append((t, msg))
@@ -83,83 +94,104 @@ class PoseMux:
             raise ValueError(mode)
         self.want = mode
         if t is not None:
-            self._switch(t)
+            self._update_mode(t)
 
     def map_ok(self, t):
-        return self.map is not None and self.map[2] and t - self.map[0] <= self.p.map_timeout
+        return (self.map is not None and self.map[2] and t - self.map[0] <= self.p.map_timeout
+                and self._ok_since is not None and t - self._ok_since >= self.p.rejoin_s)
 
     # ── inputs ──────────────────────────────────────────────────────────────
-    def on_odom(self, t, pose, vel_nav=None):
-        """pose (x, y, z, yaw) in odom; vel_nav optional (3,) already in nav axes."""
+    def on_odom(self, t, pose, vel_odom=None, stamp=None):
+        """pose (x, y, z, yaw) in odom; vel_odom optional (3,) in odom axes.
+        stamp: the pose's own time (defaults to t) for matching map poses."""
         pose = np.asarray(pose, dtype=float)
-        dt = t - self.odom[0] if self.odom is not None else 0.0
+        st = t if stamp is None else stamp
+        self._hist.append((st, pose))
+        while self._hist and st - self._hist[0][0] > self.p.history_s:
+            self._hist.popleft()
         self.odom = (t, pose)
-        self._switch(t)
-        if self.mode != 'odom':
-            return
-        if self.track and self.map_ok(t) and dt > 0:
-            self._pull_anchor(dt, pose)
-        self._emit(t, compose(self.T, pose), vel_nav)
+        self._update_mode(t)
+        out = compose(self.T, pose)
+        c, s = np.cos(self.T[3]), np.sin(self.T[3])
+        if vel_odom is not None:
+            v = np.asarray(vel_odom, dtype=float)
+            self.vel = np.array([c * v[0] - s * v[1], s * v[0] + c * v[1], v[2]])
+        elif self.out is not None and t > self.out[0]:
+            v = (out[:3] - self.out[1][:3]) / (t - self.out[0])
+            a = min(1.0, (t - self.out[0]) / 0.3)
+            self.vel = (1 - a) * self.vel + a * v
+        self.out = (t, out)
 
-    def on_map(self, t, pose, healthy=True):
-        self.map = (t, np.asarray(pose, dtype=float), bool(healthy))
+    def on_map(self, t, pose, healthy=True, stamp=None):
+        """t: arrival time (freshness); stamp: when the scan behind it was taken."""
+        pose = np.asarray(pose, dtype=float)
+        self.map = (t, pose, bool(healthy))
         if not healthy:
             self._ok_since = None
         elif self._ok_since is None:
             self._ok_since = t
-        self._switch(t)
-        if self.mode != 'map':
+        self._update_mode(t)
+        fast = self.mode == 'map'
+        if not (fast or (self.track and self.map_ok(t))):
+            self._t_corr = None
             return
-        k = np.exp(-(t - self._t_switch) / self.p.tau) if self.p.tau > 0 else 0.0
-        self._emit(t, self.map[1] + self._offset * k)
-
-    # ── internals ───────────────────────────────────────────────────────────
-    def _pull_anchor(self, dt, odom_pose):
-        target = between(self.map[1], odom_pose)
+        od = self._odom_at(t if stamp is None else stamp)
+        if od is None:
+            return
+        dt = 0.1 if self._t_corr is None else float(np.clip(t - self._t_corr, 1e-3, 0.5))
+        self._t_corr = t
+        target = between(pose, od)
         d = target - self.T
         d[3] = wrap(d[3])
-        step_xy = self.p.anchor_xy_rate * dt
-        n = np.hypot(d[0], d[1])
-        if n > step_xy:
-            d[:2] *= step_xy / n
-        d[3] = np.clip(d[3], -self.p.anchor_yaw_rate * dt, self.p.anchor_yaw_rate * dt)
-        d[2] = np.clip(d[2], -step_xy, step_xy) if self.p.anchor_z else 0.0
-        self.T = self.T + d
+        self.last_offset = float(np.hypot(d[0], d[1]))
+        if fast:
+            k = min(1.0, dt / self.p.tau_map)
+            xy_cap, yaw_cap, z_cap = self.p.map_xy_rate * dt, self.p.map_yaw_rate * dt, self.p.map_z_rate * dt
+        else:
+            k = min(1.0, dt / self.p.tau_odom)
+            xy_cap, yaw_cap, z_cap = self.p.anchor_xy_rate * dt, self.p.anchor_yaw_rate * dt, 0.0
+        step = d * k
+        n = np.hypot(step[0], step[1])
+        if n > xy_cap:
+            step[:2] *= xy_cap / n
+        step[3] = np.clip(step[3], -yaw_cap, yaw_cap)
+        step[2] = np.clip(step[2], -z_cap, z_cap)
+        self.T = self.T + step
         self.T[3] = wrap(self.T[3])
+        if self.odom is not None:
+            self.out = (self.out[0] if self.out else t, compose(self.T, self.odom[1]))
 
-    def _switch(self, t):
-        if self.mode == 'map' and (self.want == 'odom' or not self.map_ok(t)):
-            why = 'requested' if self.want == 'odom' else (
-                'map pose stale' if self.map is None or t - self.map[0] > self.p.map_timeout
-                else 'map pose unhealthy')
-            if self.odom is not None:
-                # carry on from where the output is
-                last = self.out[1] if self.out is not None else self.map[1]
-                self.T = between(last, self.odom[1])
-            self.mode = 'odom'
-            if why != 'requested':
-                self._ok_since = None
-            self.say(t, f'pose source -> odom ({why})')
-        elif self.mode == 'odom' and self.want == 'map' and self.map_ok(t) \
-                and self._ok_since is not None and t - self._ok_since >= self.p.rejoin_s:
-            last = self.out[1] if self.out is not None else self.map[1]
-            self._offset = last - self.map[1]
-            self._offset[3] = wrap(self._offset[3])
-            self._t_switch = t
-            self.mode = 'map'
-            self.say(t, f'pose source -> map (offset {np.round(self._offset, 3).tolist()})')
+    # ── internals ───────────────────────────────────────────────────────────
+    def _odom_at(self, st):
+        """Odometry pose at stamp st, interpolated from the history (or the latest)."""
+        if not self._hist:
+            return None
+        h = self._hist
+        if st >= h[-1][0]:
+            return h[-1][1]
+        if st <= h[0][0]:
+            return h[0][1]
+        for (t0, p0), (t1, p1) in zip(h, list(h)[1:]):
+            if t0 <= st <= t1:
+                a = (st - t0) / max(t1 - t0, 1e-9)
+                p = p0 + a * (p1 - p0)
+                p[3] = wrap(p0[3] + a * wrap(p1[3] - p0[3]))
+                return p
+        return h[-1][1]
 
-    def _emit(self, t, pose, vel=None):
-        pose = np.asarray(pose, dtype=float)
-        pose[3] = wrap(pose[3])
-        if vel is not None:
-            self.vel = np.asarray(vel, dtype=float)
-        elif self.out is not None and t > self.out[0]:
-            # finite difference, smoothed: the map pose is noisier than LIO
-            v = (pose[:3] - self.out[1][:3]) / (t - self.out[0])
-            a = min(1.0, (t - self.out[0]) / 0.3)
-            self.vel = (1 - a) * self.vel + a * v
-        self.out = (t, pose)
+    def _update_mode(self, t):
+        mode = 'map' if (self.want == 'map' and self.map_ok(t)) else 'odom'
+        if mode != self.mode:
+            if mode == 'map':
+                why = 'map pose healthy'
+            elif self.want == 'odom':
+                why = 'requested'
+            elif self.map is None or t - self.map[0] > self.p.map_timeout:
+                why = 'map pose stale'
+            else:
+                why = 'map pose unhealthy'
+            self.say(t, f'pose source -> {mode} ({why})')
+            self.mode = mode
 
     def pose(self):
         return None if self.out is None else self.out[1]

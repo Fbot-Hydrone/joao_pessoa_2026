@@ -4,7 +4,8 @@ Localizer + pose mux + KnownMission wired like the ROS graph (known_stack.py),
 flown against worlds built from the same YAML, then against worlds that
 disagree with it. Checked: in through the entrance and out through the exit
 only (never the door), all QR codes read, no wall contact, landing on the
-pad, and the map pose (not LIO) flying inside. Slow (~5 min each here):
+pad, and the flying pose within 0.15 m of the truth inside (that includes
+the lag of a pose at up to 0.25 m/s). Slow (~5 min each here):
 `-m "not slow"` skips them.
 """
 import os
@@ -62,7 +63,7 @@ def fly(name):
     return _cache[name]
 
 
-def check_common(km, world, stack, res, err, qr=5, map_err=0.12):
+def check_common(km, world, stack, res, err, qr=5, map_err=0.15):
     assert res.done, 'did not land'
     assert not res.crashed, f'hit a wall: {res.min_clearance:.3f} at {res.min_clearance_at}'
     assert res.entry_cross is not None and opening_hit(world, 'entrance', res.entry_cross)

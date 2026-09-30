@@ -156,49 +156,70 @@ def test_localizer_converges_and_tracks():
     assert np.linalg.norm(xy - true) < 0.08, (xy, true)
 
 
-def test_mux_switches_without_jumps():
+def _run_mux(mux, t0, t1, odom_fn, map_fn, healthy=True, dt=0.1, delay=0.0):
+    """Feed odometry and map poses at 10 Hz; returns the output poses."""
+    out = []
+    t = t0
+    while t < t1 - 1e-9:
+        mux.on_odom(t, odom_fn(t))
+        if map_fn is not None:
+            mux.on_map(t, map_fn(t - delay), healthy, stamp=t - delay)
+        out.append(mux.pose().copy())
+        t += dt
+    return np.array(out)
+
+
+def test_mux_output_never_steps_and_converges_to_the_map():
     mux = PoseMux()
     mux.set_anchor([1.0, 0.5, 0.0, np.pi / 2], [0.0, 0.0, 0.0, 0.0])
-    mux.on_odom(0.0, [0.0, 0.0, 0.0, 0.0])
-    assert np.allclose(mux.pose(), [1.0, 0.5, 0.0, np.pi / 2])
-    # odom says 1 m forward: in nav that's +y
-    mux.on_odom(1.0, [1.0, 0.0, 0.0, 0.0])
-    assert np.allclose(mux.pose()[:2], [1.0, 1.5])
-    # the map disagrees by 0.2 m; it has to stay healthy 0.5 s before it's
-    # joined, and switching keeps the output where it was
-    mux.request('map')
-    mux.on_map(1.05, [1.2, 1.5, 0.0, np.pi / 2])
-    assert mux.mode == 'odom'
-    mux.on_map(1.3, [1.2, 1.5, 0.0, np.pi / 2], healthy=False)
-    mux.on_map(1.4, [1.2, 1.5, 0.0, np.pi / 2])
-    mux.on_map(1.8, [1.2, 1.5, 0.0, np.pi / 2])
-    assert mux.mode == 'odom'                   # the unhealthy one restarted the streak
-    mux.on_map(1.95, [1.2, 1.5, 0.0, np.pi / 2])
+    still = lambda t: np.zeros(4)  # noqa: E731
+    out = _run_mux(mux, 0.0, 1.0, still, None)
+    assert np.allclose(out[-1], [1.0, 0.5, 0.0, np.pi / 2])
+    # the map says 0.2 m further along x; asked for the map, the output walks there
+    mux.request('map', 1.0)
+    out = _run_mux(mux, 1.0, 5.0, still, lambda t: np.array([1.2, 0.5, 0.0, np.pi / 2]))
+    steps = np.linalg.norm(np.diff(out[:, :2], axis=0), axis=1)
+    assert steps.max() <= 0.1 + 1e-9                  # 1 m/s cap, never a jump
+    assert abs(out[-1, 0] - 1.2) < 0.005
     assert mux.mode == 'map'
-    assert np.allclose(mux.pose()[:2], [1.0, 1.5], atol=1e-6)
-    for k in range(1, 60):
-        mux.on_map(1.95 + 0.1 * k, [1.2, 1.5, 0.0, np.pi / 2])
-    assert np.allclose(mux.pose()[:2], [1.2, 1.5], atol=0.01)
-    # map goes stale -> back on odom, continuing from the output
-    mux.on_odom(9.0, [1.0, 0.0, 0.0, 0.0])
-    assert mux.mode == 'odom'
-    assert np.allclose(mux.pose()[:2], [1.2, 1.5], atol=0.01)
-    assert any('stale' in m for _, m in mux.events)
+    # the map goes quiet: the anchor holds, nothing moves
+    out = _run_mux(mux, 5.0, 7.0, still, None)
+    assert np.allclose(out[-1], out[0]) and abs(out[-1, 0] - 1.2) < 0.005
+    assert mux.mode == 'odom' and any('stale' in m for _, m in mux.events)
 
 
-def test_mux_anchor_tracks_map_at_capped_rate():
+def test_mux_holds_a_sliding_odometry_to_the_walls():
+    mux = PoseMux()
+    mux.request('map')
+    truth = np.array([3.0, 1.0, 0.7, 0.0])
+    slide = lambda t: np.array([0.15 * t, 0.0, 0.0, 0.0])  # noqa: E731  LIO drifting, drone still
+    out = _run_mux(mux, 0.0, 20.0, slide, lambda t: truth)
+    err = np.linalg.norm(out[80:, :2] - truth[:2], axis=1)     # after the first pull-in (3.2 m at 1 m/s)
+    assert err.max() < 0.08, err.max()                # ~ slide rate x tau
+
+
+def test_mux_matches_map_poses_at_their_scan_stamp():
+    moving = lambda t: np.array([1.0 * t, 0.0, 0.0, 0.0])  # noqa: E731  1 m/s, odometry exact
+    truth = moving
+    # map poses arrive 0.2 s late but carry their stamp: no lag error
+    mux = PoseMux()
+    mux.request('map')
+    out = _run_mux(mux, 0.0, 6.0, moving, truth, delay=0.2)
+    assert abs(out[-1, 0] - 5.9) < 0.01
+    # ...and the anchor never leaves where it started (odometry was right)
+    assert np.allclose(mux.T, 0.0, atol=1e-6)
+
+
+def test_mux_anchor_tracks_map_slowly_on_odometry():
     mux = PoseMux()
     mux.track = True
-    mux.on_odom(0.0, [0.0, 0.0, 0.0, 0.0])
-    mux.on_map(0.0, [1.0, 0.0, 0.0, 0.0])
-    mux.on_odom(0.1, [0.0, 0.0, 0.0, 0.0])
-    assert mux.pose()[0] == pytest.approx(0.025)        # 0.25 m/s * 0.1 s
-    t = 0.1
-    for _ in range(60):
-        t += 0.1
-        mux.on_map(t, [1.0, 0.0, 0.0, 0.0])
-        mux.on_odom(t, [0.0, 0.0, 0.0, 0.0])
-    assert mux.pose()[0] == pytest.approx(1.0, abs=1e-6)
+    mux._ok_since = -1.0
+    still = lambda t: np.zeros(4)  # noqa: E731
+    out = _run_mux(mux, 0.0, 12.0, still, lambda t: np.array([1.0, 0.0, 0.0, 0.0]))
+    steps = np.abs(np.diff(out[:, 0]))
+    assert steps.max() <= 0.025 + 1e-9                # 0.25 m/s cap
+    assert abs(out[-1, 0] - 1.0) < 0.05
+    assert mux.mode == 'odom'
 
 
 def test_pose_algebra():

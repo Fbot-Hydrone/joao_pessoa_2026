@@ -11,7 +11,8 @@
 #   - t2 <-> r5: a door at u 1.06..1.90 (survey), measured, no longer soft
 #   - b1 <-> b2: open at both 0.45 and 1.25 m in the survey (door or tall
 #     window); kept as a window, which is passed at a height open either way
-#   - r5 <-> r6 still soft: the survey scans were ambiguous there
+#   - r5 <-> r6: a LOW HOLE too (survey single scans: open at 0.45 m for y 0.1..1.0,
+#     closed at 1.2 m; flight 7 could not crawl through it at 0.75 m, under its lintel)
 # The teleport survey's scans disagree between poses by ~1 m in places (a
 # BiguaSim teleport/lidar timing quirk, see docs/Phase 4 Known Maze.md), so only
 # single-scan evidence was used.
@@ -96,7 +97,7 @@ walls:
     a: [7.02, 0.04]
     b: [7.02, 1.96]
     openings:
-      - {name: r5_r6, kind: door, u: [0.12, 0.86], z: [0.0, 1.50], soft: true}
+      - {name: r5_r6, kind: hole, u: [0.12, 0.96], z: [0.05, 0.85]}
 
 rooms:
   - {name: entry, x: [2.08, 3.04], y: [1.03, 1.92]}

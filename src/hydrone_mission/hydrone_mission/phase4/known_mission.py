@@ -35,6 +35,13 @@ from hydrone_confined.core.planner import GridPlanner
 from hydrone_mission.phase4.route import RoomGraph, exit_legs, plan_tour
 
 
+# Interior bands for the explorer when it takes over (m above the floor): low
+# holes are passed at ~0.4, and windows between rooms (sill ~0.7) need the
+# body's bottom above the sill: 0.9, not the explorer's default 0.75, which
+# flew into a sill in the handover test.
+HANDOVER_BANDS = (0.40, 0.90)
+
+
 @dataclass
 class KnownParams:
     out_z: float = 1.1              # above the floor, outside (window centres)
@@ -108,6 +115,7 @@ class KnownMission:
         self._blocked_since = None
         self._search = []
         self._shift = {}                        # passage name -> offset found along its wall
+        self._crawl_fails = {}
         self._goal = None
         self._pos = None
         self.fix = None
@@ -201,6 +209,10 @@ class KnownMission:
                            else 'mission budget spent')
         self._scan_nav = scan_nav
         cmd = getattr(self, '_ph_' + self.phase.lower())(pos, yaw)
+        # the map pose is wanted from the entrance on, until out of the exit;
+        # whether it's healthy enough to fly on is the mux's call
+        if self.phase != 'EXPLORE':         # the explorer says for itself
+            self.source = 'odom' if self.phase in ('TAKEOFF', 'TO_ENTRY', 'GO_LAND', 'LAND') else 'map'
         cmd.source = self.source
         cmd.debug = self.debug()
         self.step_ms.append((time.perf_counter() - c0) * 1e3)
@@ -330,8 +342,8 @@ class KnownMission:
             self._start_cross(self.entrance, None, self.graph.entry)
         elif self.elapsed() > self.p.map_wait_s:
             self.fallback_used.append('enter-on-odom')
-            self.say('FALLBACK: map pose never became flyable, entering on odometry')
-            self.source = 'odom'
+            self.say('FALLBACK: map pose never became flyable here, crossing on odometry '
+                     '(the mux joins the map pose once it is)')
             self.leg = ('enter', self.entrance, self.graph.entry)
             self.legs = plan_tour(self.graph, self.graph.entry)
             self._start_cross(self.entrance, None, self.graph.entry)
@@ -462,8 +474,18 @@ class KnownMission:
                 self._next_leg(pos)
             return self._hover(pos, pos[:2], z, self.p.v_crawl)
         if self.elapsed() > 4.0 * (self.p.align_dist + goal) / self.p.v_crawl:
-            self.say(f'crossing {self._cross["p"].name} is taking too long, lining up again')
-            self.go('ALIGN')
+            name = self._cross['p'].name
+            self._crawl_fails[name] = self._crawl_fails.get(name, 0) + 1
+            if self._crawl_fails[name] >= 2:
+                # open to the beam but not to the drone: narrower or off-centre
+                # from the map; look for the real gap along the wall
+                self._search = [o + self._shift.get(name, 0.0) for o in self.p.search_offsets]
+                self.say(f'crossing {name} failed twice, searching along the wall')
+                self._crawl_fails[name] = 0
+                self.go('SEARCH')
+            else:
+                self.say(f'crossing {name} is taking too long, lining up again')
+                self.go('ALIGN')
         v = n * self.p.v_crawl - t * np.clip(1.2 * lateral, -0.1, 0.1)
         return self._vel(v, pos, z, self.p.v_crawl)
 

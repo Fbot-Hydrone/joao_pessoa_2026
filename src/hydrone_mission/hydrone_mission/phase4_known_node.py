@@ -36,7 +36,7 @@ from hydrone_confined.core.known_map import KnownMap
 from hydrone_confined.nodes.rosutil import cloud_xyz, quat_to_rpy, stamp_s
 from hydrone_mission.mavros_glue import MavrosMissionNode
 from hydrone_mission.phase4.explore_mission import Mission, MissionParams
-from hydrone_mission.phase4.known_mission import KnownMission, KnownParams
+from hydrone_mission.phase4.known_mission import HANDOVER_BANDS, KnownMission, KnownParams
 
 
 def beams_of(m):
@@ -69,7 +69,7 @@ class KnownNode(MavrosMissionNode):
         kp = KnownParams(out_z=p['out_z'], cruise_z=p['cruise_z'], v_in=p['v_in'], v_out=p['v_out'],
                          v_crawl=p['v_crawl'], spin=bool(p['spin']), qr_target=int(p['qr_target']),
                          explore_fallback=bool(p['explore_fallback']))
-        ex = Mission(MissionParams(flight_z=kp.out_z)) if kp.explore_fallback else None
+        ex = Mission(MissionParams(flight_z=kp.out_z, inside_bands=HANDOVER_BANDS)) if kp.explore_fallback else None
         self.mission = KnownMission(self.km, kp, explore=ex,
                                     logger=lambda m: self.get_logger().info(f'[known] {m}'))
         self.mount = np.array(p['lidar_mount'], dtype=float)

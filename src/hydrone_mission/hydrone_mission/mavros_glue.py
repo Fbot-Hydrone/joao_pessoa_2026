@@ -7,6 +7,9 @@ planning frame. This base node turns them into MAVROS:
   - a velocity setpoint every cmd_hz tick, whatever else is happening:
     ArduPilot drops GUIDED velocity control after ~1 s of silence
   - hold still when the pose or the sensor stream goes stale
+  - start only once the FCU has a home: before that EKF3 isn't flying on the
+    external nav yet (AHRS still on DCM under a slow sim) and a takeoff is
+    accepted and then silently not flown
 
 Frames: the planning frame is whatever vision_odom_bridge feeds the EKF (the
 LIO odom, or the map frame through pose_mux). The bridge turns it +90 deg into
@@ -17,7 +20,7 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 
 from geometry_msgs.msg import PoseStamped, Twist
-from mavros_msgs.msg import State
+from mavros_msgs.msg import HomePosition, State
 from mavros_msgs.srv import CommandBool, CommandTOL, SetMode
 
 from hydrone_confined.nodes.rosutil import odom_to_enu
@@ -32,6 +35,7 @@ class MavrosMissionNode(Node):
             ('start_delay', 5.0),               # s of pose before arming
             ('stale_s', 2.0),                   # no sensor tick for this long -> hold
             ('auto_start', True),
+            ('wait_home', True),              # start only once the FCU has a home
         ] + list(extra_params))
         self.par = {q.name: q.value for q in p}
         self.state = State()
@@ -44,10 +48,15 @@ class MavrosMissionNode(Node):
         self.armed_z = None
         self.started = False
         self.takeoff_sent = False
+        self.t_takeoff = -1e9
         self.land_sent = False
         self.finished = False
         self._pending = []
+        self._last_call = {}
+        self.home = False
         self.create_subscription(State, '/mavros/state', self._state_cb, 10)
+        self.create_subscription(HomePosition, '/mavros/home_position/home', self._home_cb,
+                                 qos_profile_sensor_data)
         self.create_subscription(PoseStamped, '/mavros/local_position/pose', self._local_cb,
                                  qos_profile_sensor_data)
         self.pub_vel = self.create_publisher(Twist, '/mavros/setpoint_velocity/cmd_vel_unstamped', 10)
@@ -60,6 +69,11 @@ class MavrosMissionNode(Node):
     def _state_cb(self, m):
         self.state = m
 
+    def _home_cb(self, m):
+        if not self.home:
+            self.get_logger().info('FCU has a home: EKF is up')
+        self.home = True
+
     def _local_cb(self, m):
         self.local = np.array([m.pose.position.x, m.pose.position.y, m.pose.position.z])
 
@@ -69,6 +83,12 @@ class MavrosMissionNode(Node):
             self.t_first = t
 
     def _call(self, cli, req, what):
+        # one request per service per second: a slow FCU (SITL under a slow
+        # sim) otherwise gets a GUIDED request on every sensor tick
+        now = self.get_clock().now().nanoseconds * 1e-9
+        if now - self._last_call.get(what, -1e9) < 1.0:
+            return
+        self._last_call[what] = now
         if not cli.service_is_ready():
             self.get_logger().warn(f'{what}: service not ready')
             return
@@ -86,14 +106,23 @@ class MavrosMissionNode(Node):
                 self._call(self.cli_mode, SetMode.Request(custom_mode='GUIDED'), 'GUIDED')
                 return
             if not self.state.armed:
+                if self.takeoff_sent:
+                    # the FCU disarmed on the ground (auto-disarm after a takeoff
+                    # that never took): start over
+                    self.get_logger().warn('disarmed before climbing, arming again')
+                    self.takeoff_sent, self.armed_z = False, None
                 self._call(self.cli_arm, CommandBool.Request(value=True), 'arm')
                 return
             if self.armed_z is None:
                 self.armed_z = float(self.pose[0][2])
-            if not self.takeoff_sent:
+            climbed = float(self.pose[0][2]) - self.armed_z > 0.1
+            if not self.takeoff_sent or (not climbed and t - self.t_takeoff > 6.0):
                 alt = float(cmd.z) - self.armed_z
-                self.takeoff_sent = True
+                if self.takeoff_sent:
+                    self.get_logger().warn('takeoff accepted but not climbing, sending it again')
+                self.takeoff_sent, self.t_takeoff = True, t
                 self.get_logger().info(f'takeoff to z {cmd.z:.2f} ({alt:.2f} m above here)')
+                self._last_call.pop('takeoff', None)
                 self._call(self.cli_takeoff, CommandTOL.Request(altitude=alt), 'takeoff')
         elif cmd.kind == 'land':
             if not self.land_sent:
@@ -108,6 +137,10 @@ class MavrosMissionNode(Node):
             return
         if not self.started:
             if self.par['auto_start'] and self.t_pose - self.t_first >= self.par['start_delay']:
+                if self.par['wait_home'] and not self.home:
+                    self.get_logger().info('waiting for the FCU home (EKF3 on external nav)',
+                                           throttle_duration_sec=5.0)
+                    return
                 self.started = True
                 self.get_logger().info('starting the mission')
             return
