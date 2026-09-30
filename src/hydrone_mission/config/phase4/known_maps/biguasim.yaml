@@ -1,0 +1,109 @@
+# CBR 2026 FRL, Phase 4 structure AS BUILT IN BIGUASIM (Competition / CompetionMap).
+# The rulebook map (rulebook.yaml) with what BiguaSim measurably does differently:
+#   - takeoff: base_link at (1.09, 0.68) in this frame, from the maze bags
+#     (maps/bags/maze2..6, LIO-registered /cloud_registered; odom (x, y) ->
+#     maze (1.09 - y, x + 0.68)). BiguaSim spawns the drone 0.95 m before the
+#     entrance end wall, not on the rulebook pad centre.
+#   - the entrance window sits at y 1.23..1.93, 0.62..1.47 m (bags)
+#   - the low holes reach 0.85 m, not 0.77 (bags + teleport survey)
+#   - b2 <-> t2 is a LOW HOLE at mid-wall u 1.07..1.87 (teleport survey, single
+#     scans: open at 0.45 m, closed at 1.2 m), not the window read off Fig. 5
+#   - t2 <-> r5: a door at u 1.06..1.90 (survey), measured, no longer soft
+#   - b1 <-> b2: open at both 0.45 and 1.25 m in the survey (door or tall
+#     window); kept as a window, which is passed at a height open either way
+#   - r5 <-> r6 still soft: the survey scans were ambiguous there
+# The teleport survey's scans disagree between poses by ~1 m in places (a
+# BiguaSim teleport/lidar timing quirk, see docs/Phase 4 Known Maze.md), so only
+# single-scan evidence was used.
+#
+# --- below: the rulebook's own notes ---
+# CBR 2026 FRL, Phase 4 structure, from the rulebook (regras-cbr-frl-2026.pdf).
+#
+# Frame "maze": the arena corner behind the takeoff pad. x runs along the
+# structure (away from the pad), y out into the arena, z up from the floor.
+#   arena      [0, 8] x [0, 8] (Fig. 3; marked on the floor, the net isn't a wall)
+#   takeoff    2 x 1.5 m pad in the corner, ~0.54 m tall (Fig. 3/4)
+#   structure  [2, 8] x [0, 2], 1.5 m tall, roofed (Fig. 3/6)
+#   landing    pad in the middle of the arena (Fig. 10)
+#
+# Walls come from Fig. 6 (dimensioned). Passages between rooms are only drawn
+# in the 3D render (Fig. 5): the ones marked soft are read off it, the rest
+# were measured in BiguaSim (maps/bags/maze2..6), which is built to the rules.
+# Outer walls sit inside the footprint by half their thickness.
+name: cbr2026-biguasim
+arena: {x: [0.0, 8.0], y: [0.0, 8.0]}
+structure: {x: [2.0, 8.0], y: [0.0, 2.0], height: 1.5}
+takeoff: {center: [1.09, 0.68], size: [1.0, 1.0], top: 0.54, yaw_deg: 90.0}
+landing: {center: [4.0, 4.0]}
+
+walls:
+  # ── outer shell ──
+  - name: end_entry
+    kind: outer
+    a: [2.04, 0.0]
+    b: [2.04, 2.0]
+    t: 0.08
+    openings:
+      - {name: entrance, kind: window, role: entry, u: [1.23, 1.93], z: [0.62, 1.47]}
+  - name: end_far
+    kind: outer
+    a: [7.96, 0.0]
+    b: [7.96, 2.0]
+    t: 0.08
+  - name: back            # along the arena wall, never seen from outside
+    kind: outer
+    a: [2.0, 0.04]
+    b: [8.0, 0.04]
+    t: 0.08
+  - name: front           # faces the arena
+    kind: outer
+    a: [2.0, 1.96]
+    b: [8.0, 1.96]
+    t: 0.08
+    openings:
+      - {name: door, kind: door, role: forbidden, u: [1.15, 1.95], z: [0.0, 1.50], soft: true}
+      - {name: exit, kind: window, role: exit, u: [5.10, 5.90], z: [0.70, 1.50]}
+
+  # ── inside (Fig. 6: x_s + 2 along, y as drawn) ──
+  - name: entry_right     # entry room | top of the L
+    a: [3.07, 1.0]
+    b: [3.07, 1.96]
+  - name: entry_floor     # entry room | bottom of the L, low hole
+    a: [2.04, 1.0]
+    b: [3.07, 1.0]
+    openings:
+      - {name: entry_hole, kind: hole, u: [0.10, 0.88], z: [0.05, 0.85]}
+  - name: l_end           # bottom of the L | bottom room 1
+    a: [4.02, 0.04]
+    b: [4.02, 1.0]
+  - name: mid             # top of the L and T2 | bottom rooms 1, 2
+    a: [4.02, 1.0]
+    b: [6.0, 1.0]
+    openings:
+      - {name: l_hole, kind: hole, u: [0.08, 0.80], z: [0.05, 0.85]}
+      - {name: b2_t2, kind: hole, u: [1.07, 1.87], z: [0.05, 0.85]}
+  - name: x5
+    a: [5.0, 0.04]
+    b: [5.0, 1.96]
+    openings:
+      - {name: b1_b2, kind: window, u: [0.10, 0.92], z: [0.62, 1.42]}
+  - name: x6
+    a: [6.0, 0.04]
+    b: [6.0, 1.96]
+    openings:
+      - {name: t2_r5, kind: door, u: [1.06, 1.90], z: [0.0, 1.50]}
+  - name: x7
+    a: [7.02, 0.04]
+    b: [7.02, 1.96]
+    openings:
+      - {name: r5_r6, kind: door, u: [0.12, 0.86], z: [0.0, 1.50], soft: true}
+
+rooms:
+  - {name: entry, x: [2.08, 3.04], y: [1.03, 1.92]}
+  - {name: l_low, x: [2.08, 3.99], y: [0.08, 0.97]}
+  - {name: l_top, x: [3.10, 4.97], y: [1.03, 1.92]}
+  - {name: b1,    x: [4.05, 4.97], y: [0.08, 0.97]}
+  - {name: b2,    x: [5.03, 5.97], y: [0.08, 0.97]}
+  - {name: t2,    x: [5.03, 5.97], y: [1.03, 1.92]}
+  - {name: r5,    x: [6.03, 6.99], y: [0.08, 1.92]}
+  - {name: r6,    x: [7.05, 7.92], y: [0.08, 1.92]}

@@ -12,6 +12,7 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        ('share/' + package_name + '/config/phase4/known_maps', glob('config/phase4/known_maps/*.yaml')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -25,6 +26,7 @@ setup(
             'pad_mission_node = hydrone_mission.pad_mission_node:main',
             'phase1_mission_node = hydrone_mission.phase1_mission_node:main',
             'phase4_maze_node = hydrone_mission.phase4_maze_node:main',
+            'phase4_known_node = hydrone_mission.phase4_known_node:main',
         ],
     },
 )
