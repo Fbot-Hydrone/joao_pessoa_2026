@@ -71,11 +71,25 @@ All velocities go through the beam guard. Planning inside uses the map rasterise
 | LIO sliding 0.15 m/s inside | done in 205 s, all 5 QR, min clearance 0.182 m, landed 0.09 m off; map pose error while flying on it: mean 0.03 m, max 0.115 m |
 | start pose 12° / 15 cm off the prior | done, all 5 QR, landed within 0.1 m |
 
+| moved passage (r5→r6 0.5 m off the map) | the sweep found it open from +0.4 to +0.6 m and centred at +0.50; done, all 5 QR, landed 0.19 m off |
+| LIO dead 40 s mid-maze, back 2.8 m off | flew on the map pose alone, re-anchored when LIO returned; done, all 5 QR, landed 0.08 m off, pose error max 0.118 m |
+| passage walled up (no route left) | blocked by VERIFY/SEARCH, the explorer took over; no contact (min clearance 0.044 m), landed inside (the maze is a chain, so the exit was unreachable) |
+
 ### BiguaSim (machine 1, `biguasim.yaml`, 2026-09-30)
 The **whole mission**, run 8: takeoff, entrance window, all 8 rooms with a turn at each look point, every passage at its own height (three low holes at 0.45 m, windows at 1.02–1.1 m, a door at 0.75 m), exit window, back on LIO, landed and disarmed on the pad. It took **361 s**, and no QR codes were read (BiguaSim has neither a camera nor codes).
 - Flying pose vs ground truth inside, with the world→map frames fitted: **mean 0.043 m, p95 0.105 m, max 0.15 m**. z within ±1 cm while indoors.
 - Touchdown 0.17 m from the pad centre.
 - LIO alone was 0.06 m mean in this run: it didn't degenerate in this sim. The value of flying by the walls shows in the degeneracy runs above.
+
+Run 11, with the LIO-failure handling below, was the same: 365 s, mean 0.041 m (p95 0.108 m), touchdown 0.13 m from the pad centre.
+
+**LIO does fail for real in BiguaSim.** In b2 (a 1 × 1 m room) FAST-LIO went "No Effective Points" and diverged in two of the runs (steps of ~2 m every 0.1 s):
+- Run 9: the mux went silent with it, the EKF lost external nav, failed safe to LAND and the drone crashed.
+- Run 10: the mux followed its velocity, and the EKF swung the drone 1.5 m back and forth until the localizer lost it.
+
+The mux now treats any odometry step or velocity faster than 1.2 m/s as lying. It flies on the map pose alone (**map-only**), never passes that velocity on, and trusts LIO again only after 1 s of sane steps. The localizer believes odometry steps only up to 0.8 m/s, and re-spreads over every room when lost.
+
+Two more runs died for reasons outside the stack: somebody at machine 1's desktop closed the UE window (the engine exits with `ViewportClosed`), so runs there are now headless.
 
 Getting there took these fixes:
 - the EKF feed (see Pipeline)
