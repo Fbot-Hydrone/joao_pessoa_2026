@@ -23,6 +23,8 @@
 #                     operator's gestures. In the sim, type the gestures in a
 #                     second terminal: scripts/phase3_terminal.sh.
 #                     See phase3_sim.launch.py and docs/Phase 3 HRI Mission.md.
+#   --webcam          pass the PC's webcam (WEBCAM_DEV, default /dev/video0)
+#                     into the container, for scripts/phase3_camera.sh.
 #   --phase4          bring up the OTHER AIRCRAFT: the Kopis X8 flying on its
 #                     Livox Mid-360 (config-KopisX8.yaml, an engine raycast
 #                     lidar). FAST-LIO odometry is the EKF's external nav; the
@@ -74,6 +76,7 @@ ODOM_ERROR_PRINT=true
 HYDRONE_LAUNCH=hydrone_sim.launch.py
 ODOM_SOURCE=vo
 DEV_MODE=false
+WEBCAM=false
 DO_BUILD=true
 WORLD_ADDRESS="${WORLD_ADDRESS:-}"
 WORLD_PORT="${WORLD_PORT:-8770}"
@@ -109,6 +112,7 @@ for arg in "$@"; do
         --phase1)        HYDRONE_LAUNCH=phase1_sim.launch.py ;;
         --landing-sites) HYDRONE_LAUNCH=landing_sites_sim.launch.py ;;
         --phase3)        HYDRONE_LAUNCH=phase3_sim.launch.py ;;
+        --webcam)        WEBCAM=true ;;
         --phase4)        HYDRONE_LAUNCH=phase4_sim.launch.py ;;
         --ground-truth)  ODOM_SOURCE=ground_truth ;;
         --dev)           DEV_MODE=true; DO_BUILD=false ;;
@@ -182,6 +186,18 @@ if docker info 2>/dev/null | grep -qi 'runtimes:.*nvidia'; then
     compose_files+=(-f docker-compose.nvidia.yml)
 else
     echo "No NVIDIA container runtime — rendering on the iGPU (see README for dGPU setup)"
+fi
+
+if [ "$WEBCAM" = true ]; then
+    WEBCAM_DEV="${WEBCAM_DEV:-/dev/video0}"
+    if [ ! -e "$WEBCAM_DEV" ]; then
+        echo "ERROR: --webcam but $WEBCAM_DEV does not exist (plug the camera in;" >&2
+        echo "  ls /dev/video* lists them; WEBCAM_DEV=/dev/videoN picks another)." >&2
+        exit 1
+    fi
+    export WEBCAM_DEV
+    echo "Webcam       : $WEBCAM_DEV (scripts/phase3_camera.sh)"
+    compose_files+=(-f docker-compose.webcam.yml)
 fi
 
 if [ "$DEV_MODE" = true ]; then

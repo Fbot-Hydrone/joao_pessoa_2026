@@ -1,0 +1,6 @@
+# The PC's webcam inside the container, for the Phase 3 gesture camera
+# (scripts/docker_up.sh --webcam; WEBCAM_DEV picks another device).
+services:
+  hydrone:
+    devices:
+      - ${WEBCAM_DEV:-/dev/video0}:${WEBCAM_DEV:-/dev/video0}

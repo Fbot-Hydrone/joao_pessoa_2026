@@ -127,6 +127,12 @@ class Phase3HriNode(Node):
             ("retry_period_s", 2.0),
             ("setpoint_hz", 10.0),
             ("gesture_topic", "/hydrone/vision/human_gesture"),
+            # the camera's hold-to-move gestures (frl_core, via gesture_camera)
+            ("vel_speed", 0.5),            # m/s while APROXIMAR/AFASTAR/DIREITA/ESQUERDA is held
+            ("vel_speed_z", 0.3),          # m/s while SUBIR/DESCER is held
+            ("vel_lead_m", 0.5),           # how far the setpoint may run ahead of the drone
+            ("vel_timeout_s", 0.5),        # no frame for this long => brake
+            ("takeoff_hold_s", 1.5),       # SUBIR held this long on the ground => TAKEOFF
         ])
         self.p = {q.name: q.value for q in params}
         # step sizes can be changed mid-flight (gesture_terminal `passo`/`giro`)
@@ -152,6 +158,12 @@ class Phase3HriNode(Node):
         self._auto_home_at = None     # time to fly home by itself, after the last base
         self._land_z = None
         self._z_hist = []
+        # the gesture stream from the camera (frl_core vocabulary)
+        self.vel = None               # (lateral, frente, vertical) being flown, or None
+        self._stream_name = None      # last streamed gesture
+        self._stream_since = 0.0      # when it started
+        self._stream_t = -1e9         # last frame
+        self._stream_block = None     # ignore this gesture until it changes (after a takeoff)
 
         self.create_subscription(State, "/mavros/state", self._cb_state, 10)
         self.create_subscription(PoseStamped, "/mavros/local_position/pose",
@@ -222,6 +234,9 @@ class Phase3HriNode(Node):
             self._enter(self.COMMAND)
             return
 
+        if msg.gesture_name in core.STREAMED:
+            self._on_stream(msg, now)
+            return
         if action is None or action == core.HUMAN:
             return
         if self.state not in (self.COMMAND, self.LANDED):
@@ -243,6 +258,50 @@ class Phase3HriNode(Node):
             f"[FASE 3] COMANDO: {msg.gesture_name} -> {action}"
             f"   (humano em {msg.human_position.x:.2f}, {msg.human_position.y:.2f})")
         self._execute(action)
+
+    def _on_stream(self, msg, now):
+        """One frame of the camera's debounced gesture (frl_core vocabulary).
+
+        Arrives every frame, so only a CHANGE is logged and acted on, except
+        for the velocity, which is refreshed by every frame and dies with the
+        stream (vel_timeout_s).
+        """
+        name = msg.gesture_name
+        # a gap in the frames (operator out of view) restarts every hold
+        changed = name != self._stream_name or now - self._stream_t > self.p["vel_timeout_s"]
+        self._stream_t = now
+        if changed:
+            self._stream_name, self._stream_since = name, now
+            if self._stream_block is not None and name != self._stream_block:
+                self._stream_block = None
+            hp = msg.human_position
+            self.get_logger().info(
+                f"[FASE 3] GESTO: {name} -> {core.velocity_for(name) or core.action_for(name)}"
+                f"   (operador na imagem em {hp.x:.0f}, {hp.y:.0f} px)")
+        if name == self._stream_block:
+            return
+
+        if self.state == self.LANDED:
+            if name == core.FRL_TAKEOFF and now - self._stream_since >= self.p["takeoff_hold_s"]:
+                self.get_logger().info(f"[FASE 3] {name} mantido {self.p['takeoff_hold_s']:.1f} s no chão -> DECOLAR")
+                self._stream_block = name      # lower the arms before it climbs on SUBIR
+                self._execute(core.TAKEOFF)
+            return
+        if self.state != self.COMMAND:
+            if changed:
+                self.get_logger().info(f"[FASE 3] gesto '{name}' ignorado em {self.state}")
+            return
+
+        vel = core.velocity_for(name)
+        if vel is not None:
+            if self.vel is None:
+                self.moving = None             # a held gesture overrides a terminal step
+            self.vel = vel
+        elif self.vel is not None or (changed and name == "STOP"):
+            self.vel = None
+            self._hold_here()                  # HOVER / STOP: brake where it is
+        if changed and core.action_for(name) == core.LAND:
+            self._begin_landing(final=False)
 
     # ── gesture -> flight ─────────────────────────────────────────────────────
 
@@ -279,6 +338,7 @@ class Phase3HriNode(Node):
             self._goto(sp, action)
 
     def _go_home(self):
+        self.vel = None
         self.going_home = True
         self.get_logger().info(
             f"[FASE 3] RETORNO AUTÔNOMO à base de decolagem "
@@ -402,6 +462,9 @@ class Phase3HriNode(Node):
             self._enter(self.WAIT_OPERATOR)
 
     def _do_command(self):
+        if self.vel is not None:
+            self._fly_velocity()
+            return
         if self.moving is None:
             return
         if self._arrived():
@@ -412,6 +475,27 @@ class Phase3HriNode(Node):
             self.get_logger().warn(f"[FASE 3] {self.moving} não chegou — segurando onde está")
             self._hold_here()
 
+    def _fly_velocity(self):
+        """Hold-to-move: run the setpoint ahead of the drone along the held
+        gesture, never more than vel_lead_m ahead, and brake if the camera
+        stops sending."""
+        if self.now() - self._stream_t > self.p["vel_timeout_s"]:
+            self.get_logger().warn("[FASE 3] câmera sem quadros — freando")
+            self.vel = None
+            self._hold_here()
+            return
+        dt = 1.0 / max(self.p["setpoint_hz"], 1.0)
+        vx, vy, vz = core.velocity_enu(self.vel, self.sp[3], self.p["vel_speed"], self.p["vel_speed_z"])
+        x, y, z = self.sp[0] + vx * dt, self.sp[1] + vy * dt, self.sp[2] + vz * dt
+        pp = self.pose.pose.position
+        d = math.hypot(x - pp.x, y - pp.y)
+        if d > self.p["vel_lead_m"]:
+            k = self.p["vel_lead_m"] / d
+            x, y = pp.x + (x - pp.x) * k, pp.y + (y - pp.y) * k
+        z = min(max(z, self.home[2] + self.p["min_alt"]), self.home[2] + self.p["max_alt"])
+        self.sp = [x, y, z, self.sp[3]]
+        self.stream = True
+
     def _do_homing(self):
         if self._arrived(self.p["home_tol_m"]) or self._move_timed_out():
             self.moving = None
@@ -419,6 +503,7 @@ class Phase3HriNode(Node):
             self._begin_landing(final=True)
 
     def _begin_landing(self, final):
+        self.vel = None
         self.going_home = self.going_home or final
         self.stream = False            # LAND owns the vehicle from here
         self.moving = None
@@ -512,7 +597,8 @@ class Phase3HriNode(Node):
             pose = f" pos ({pp.x:.2f}, {pp.y:.2f}, {pp.z:.2f}) yaw {math.degrees(yaw_of(self.pose)):.0f}"
         self.pub_status.publish(String(
             data=f"{self.state} bases {self.landings}/{self.p['target_bases']}"
-                 f"{' moving ' + self.moving if self.moving else ''}{pose}"))
+                 f"{' moving ' + self.moving if self.moving else ''}"
+                 f"{' gesto ' + self._stream_name if self.vel else ''}{pose}"))
 
     def _set_mode(self, mode):
         self._start(self.cli_mode, SetMode.Request(custom_mode=mode))

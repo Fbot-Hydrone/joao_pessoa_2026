@@ -73,9 +73,42 @@ def action_for(gesture_name):
     name = (gesture_name or "").strip()
     if name in GESTURE_ACTION:
         return GESTURE_ACTION[name]
+    if name in FRL_ACTION:
+        return FRL_ACTION[name]
     if name.upper() in GESTURE_ACTION.values():
         return name.upper()
     return None
+
+
+# ── The camera's vocabulary (frl_core): hold to move ─────────────────────────
+# gesture_camera streams frl_core's DEBOUNCED gesture every frame. Its movement
+# gestures are velocities, not steps: held, the drone keeps going at
+# vel_speed; HOVER / STOP brake. frl_core.COMMANDS is the one table of
+# directions (+lateral = the drone's right, +frente = towards the operator).
+HOLD = "HOLD"                 # HOVER: neutral, brake and hold
+FRL_ACTION = {"HOVER": HOLD, "NENHUM": HOLD, "STOP": STOP, "POUSAR": LAND}
+FRL_TAKEOFF = "SUBIR"         # held on the ground for takeoff_hold_s => TAKEOFF
+# every name the camera streams (frl_core.COMMANDS keys, plus NENHUM)
+STREAMED = ("HOVER", "NENHUM", "STOP", "POUSAR", "DIREITA", "ESQUERDA",
+            "APROXIMAR", "AFASTAR", "SUBIR", "DESCER")
+
+
+def velocity_for(gesture_name):
+    """(lateral, frente, vertical) for a moving frl_core gesture, else None."""
+    from hydrone_mission.phase3.frl_core import COMMANDS
+    cmd = COMMANDS.get((gesture_name or "").strip())
+    return cmd if cmd is not None and any(cmd) else None
+
+
+def velocity_enu(cmd, yaw, speed, speed_z):
+    """Body-frame (lateral, frente, vertical) -> MAVROS local ENU (vx, vy, vz).
+
+    Right of a vehicle at `yaw` (ENU, CCW from east) is (sin yaw, -cos yaw).
+    """
+    lat, fwd, vert = cmd
+    vx = speed * (fwd * math.cos(yaw) + lat * math.sin(yaw))
+    vy = speed * (fwd * math.sin(yaw) - lat * math.cos(yaw))
+    return vx, vy, speed_z * vert
 
 
 def wrap_pi(angle):

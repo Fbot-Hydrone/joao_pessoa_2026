@@ -68,6 +68,39 @@ the LIO, as it will on the real aircraft. It spawns where phase 4 spawns, so
 the first 2 m and the turn happen wherever that is in the Competition world —
 there is no phase 3 arena in the simulator yet.
 
+## Flying on the webcam (frl_core)
+
+```bash
+ROS_DOMAIN_ID=77 BS_SIM_DIR=~/Documents/bs-drone-competition-phase4 \
+    ./scripts/docker_up.sh --phase3 --no-build --webcam
+./scripts/phase3_camera.sh                 # second terminal; `q` in the window stops it
+```
+
+`gesture_camera` runs MediaPipe Pose on the camera, maps its 33 landmarks to
+COCO-17 (`MP_TO_COCO`, `visibility` as confidence) and hands them to the team's
+`phase3/frl_core.py`, untouched: `classify` names the gesture, `Debouncer`
+confirms it. The debounced gesture goes out on the usual topic EVERY frame.
+
+| gesture (frl_core) | in the mission |
+|---|---|
+| APROXIMAR / AFASTAR / DIREITA / ESQUERDA | held: fly that way at `vel_speed` (0.5 m/s), body frame |
+| SUBIR / DESCER | held: climb / descend at `vel_speed_z`; SUBIR held `takeoff_hold_s` (1.5 s) on the ground = TAKEOFF |
+| HOVER / STOP | brake and hold |
+| POUSAR (held 1.2 s by the Debouncer) | LAND |
+
+Hold-to-move runs the position setpoint ahead of the drone (never more than
+`vel_lead_m`), so it is still GUIDED on the EKF — the autonomous approach and
+return keep working. No frame for `vel_timeout_s` (operator out of view, camera
+closed) = brake. After a SUBIR takeoff, SUBIR is ignored until the arms move,
+so it does not climb straight to `max_alt`. `frl_core.Mover` (RC PWM for
+ALT_HOLD) is kept for the real drone and not used in the sim.
+
+Tested against the fake FCU with a 30 Hz synthetic stream: APROXIMAR 2 s =
++0.95 m forward, DIREITA 1 s = 0.45 m to the drone's right, SUBIR 1 s = +0.3 m,
+camera dark = no drift, POUSAR lands, SUBIR 1 s on the ground stays down,
+2 s takes off. `test/test_phase3_frl.py` covers every gesture of the
+vocabulary on a synthetic skeleton. Not yet flown with a real webcam.
+
 ## The gesture contract
 
 The camera pipeline, when it arrives, only has to publish
