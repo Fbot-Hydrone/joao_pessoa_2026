@@ -176,7 +176,7 @@ def generate_launch_description():
         # base. Um argumento por câmera porque normalmente só faz sentido
         # trocar a de baixo (a que confirma o pouso) primeiro.
         DeclareLaunchArgument(
-            "down_detector_backend", default_value="cv",
+            "down_detector_backend", default_value="yolo",
             description="'cv' (HSV/contorno, o de sempre) ou 'yolo' (modelo "
                         "treinado em 1_train_yolo.py sobre fotos reais da "
                         "base). Ver down_yolo_weights."),
@@ -194,7 +194,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "down_yolo_conf_threshold", default_value="0.5"),
         DeclareLaunchArgument(
-            "forward_detector_backend", default_value="cv",
+            "forward_detector_backend", default_value="yolo",
             description="Idem, para a câmera forward (ZED). Só importa "
                         "quando forward_detector:=true."),
         DeclareLaunchArgument(
@@ -362,8 +362,23 @@ def generate_launch_description():
                         "reserva e dimensionada para o pior trajeto, nao para "
                         "o medio."),
         DeclareLaunchArgument(
-            "land_centre_max_cm", default_value="60.0",
-            description="Quantos CENTIMETROS no chao a base ainda pode estar "
+            "trust_map_observations", default_value="20",
+            description="Se a barriga nao confirma em confirm_timeout_s mas o "
+                        "mapa tem pelo menos isto de deteccoes da base, pousa "
+                        "no ponto do mapa em vez de por na blacklist. Reflexo "
+                        "do teto lava o topo das bases altas visto de cima "
+                        "(seed 100, 2026-10-01). 0 desliga."),
+        DeclareLaunchArgument(
+            "centre_on_pad", default_value="false",
+            description="Servo visual sobre a base antes de pousar. DESLIGADO: "
+                        "com varias bases no quadro ele perseguia a vizinha e "
+                        "travava ate a blacklist (seed 100, 2026-10-01). O "
+                        "veiculo voa ate o centro da base no MAPA, confirma "
+                        "que ha base embaixo e pousa ali."),
+        DeclareLaunchArgument(
+            "land_centre_max_cm", default_value="0.0",
+            description="0 DESLIGA (padrao: sem servo nao ha o que vetar, ver "
+                        "centre_on_pad). Quantos CENTIMETROS no chao a base ainda pode estar "
                         "fora do centro quando a pairagem decide pousar. A "
                         "base tem 1 m, entao a borda dela esta a 50 cm do "
                         "centro: 30 cm quer dizer 'fique nos dois tercos do "
@@ -1012,6 +1027,10 @@ def generate_launch_description():
                 LaunchConfiguration("confirm_timeout_s"), value_type=float),
             "land_centre_max_cm": ParameterValue(
                 LaunchConfiguration("land_centre_max_cm"), value_type=float),
+            "centre_on_pad": ParameterValue(
+                LaunchConfiguration("centre_on_pad"), value_type=bool),
+            "trust_map_observations": ParameterValue(
+                LaunchConfiguration("trust_map_observations"), value_type=int),
             "belly_offset_xy": ParameterValue(
                 LaunchConfiguration("belly_offset_xy"),
                 value_type=List[float]),

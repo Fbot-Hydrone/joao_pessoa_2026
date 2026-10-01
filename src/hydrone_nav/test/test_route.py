@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from hydrone_nav import route
 
 
-def pad(pad_id, x, y, *, takeoff_base=False, visited=False, observations=3):
+def pad(pad_id, x, y, *, takeoff_base=False, visited=False, observations=5):
     return SimpleNamespace(
         id=pad_id,
         position=SimpleNamespace(x=x, y=y),
@@ -34,9 +34,9 @@ def test_a_blacklisted_pad_is_never_a_candidate():
     assert not route.is_candidate(pad(7, 2.0, 0.0), blacklist={7})
 
 
-def test_a_pad_needs_more_than_one_sighting():
-    assert not route.is_candidate(pad(1, 2.0, 0.0, observations=1))
-    assert route.is_candidate(pad(1, 2.0, 0.0, observations=2))
+def test_a_pad_needs_five_sightings():
+    assert not route.is_candidate(pad(1, 2.0, 0.0, observations=4))
+    assert route.is_candidate(pad(1, 2.0, 0.0, observations=5))
 
 
 def test_a_pad_on_top_of_home_is_never_a_candidate():
@@ -73,12 +73,11 @@ def test_takeoff_base_falls_back_when_the_map_has_none():
     assert route.takeoff_base_xy([pad(1, 2.0, 0.0)], fallback=(9.0, 9.0)) == (9.0, 9.0)
 
 
-def test_two_sightings_are_enough_to_be_worth_a_leg():
-    """This needed three until 2026-08-27, and three cost real bases: two pads
-    seen twice at 6.9 m and 5.7 m never got a third look because the search
-    turned away, so they were never flown to. The confirmation hover is the
-    real filter — a metre up, where the pad is hundreds of pixels across."""
-    assert route.is_candidate(pad(1, 2.0, 0.0, observations=2))
+def test_two_sightings_are_not_enough_to_be_worth_a_leg():
+    """2026-10-01, seed 100: a ghost entry beside a tall base was picked with
+    two looks, the hover confirmed the base next to it, and the vehicle landed
+    on the floor. Weak leads are investigation mode's job, not the search's."""
+    assert not route.is_candidate(pad(1, 2.0, 0.0, observations=2))
 
 
 def test_a_single_sighting_is_still_not_enough():

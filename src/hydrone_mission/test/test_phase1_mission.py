@@ -171,15 +171,13 @@ def test_a_blacklisted_pad_is_never_a_candidate(node):
     assert not node._is_candidate(pad(7, 2.0, 0.0))
 
 
-def test_a_pad_seen_only_once_is_never_a_candidate(node):
-    """One frame of blue noise reaches the map. Two frames is a thing that was
-    there both times, and the confirmation hover is what settles it — a metre
-    up, where the pad is hundreds of pixels across instead of a handful.
-    Requiring three across the arena only meant the better judge never voted,
-    and it cost real bases (see route.MIN_OBSERVATIONS)."""
+def test_a_weak_lead_is_not_a_candidate_outside_investigation(node):
+    """2026-10-01, seed 100: a ghost with two looks was flown to and the
+    vehicle landed on the floor beside a tall base. The search needs
+    route.MIN_OBSERVATIONS; weak leads wait for investigation mode."""
     node.home = (9.0, 9.0)
-    assert not node._is_candidate(pad(1, 2.0, 0.0, observations=1))
-    assert node._is_candidate(pad(1, 2.0, 0.0, observations=2))
+    assert not node._is_candidate(pad(1, 2.0, 0.0, observations=2))
+    assert node._is_candidate(pad(1, 2.0, 0.0, observations=5))
 
 
 def test_anything_sitting_where_we_armed_is_never_a_candidate(node):
@@ -758,6 +756,28 @@ def test_a_candidate_that_never_confirms_is_blacklisted(node):
     assert 4 in node.blacklist
     assert node.state == node.SETTLE
     assert node.target_id is None
+
+
+def test_a_well_mapped_pad_lands_even_if_the_belly_is_blind(node):
+    """2026-10-01, seed 100: over the tallest bases the vehicle sat 4-5 cm from
+    the true centre and ceiling glare left the belly with 0-2 frames. The map
+    had seen them from the side 53 times."""
+    node.target_id = 4
+    set_map(node, pad(4, 1.0, 1.0, observations=53))
+    enter(node, node.CONFIRM, age_s=node.confirm_timeout + 1.0)
+    node._do_confirm()
+    assert node.state == node.LAND
+    assert 4 not in node.blacklist
+
+
+def test_a_weakly_mapped_pad_is_still_blacklisted(node):
+    """The ghost that put the vehicle on the floor had three looks."""
+    node.target_id = 4
+    set_map(node, pad(4, 1.0, 1.0, observations=3))
+    enter(node, node.CONFIRM, age_s=node.confirm_timeout + 1.0)
+    node._do_confirm()
+    assert 4 in node.blacklist
+    assert node.state != node.LAND
 
 
 def test_a_rejection_restarts_the_search_from_scratch(node):

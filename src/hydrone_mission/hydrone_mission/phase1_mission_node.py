@@ -289,6 +289,7 @@ class Phase1MissionNode(Node):
         self.declare_parameter("confirm_detections", 3)
         self.declare_parameter("confirm_confidence", 0.60)
         self.declare_parameter("confirm_timeout_s", 25.0)
+        self.declare_parameter("trust_map_observations", 20)
         # How long a leg may go without getting closer before its target is
         # written off. Generous on purpose: this must never fire on a leg that
         # is merely slow, only on one that has stopped closing, and the removed
@@ -690,6 +691,7 @@ class Phase1MissionNode(Node):
         self.confirm_detections = int(p("confirm_detections"))
         self.confirm_conf = float(p("confirm_confidence"))
         self.confirm_timeout = float(p("confirm_timeout_s"))
+        self.trust_map_observations = int(p("trust_map_observations"))
         self.travel_stall_s = float(p("travel_stall_s"))
         self.travel_progress_m = float(p("travel_progress_m"))
         self.coverage_search = bool(p("coverage_search"))
@@ -2379,6 +2381,23 @@ class Phase1MissionNode(Node):
                     return
 
         if self._since_entered() > self.confirm_timeout:
+            # TRUST A WELL-MAPPED PAD over a blind belly camera. MEASURED
+            # 2026-10-01, seed 100: over the two tallest bases (tops 1.40 and
+            # 1.16 m) the vehicle sat 4-5 cm from the true centre and the belly
+            # saw 2 and 0 frames in 25 s — ceiling glare washes the top out
+            # from straight above, while the perimeter had seen it from the
+            # side 53 times. By then the map had refined real bases to 5-7 cm.
+            # <= 0 turns this off.
+            pad = self._target_pad()
+            if (self.trust_map_observations > 0 and pad is not None
+                    and pad.observations >= self.trust_map_observations):
+                self.get_logger().warn(
+                    f"pad {self.target_id}: belly saw {self._confirm_hits}/"
+                    f"{self.confirm_detections} looks in "
+                    f"{self.confirm_timeout:.0f} s, but the map has "
+                    f"{pad.observations} — trusting the map and landing.")
+                self._begin_landing()
+                return
             self.get_logger().warn(
                 f"pad {self.target_id} did not confirm in "
                 f"{self.confirm_timeout:.0f} s ({self._confirm_hits}/"
@@ -2420,14 +2439,19 @@ class Phase1MissionNode(Node):
                     break
         return max(z - top, 0.2)
 
-    def _target_xy(self):
-        """Where the map believes the pad being confirmed is, or None."""
+    def _target_pad(self):
+        """The map entry of the pad being confirmed, or None."""
         if self.target_id is None or self.pad_map is None:
             return None
         for pad in self.pad_map.pads:
             if int(pad.id) == int(self.target_id):
-                return (pad.position.x, pad.position.y)
+                return pad
         return None
+
+    def _target_xy(self):
+        """Where the map believes the pad being confirmed is, or None."""
+        pad = self._target_pad()
+        return None if pad is None else (pad.position.x, pad.position.y)
 
     def _settled(self) -> bool:
         """Has the settle pause done its job yet? See settle_still_speed."""

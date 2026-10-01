@@ -18,23 +18,19 @@ needs one — that is the point of it being a library.
 
 import math
 
-# Two fused sightings before a pad is worth a leg. One frame of blue noise
-# reaches the map; two from different frames is a thing that was there both
-# times.
+# Five fused sightings before a pad is worth a leg in the normal search.
 #
-# This was three, and three was costing real bases. MEASURED 2026-08-27 on a
-# --ground-truth run over six of them: two pads were sighted twice, at 6.9 m
-# and 5.7 m, and never got a third look because the search turned away — so
-# they were never eligible, never flown to, and eventually dropped.
+# This was two, on the argument that the confirmation hover is the real filter.
+# MEASURED 2026-10-01, seed 100, YOLO belly: it is not. A second map entry 1.26 m
+# from the tall base 4 (top 1.40 m) was picked with TWO looks, and the hover
+# "confirmed" it with six belly frames — the camera was seeing base 4 from the
+# side. The vehicle landed on the floor beside it, which ends the attempt. The
+# six real bases had 27-274 looks by the time they were flown to.
 #
-# Three was the wrong place to spend the caution. The forward camera judges a
-# pad across the arena, where the ring and the cross are a handful of pixels;
-# the CONFIRMATION HOVER judges it from a metre up, where the same structure is
-# hundreds of pixels across, and a candidate that fails it is blacklisted. That
-# is the real filter. Making the weaker judge stricter only means the stronger
-# one never gets to vote — and the asymmetry is brutal: a doubtful lead costs
-# one hover, ~25 s, while a missed base costs the base.
-MIN_OBSERVATIONS = 2
+# The old worry — real bases seen only twice from far away never qualifying —
+# is covered by investigation mode, which drops to one look once a level has
+# been flown (phase1_mission_node._is_candidate).
+MIN_OBSERVATIONS = 5
 
 # A pad this close to where we armed is the takeoff base under another id.
 HOME_RADIUS_M = 1.0
