@@ -134,13 +134,14 @@ from mavros_msgs.msg import State
 
 from octomap_msgs.msg import Octomap
 
-from sensor_msgs.msg import CameraInfo
+from sensor_msgs.msg import CameraInfo, Range
 
 from hydrone_controller.touchdown import TouchdownDetector
 from hydrone_controller.vehicle import Vehicle
 from hydrone_nav import coverage, route, servo
 from hydrone_nav import precision_landing as pl
 from hydrone_nav.navigator import Navigator, path_msg
+from hydrone_nav.visual_descent import LOST, READY, VisualDescent
 from hydrone_msgs.msg import PadDetection, PadMap
 from hydrone_msgs.srv import MarkPadVisited, RegisterTakeoffBase
 
@@ -437,6 +438,24 @@ class Phase1MissionNode(Node):
         # the belly camera. The pixel-to-metre mapping is learned in flight;
         # see hydrone_nav.servo for why it cannot be a constant.
         self.declare_parameter("centre_on_pad", True)
+        # HOW the vehicle commits to a base (see hydrone_nav.visual_descent):
+        #   "hover"  — hover at the map position, count belly looks, land
+        #   "visual" — Black Bee style: centre on the detection nearest the
+        #              image centre and DESCEND while centring, then land
+        self.declare_parameter("landing_mode", "hover")
+        self.declare_parameter("visual_descend_to_m", 1.2)
+        self.declare_parameter("visual_coarse_px", 100.0)
+        self.declare_parameter("visual_fine_px", 40.0)
+        self.declare_parameter("visual_gain", 0.6)
+        self.declare_parameter("visual_axes", [-1.0, -1.0])
+        # Its own clock: a descent from cruise to 1.2 m over a low base takes
+        # longer than a hover count (Black Bee allowed 35 s per phase).
+        self.declare_parameter("visual_timeout_s", 45.0)
+        self.declare_parameter("range_topic",
+                               "/mavros/distance_sensor/rangefinder")
+        # Filter a base already landed on by WHERE THE VEHICLE CAME TO REST on
+        # it (contact, exact), not by its map estimate (Black Bee: 0.75 m).
+        self.declare_parameter("visited_from_landing", False)
         # How far off-centre the pad may still be, IN CENTIMETRES ON THE
         # GROUND, when the confirmation hover decides to land.
         #
@@ -702,6 +721,22 @@ class Phase1MissionNode(Node):
         t = [float(v) for v in p("pad_target_uv")]
         self._servo = servo.VisualServo(target_uv=(t[0], t[1]))
         self._belly_offset = [float(v) for v in p("belly_offset_xy")]
+        self.landing_mode = str(p("landing_mode"))
+        self.visited_from_landing = bool(p("visited_from_landing"))
+        self._landed_xy = []
+        self._vdesc = VisualDescent(
+            target_uv=self._servo.target_uv,
+            coarse_px=float(p("visual_coarse_px")),
+            fine_px=float(p("visual_fine_px")),
+            gain=float(p("visual_gain")),
+            descend_to_m=float(p("visual_descend_to_m")),
+            axes=tuple(float(v) for v in p("visual_axes")))
+        self.visual_timeout = float(p("visual_timeout_s"))
+        self._frame_stamp = None
+        self._frame_dets = []          # (u, v) of the latest belly frame
+        self._frame_t = 0.0
+        self._range_m = None
+        self._visual_fallback = False
         self._level = 1
         self._survey_path = None
         self.survey_max_stalls = int(p("survey_max_stalls"))
@@ -847,6 +882,9 @@ class Phase1MissionNode(Node):
         self.create_subscription(PadDetection,
                                  self.get_parameter("detections_topic").value,
                                  self._cb_detection, 20)
+        self.create_subscription(Range,
+                                 self.get_parameter("range_topic").value,
+                                 self._cb_range, sensor_qos)
 
         # O RELOGIO DA PROVA. Nada mais neste no o usa — nem o tick, nem o
         # stream de setpoint, nem um timeout. So o orcamento de missao.
@@ -983,6 +1021,17 @@ class Phase1MissionNode(Node):
         if msg.camera == "down":
             self._last_down = msg
             self._last_down_t = self._now()
+            # ALL detections of the latest frame, for visual_descent: the
+            # detector publishes one message per base, same stamp per frame.
+            st = (msg.header.stamp.sec, msg.header.stamp.nanosec)
+            if st != self._frame_stamp:
+                self._frame_stamp, self._frame_dets = st, []
+            if msg.confidence >= self.confirm_conf:
+                self._frame_dets.append((float(msg.u), float(msg.v)))
+            self._frame_t = self._now()
+
+    def _cb_range(self, msg: Range):
+        self._range_m = float(msg.range) if math.isfinite(msg.range) else None
 
     def _cb_clock(self, msg: Clock):
         self._sim_clock = msg.clock.sec + msg.clock.nanosec * 1e-9
@@ -1022,6 +1071,7 @@ class Phase1MissionNode(Node):
         self.home = None
         self.base_registered = False
         self.landed_count = 0
+        self._landed_xy = []
         self.blacklist.clear()
         self.target_id = None
         self.landing_for = self.LAND_PAD
@@ -1392,6 +1442,8 @@ class Phase1MissionNode(Node):
         visited = [(p.position.x, p.position.y)
                    for p in (self.pad_map.pads if self.pad_map else ())
                    if p.visited and int(p.id) != int(pad.id)]
+        if self.visited_from_landing:
+            visited += self._landed_xy
         return route.is_candidate(pad, blacklist=self.blacklist,
                                   home=self.home, min_observations=n,
                                   visited_xy=visited)
@@ -1980,6 +2032,8 @@ class Phase1MissionNode(Node):
                 self._confirm_seen = 0
                 self._confirm_best = 0.0
                 self._servo.reset()
+                self._vdesc.reset()
+                self._visual_fallback = False
                 self._enter(self.CONFIRM)
             return
 
@@ -2069,6 +2123,9 @@ class Phase1MissionNode(Node):
         tarp cost half a minute instead of the mission.
         """
         self._hold()
+        if self.landing_mode == "visual" and not self._visual_fallback:
+            self._do_visual_confirm()
+            return
 
         fresh = (self._last_down is not None
                  and self._now() - self._last_down_t <= self.fresh_s)
@@ -2146,45 +2203,105 @@ class Phase1MissionNode(Node):
                     return
 
         if self._since_entered() > self.confirm_timeout:
-            # TRUST A WELL-MAPPED PAD over a blind belly camera. MEASURED
-            # 2026-10-01, seed 100: over the two tallest bases (tops 1.40 and
-            # 1.16 m) the vehicle sat 4-5 cm from the true centre and the belly
-            # saw 2 and 0 frames in 25 s — ceiling glare washes the top out
-            # from straight above, while the perimeter had seen it from the
-            # side 53 times. By then the map had refined real bases to 5-7 cm.
-            # <= 0 turns this off.
-            pad = self._target_pad()
-            if (self.trust_map_observations > 0 and pad is not None
-                    and pad.observations >= self.trust_map_observations):
-                self.get_logger().warn(
-                    f"pad {self.target_id}: belly saw {self._confirm_hits}/"
-                    f"{self.confirm_detections} looks in "
-                    f"{self.confirm_timeout:.0f} s, but the map has "
-                    f"{pad.observations} — trusting the map and landing.")
-                self._begin_landing()
-                return
+            self._confirm_failed()
+
+    def _confirm_failed(self):
+        """The hover could not settle it: trust a well-mapped pad, or reject."""
+        # TRUST A WELL-MAPPED PAD over a blind belly camera. MEASURED
+        # 2026-10-01, seed 100: over the two tallest bases (tops 1.40 and
+        # 1.16 m) the vehicle sat 4-5 cm from the true centre and the belly
+        # saw 2 and 0 frames in 25 s — ceiling glare washes the top out
+        # from straight above, while the perimeter had seen it from the
+        # side 53 times. By then the map had refined real bases to 5-7 cm.
+        # <= 0 turns this off.
+        pad = self._target_pad()
+        if (self.trust_map_observations > 0 and pad is not None
+                and pad.observations >= self.trust_map_observations):
             self.get_logger().warn(
-                f"pad {self.target_id} did not confirm in "
-                f"{self.confirm_timeout:.0f} s ({self._confirm_hits}/"
-                f"{self.confirm_detections} looks) — not a landing site. "
-                "Blacklisting it and searching from here.")
-            # WHICH failure was it. `seen` counts belly frames that arrived at
-            # all; `best` is the highest confidence any of them reached against
-            # the gate. seen>0 with best below the gate means the camera was
-            # looking at the pad and the detector would not call it — lighting,
-            # threshold, exposure. seen==0 means the camera was pointed at
-            # empty floor, and no detector change can help that.
+                f"pad {self.target_id}: belly saw {self._confirm_hits}/"
+                f"{self.confirm_detections} looks in "
+                f"{self.confirm_timeout:.0f} s, but the map has "
+                f"{pad.observations} — trusting the map and landing.")
+            self._begin_landing()
+            return
+        self.get_logger().warn(
+            f"pad {self.target_id} did not confirm in "
+            f"{self.confirm_timeout:.0f} s ({self._confirm_hits}/"
+            f"{self.confirm_detections} looks) — not a landing site. "
+            "Blacklisting it and searching from here.")
+        # WHICH failure was it. `seen` counts belly frames that arrived at
+        # all; `best` is the highest confidence any of them reached against
+        # the gate. seen>0 with best below the gate means the camera was
+        # looking at the pad and the detector would not call it — lighting,
+        # threshold, exposure. seen==0 means the camera was pointed at
+        # empty floor, and no detector change can help that.
+        tgt = self._target_xy()
+        pos = (self.pose.pose.position if self.pose is not None else None)
+        if pos is not None and tgt is not None:
+            d = math.hypot(pos.x - tgt[0], pos.y - tgt[1])
+            self.get_logger().warn(
+                f"  confirm autopsy: {self._confirm_seen} belly frame(s) "
+                f"arrived, best conf {self._confirm_best:.2f} vs gate "
+                f"{self.confirm_conf:.2f} | vehicle at "
+                f"({pos.x:.2f}, {pos.y:.2f}, {pos.z:.2f}), pad believed at "
+                f"({tgt[0]:.2f}, {tgt[1]:.2f}), off by {d:.2f} m")
+        self._reject_target()
+
+    def _do_visual_confirm(self):
+        """landing_mode=visual: centre by camera WHILE DESCENDING, then land.
+
+        hydrone_nav.visual_descent decides; this only turns its body-frame
+        step into a setpoint relative to where the vehicle IS (not added to
+        the old setpoint, which would wind up at 10 Hz). Height is the
+        smaller of the rangefinder and the map's height over this pad: over
+        the floor beside a tall base the rangefinder reads high, and
+        descending on that reading would put the vehicle into the box.
+        """
+        if self.pose is None:
+            return
+        fresh = self._now() - self._frame_t <= self.fresh_s
+        new_frame = fresh and self._frame_stamp != getattr(
+            self, "_used_stamp", None)
+        heights = [self._height_over_pad()]
+        if self._range_m is not None:
+            heights.append(self._range_m)
+        h = min(heights)
+        self._vdesc.target_uv = self._target_uv_now()
+        step = self._vdesc.update(list(self._frame_dets) if fresh else [],
+                                  h, self._fx(), self._now())
+        if step.phase == READY:
+            self.get_logger().info(
+                f"pad {self.target_id} CENTRED by camera at {h:.2f} m over it "
+                f"({step.err_px:.0f} px off) — landing.")
+            self._begin_landing()
+            return
+        if step.phase == LOST or self._since_entered() > self.visual_timeout:
+            # Do not land wherever the nudges left us: go back over the MAP
+            # position at cruise height and let the hover path (with its
+            # trust-the-map fallback for glare) settle it.
+            self.get_logger().warn(
+                f"pad {self.target_id}: visual descent "
+                f"{'lost the base' if step.phase == LOST else 'timed out'} "
+                f"at {h:.2f} m — back over the map position, hover mode.")
             tgt = self._target_xy()
-            pos = (self.pose.pose.position if self.pose is not None else None)
-            if pos is not None and tgt is not None:
-                d = math.hypot(pos.x - tgt[0], pos.y - tgt[1])
-                self.get_logger().warn(
-                    f"  confirm autopsy: {self._confirm_seen} belly frame(s) "
-                    f"arrived, best conf {self._confirm_best:.2f} vs gate "
-                    f"{self.confirm_conf:.2f} | vehicle at "
-                    f"({pos.x:.2f}, {pos.y:.2f}, {pos.z:.2f}), pad believed at "
-                    f"({tgt[0]:.2f}, {tgt[1]:.2f}), off by {d:.2f} m")
-            self._reject_target()
+            if tgt is not None:
+                self.setpoint[0], self.setpoint[1] = tgt
+            self.setpoint[2] = self.takeoff_alt
+            self._visual_fallback = True
+            self._state_since = self._now()
+            return
+        if new_frame and step.picked is not None:
+            self._used_stamp = self._frame_stamp
+            wx, wy = pl.body_to_world((step.dx, step.dy), yaw_of(self.pose))
+            p = self.pose.pose.position
+            self.setpoint[0] = p.x + wx
+            self.setpoint[1] = p.y + wy
+            self.setpoint[2] = p.z + step.dz if step.dz else self.setpoint[2]
+            self.get_logger().info(
+                f"visual descent [{step.phase}] pad {self.target_id}: "
+                f"{step.err_px:.0f} px off at {h:.2f} m -> "
+                f"({wx:+.2f}, {wy:+.2f}, {step.dz:+.2f}) m",
+                throttle_duration_sec=1.0)
 
     def _height_over_pad(self) -> float:
         """Camera height above the pad being judged (see precision_landing)."""
@@ -2350,6 +2467,9 @@ class Phase1MissionNode(Node):
                 f"LANDED on base #{self.landed_count} of {self.target_bases} — "
                 f"resting at z={z:.2f} m ({how}).")
             self._mark_visited(z)
+            if self.pose is not None:
+                self._landed_xy.append((self.pose.pose.position.x,
+                                        self.pose.pose.position.y))
         else:
             self.get_logger().info(
                 f"LANDED ({self.landing_for}) at z={z:.2f} m ({how}).")

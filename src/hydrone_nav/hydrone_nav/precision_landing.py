@@ -14,7 +14,7 @@ switched by a launch argument of the phase that uses it:
                          tall bases). <= 0 is OFF.
   belly_offset_xy        where the belly camera sits from the vehicle centre.
 
-Frames: image +u right, +v down. Body x forward, y right (nadir camera).
+Frames: image +u right, +v down. Body is ROS FLU (x forward, y LEFT).
 """
 
 import math
@@ -58,7 +58,7 @@ def offset_cm(off_px, fx, height):
 
 
 def body_to_world(step_xy, yaw):
-    """Rotate a body-frame (dx, dy) by the vehicle yaw into the world."""
+    """Rotate a body-frame FLU (dx, dy) by the vehicle yaw into the world."""
     dx, dy = step_xy
     return (dx * math.cos(yaw) - dy * math.sin(yaw),
             dx * math.sin(yaw) + dy * math.cos(yaw))

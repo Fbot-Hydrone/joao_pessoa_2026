@@ -362,6 +362,28 @@ def generate_launch_description():
                         "reserva e dimensionada para o pior trajeto, nao para "
                         "o medio."),
         DeclareLaunchArgument(
+            "landing_mode", default_value="hover",
+            description="Como o drone se compromete com a base. 'hover': paira "
+                        "no ponto do mapa, conta olhadas da barriga e pousa. "
+                        "'visual': estilo Black Bee CBR 2025 — centraliza na "
+                        "deteccao mais proxima do centro DESCENDO ate "
+                        "visual_descend_to_m e so entao pousa "
+                        "(hydrone_nav/visual_descent.py)."),
+        DeclareLaunchArgument("visual_descend_to_m", default_value="1.2"),
+        DeclareLaunchArgument("visual_fine_px", default_value="40.0"),
+        DeclareLaunchArgument("visual_gain", default_value="0.6"),
+        DeclareLaunchArgument(
+            "range_depth_max_deg", default_value="0.0",
+            description="Barriga: o rangefinder so vira profundidade de pixels "
+                        "a ate este angulo do eixo optico; fora disso a "
+                        "deteccao nao ganha posicao. Na borda o erro mediano "
+                        "era 1,08 m e gerava bases fantasma (seed 2, "
+                        "2026-10-08). 0 = sem limite (antigo)."),
+        DeclareLaunchArgument(
+            "visited_from_landing", default_value="false",
+            description="Filtra base ja pousada pela POSE do pouso, nao pela "
+                        "estimativa do mapa (Black Bee: 0,75 m)."),
+        DeclareLaunchArgument(
             "trust_map_observations", default_value="20",
             description="Se a barriga nao confirma em confirm_timeout_s mas o "
                         "mapa tem pelo menos isto de deteccoes da base, pousa "
@@ -702,6 +724,8 @@ def generate_launch_description():
             "map_topic": LaunchConfiguration("down_map_topic"),
             "range_as_depth": ParameterValue(
                 LaunchConfiguration("down_range_as_depth"), value_type=bool),
+            "range_depth_max_deg": ParameterValue(
+                LaunchConfiguration("range_depth_max_deg"), value_type=float),
             "range_topic": LaunchConfiguration("range_topic"),
             "ground_z": ParameterValue(ground_z, value_type=float),
             "out_topic": DOWN_DETECTIONS,
@@ -1042,6 +1066,15 @@ def generate_launch_description():
                 LaunchConfiguration("centre_on_pad"), value_type=bool),
             "trust_map_observations": ParameterValue(
                 LaunchConfiguration("trust_map_observations"), value_type=int),
+            "landing_mode": LaunchConfiguration("landing_mode"),
+            "visual_descend_to_m": ParameterValue(
+                LaunchConfiguration("visual_descend_to_m"), value_type=float),
+            "visual_fine_px": ParameterValue(
+                LaunchConfiguration("visual_fine_px"), value_type=float),
+            "visual_gain": ParameterValue(
+                LaunchConfiguration("visual_gain"), value_type=float),
+            "visited_from_landing": ParameterValue(
+                LaunchConfiguration("visited_from_landing"), value_type=bool),
             "belly_offset_xy": ParameterValue(
                 LaunchConfiguration("belly_offset_xy"),
                 value_type=List[float]),

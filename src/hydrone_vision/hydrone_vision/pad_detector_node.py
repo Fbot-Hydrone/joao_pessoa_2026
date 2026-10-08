@@ -199,6 +199,14 @@ class PadDetectorNode(Node):
         # about 20 deg: beyond that the beam and the optical axis have parted
         # company and the range is not this camera's depth any more.
         self.declare_parameter("min_nadir_cos", 0.94)
+        # The rangefinder is the depth of the pixel straight below, not of one
+        # at the edge of the frame. MEASURED 2026-10-08, seed 2, 257 belly
+        # detections: within 40 px of the border the median position error was
+        # 1.08 m (73 of 118 over 0.5 m), elsewhere 0.14 m — and those edge
+        # projections built the phantom bases the vehicle landed beside. Beyond
+        # this angle off the optical axis the pixel gets NO position (it still
+        # counts for confirmation). 0 keeps the old behaviour (no limit).
+        self.declare_parameter("range_depth_max_deg", 0.0)
         # Occupancy-map topic, or "" to leave the route off. WHY IT IS THE
         # FIRST CHOICE where it is available: a pixel is a DIRECTION, and
         # turning one into a world position needs a surface. Every other route
@@ -244,6 +252,8 @@ class PadDetectorNode(Node):
         self.max_range_age = float(p("max_range_age"))
         self.range_min = float(p("range_min_m"))
         self.range_max = float(p("range_max_m"))
+        self.range_depth_max = math.radians(
+            float(self.get_parameter("range_depth_max_deg").value))
         self.min_nadir_cos = float(p("min_nadir_cos"))
         self.range_m: float | None = None
         self.range_t = 0.0
@@ -627,6 +637,9 @@ class PadDetectorNode(Node):
 
         depth = self._depth_at(u, v)
         if depth is None:
+            if (self.range_depth_max > 0.0 and math.atan(math.hypot(
+                    (u - cx) / fx, (v - cy) / fy)) > self.range_depth_max):
+                return None
             depth = self._range_as_depth()
         if depth is not None:
             # Depth is the distance ALONG the optical Z axis, not along the ray.
