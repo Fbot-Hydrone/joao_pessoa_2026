@@ -120,6 +120,7 @@ class MinhaFase(Node):
 | `coverage.py` | perímetro e faixas de varredura (largura calculada pela câmera) |
 | `route.py` | quais bases valem a viagem (`is_candidate`), qual a mais próxima |
 | `precision_landing.py` | a geometria de "estou em cima da base?" e as opções de pouso |
+| `visual_descent.py` | centralizar + descer pela câmera (padrão de pouso da fase 1) |
 | `servo.py` | servo visual que aprende o mapeamento pixel→metro (opcional) |
 | `nav_node_legacy.py` | o nav de junho, só para o stack antigo |
 
@@ -164,7 +165,7 @@ WAIT_FCU → ARMING → REGISTER → TAKEOFF → SELECT ⇄ SETTLE ⇄ TRAVEL �
 | `SELECT` | escolhe: base conhecida, próxima perna da busca, ou casa | `route` |
 | `SETTLE` | espera parar antes de olhar/girar | velocidade do EKF |
 | `TRAVEL` | voa a perna; persegue a base se ela mudar no mapa | `navigator`, `setpoint` |
-| `CONFIRM` | paira e confirma pela câmera de baixo | `precision_landing` |
+| `CONFIRM` | centraliza pela câmera DESCENDO até 1,2 m da base (ou paira e conta olhadas, em `hover`) | `visual_descent`, `precision_landing` |
 | `LAND` | pousa e para as hélices | `vehicle.land()` |
 | `DWELL` | fica parado na base, conta o pouso, decide o próximo | serviço `mark_visited` |
 
@@ -173,6 +174,9 @@ WAIT_FCU → ARMING → REGISTER → TAKEOFF → SELECT ⇄ SETTLE ⇄ TRAVEL �
 | Opção | Padrão | Faz |
 |---|---|---|
 | `down_detector_backend` / `forward_detector_backend` | `yolo` | `yolo` ou `cv` |
+| `landing_mode` | `visual` | `visual`: centraliza na detecção mais próxima do centro descendo até `visual_descend_to_m` (Black Bee CBR 2025). `hover`: paira no ponto do mapa e conta olhadas |
+| `range_depth_max_deg` | `25` | rangefinder só vira profundidade perto do eixo da barriga (a borda gerava bases fantasma) |
+| `visited_from_landing` | `true` | base visitada pela POSE do pouso, não pela estimativa do mapa |
 | `centre_on_pad` | `false` | servo visual antes de pousar |
 | `land_centre_max_cm` | `0` (desl.) | veta pouso com a base fora do centro |
 | `trust_map_observations` | `20` | sem confirmação pela câmera mas com mapa forte → pousa no mapa |

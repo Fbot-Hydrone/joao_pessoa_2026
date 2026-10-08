@@ -53,6 +53,12 @@ RE_LANDED = re.compile(
     r"LANDED on base #\d+ of \d+ — resting at z=([-\d.]+) m \(([^)]*)\)")
 RE_CONFIRMED = re.compile(r"pad (\d+): CONFIRMED at \(([-\d.]+), ([-\d.]+)\)")
 RE_SPAWNED = re.compile(r"(\d+) bases spawnadas \(seed (\d+)\)")
+# Where each landing came to rest, in landing order (pad_map's own line).
+RE_VISITED = re.compile(
+    r"pad \d+: VISITED at \(([-\d.]+), ([-\d.]+), ([-\d.]+)\)")
+# A landing within this of a base centre, horizontally, is ON that base
+# (1 m plate, edge at 0.5 m, plus estimate drift).
+LAND_XY_TOL = 0.6
 
 
 def truth(seed, count=6):
@@ -89,13 +95,25 @@ def score(seed, path):
     touchdowns = [(float(z), how) for z, how in RE_LANDED.findall(text)]
     landings = [z for z, _ in touchdowns]
     unproven = sum(1 for _, how in touchdowns if how != "props stopped")
+    # Match each landing to a base by WHERE it rested, then check the height.
+    # Matching by height alone merged two bases of the same height into one
+    # (2026-10-08: seeds 3 and 5 scored 5/6 and 4/6 for six distinct landings).
+    # Logs without VISITED lines fall back to height only.
+    rested = [tuple(map(float, m)) for m in RE_VISITED.findall(text)]
     valid = []
-    for z, how in touchdowns:
+    for k, (z, how) in enumerate(touchdowns):
         if how != "props stopped":
             continue                      # props still turning: not a pouso
-        b = min(range(len(bases)),
-                key=lambda i: abs(z - (bases[i][2] + LAND_CLEARANCE)))
-        if abs(z - (bases[b][2] + LAND_CLEARANCE)) <= LAND_TOL:
+        if k < len(rested):
+            x, y, _ = rested[k]
+            b = min(range(len(bases)),
+                    key=lambda i: math.hypot(x - bases[i][0], y - bases[i][1]))
+            on_xy = math.hypot(x - bases[b][0], y - bases[b][1]) <= LAND_XY_TOL
+        else:
+            b = min(range(len(bases)),
+                    key=lambda i: abs(z - (bases[i][2] + LAND_CLEARANCE)))
+            on_xy = True
+        if on_xy and abs(z - (bases[b][2] + LAND_CLEARANCE)) <= LAND_TOL:
             valid.append(b)
 
     if "Traceback" in text:

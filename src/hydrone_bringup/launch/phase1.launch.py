@@ -362,25 +362,27 @@ def generate_launch_description():
                         "reserva e dimensionada para o pior trajeto, nao para "
                         "o medio."),
         DeclareLaunchArgument(
-            "landing_mode", default_value="hover",
+            "landing_mode", default_value="visual",
             description="Como o drone se compromete com a base. 'hover': paira "
                         "no ponto do mapa, conta olhadas da barriga e pousa. "
                         "'visual': estilo Black Bee CBR 2025 — centraliza na "
                         "deteccao mais proxima do centro DESCENDO ate "
                         "visual_descend_to_m e so entao pousa "
-                        "(hydrone_nav/visual_descent.py)."),
+                        "(hydrone_nav/visual_descent.py). PADRAO desde "
+                        "2026-10-08: seeds 1-6 -> 36/36 pousos em base, 6/6 "
+                        "completas; 'hover' tinha 2 eliminadas (seeds 2, 3)."),
         DeclareLaunchArgument("visual_descend_to_m", default_value="1.2"),
         DeclareLaunchArgument("visual_fine_px", default_value="40.0"),
         DeclareLaunchArgument("visual_gain", default_value="0.6"),
         DeclareLaunchArgument(
-            "range_depth_max_deg", default_value="0.0",
+            "range_depth_max_deg", default_value="25.0",
             description="Barriga: o rangefinder so vira profundidade de pixels "
                         "a ate este angulo do eixo optico; fora disso a "
                         "deteccao nao ganha posicao. Na borda o erro mediano "
                         "era 1,08 m e gerava bases fantasma (seed 2, "
                         "2026-10-08). 0 = sem limite (antigo)."),
         DeclareLaunchArgument(
-            "visited_from_landing", default_value="false",
+            "visited_from_landing", default_value="true",
             description="Filtra base ja pousada pela POSE do pouso, nao pela "
                         "estimativa do mapa (Black Bee: 0,75 m)."),
         DeclareLaunchArgument(
