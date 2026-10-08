@@ -1,0 +1,10 @@
+# Open or close the payload gripper. Same interface in sim (ardubridge_node,
+# BiguaSim world command) and on the drone (gripper_dynamixel_node, AX-12A).
+bool close               # true = close (grab), false = open (release)
+---
+bool success             # the command was carried out
+bool holding             # something is in the gripper (UNKNOWN in sim: no
+                         # grasp sensor there, so it reports `close`)
+string message
+---
+float32 position         # 0 = fully open, 1 = fully closed

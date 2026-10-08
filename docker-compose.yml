@@ -28,6 +28,7 @@ services:
       # SWEEP needs no rebuild between runs. Empty = whatever config.yaml says.
       # scripts/seed_sweep.sh is what sets it.
       - BASES_SEED=${BASES_SEED:-}
+      - ARENA_PHASE=${ARENA_PHASE:-}
     volumes:
       # Where runs write their logs. odom_error_node's drift CSV lands here,
       # and it is the ONLY record of how far the VO wanders — without this

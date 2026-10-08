@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 
+import collections
 import threading
 import rclpy
+from rclpy.action import ActionServer, CancelResponse, GoalResponse
+from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from rosgraph_msgs.msg import Clock
@@ -10,6 +14,7 @@ from std_msgs.msg import Float64MultiArray
 from biguasim.ardubridge.bridge import ArduPilotBridge
 from biguasim.ardubridge import ArduBiguaSimRunner, VEHICLE_REGISTRY
 from biguasim_main.interface import BiguaSimInterface
+from hydrone_msgs.action import Gripper
 
 GPS_ORIGIN = (33.810313, -118.393867)
 # Fallbacks only — package_name/world come from config.yaml (biguasim_scenario).
@@ -100,6 +105,18 @@ class ArduBridgeNode(Node):
         self._sensor_publisher_create()
         self._control_subscribers_create()
 
+        # Comandos para o mundo (garra, ...) rodam NA THREAD DO SIMULADOR,
+        # entre dois env.step: o env do BiguaSim não é thread-safe.
+        self._world_cmds = collections.deque()
+        self._agent_name = agent_cfg['agent_name']
+        self._gripper_closed = False
+        # Mesma interface que gripper_dynamixel_node oferece no drone real.
+        ActionServer(self, Gripper, '/hydrone/gripper/command',
+                     self._exec_gripper,
+                     goal_callback=lambda g: GoalResponse.ACCEPT,
+                     cancel_callback=lambda g: CancelResponse.REJECT,
+                     callback_group=ReentrantCallbackGroup())
+
         self.get_logger().info(f"ArduBridge pronto: {agent_type} | {len(self.interface.sensors)} sensores")
 
         # 6. Roda bridge em thread separada
@@ -126,6 +143,8 @@ class ArduBridgeNode(Node):
                     continue
 
                 motor_cmds = bridge.pwm_to_motor_cmds(pwm, frame)
+                while self._world_cmds:
+                    self._world_cmds.popleft()()
                 raw = env.step(motor_cmds)
                 sim_time += dt
 
@@ -164,6 +183,32 @@ class ArduBridgeNode(Node):
         finally:
             bridge.close()
 
+    def _exec_gripper(self, gh):
+        """Fecha/abre a garra no simulador e espera o comando ser aplicado.
+
+        Não há sensor de pega no BiguaSim: `holding` repete o comando. Quem
+        precisa saber se pegou de verdade confirma por visão (kit sumiu da
+        base) — phase2_mission_node faz isso.
+        """
+        close = bool(gh.request.close)
+        done = threading.Event()
+
+        def apply():
+            self.interface.gripper(close, self._agent_name)
+            done.set()
+        self._world_cmds.append(apply)
+        res = Gripper.Result()
+        if not done.wait(timeout=5.0):
+            res.success, res.message = False, "simulator did not tick in 5 s"
+            gh.abort()
+            return res
+        self._gripper_closed = close
+        gh.publish_feedback(Gripper.Feedback(position=1.0 if close else 0.0))
+        res.success, res.holding = True, close
+        res.message = "closed (sim: no grasp sensor)" if close else "opened"
+        gh.succeed()
+        return res
+
     def _publish_clock(self, sim_time):
         msg = Clock()
         msg.clock.sec = int(sim_time)
@@ -197,8 +242,10 @@ class ArduBridgeNode(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = ArduBridgeNode()
+    ex = MultiThreadedExecutor(num_threads=2)
+    ex.add_node(node)
     try:
-        rclpy.spin(node)
+        ex.spin()
     except KeyboardInterrupt:
         pass
     finally:

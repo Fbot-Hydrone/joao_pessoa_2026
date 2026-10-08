@@ -1,0 +1,29 @@
+# Fase 2 — onde ficam as bases. FRAME DA ARENA, em metros: a Figura 7 das
+# regras (docs/REGRAS-CBR-2026.pdf, p.11), origem no canto da arena junto da
+# base de decolagem, x para a direita ao longo do bloco da Fase 4, y para
+# "cima" na figura. As regras dizem que as posicoes sao conhecidas antes da
+# prova: e AQUI que se edita na competicao.
+#
+# Valores padrao medidos na Figura 7 (grid de 0,5 m).
+#
+# Quem le:
+#   phase2_mission_node  converte para o frame `map` a partir da pose de
+#                        decolagem: map = home + Rz(arena_yaw_deg)*(p - takeoff)
+#   ardubridge (sim)     spawna bases e kits; mundo do sim = (4 - x, 4 - y)
+takeoff: [1.03, 0.75]
+
+# Coletas: no topo do bloco da Fase 4, um kit em cada. z = topo da base.
+pickup:
+  - [3.21, 1.35, 1.6]
+  - [4.73, 1.35, 1.6]
+  - [6.23, 1.35, 1.6]
+
+# Entregas: x, y fixos pela figura; a ALTURA no sim e sorteada por seed
+# (BASES_SEED, 0 a 1,5 m, regra "qualquer altura"). Um valor aqui fixa a
+# altura e desliga o sorteio para aquela base.
+delivery:
+  - [4.48, 6.92]
+  - [1.49, 4.49]
+  - [4.98, 4.49]
+
+delivery_z_range: [0.0, 1.5]

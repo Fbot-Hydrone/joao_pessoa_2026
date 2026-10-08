@@ -69,6 +69,9 @@ for arg in "$@"; do
         --no-odom-print) ODOM_ERROR_PRINT=false ;;
         --debug)         launch_args+=("debug:=true") ;;
         --phase1)        HYDRONE_LAUNCH=phase1_sim.launch.py ;;
+        # Fase 2: o ardubridge spawna o layout de pacotes (ARENA_PHASE=2,
+        # hydrone_bringup/config/phase2_bases.yaml) em vez das bases da Fase 1.
+        --phase2)        HYDRONE_LAUNCH=phase2_sim.launch.py; export ARENA_PHASE=2 ;;
         --landing-sites) HYDRONE_LAUNCH=landing_sites_sim.launch.py ;;
         --zed-detect)    HYDRONE_LAUNCH=phase1_zed_detect_sim.launch.py ;;
         --ground-truth)  ODOM_SOURCE=ground_truth ;;

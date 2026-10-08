@@ -29,6 +29,13 @@ MOTOR_SPEEDS = {
     "HolybroX500" : 4
 }
 
+# Kit de primeiros socorros da Fase 2: a bolsa de LiPo que o POC da garra usa
+# (bs-drone-competition tests/gripper_probe.py) e que a YOLO 'lipo' detecta.
+# Tem a tag "Package", que é tudo o que a garra procura.
+KIT_BLUEPRINT = ("Blueprint'/Game/HolodeckContent/Agents/HolybroX500/"
+                 "BP_Lipo_battery_safe_bag_fbx.BP_Lipo_battery_safe_bag_fbx_C'")
+
+
 class BiguaSimInterface():
     '''
     Class for abstracting biguasim python interface
@@ -71,9 +78,16 @@ class BiguaSimInterface():
             self.initialized = False
 
     def spawn_bases(self, cfg=None):
-        """Sorteia e spawna as bases móveis antes do primeiro tick."""
+        """Sorteia e spawna as bases móveis antes do primeiro tick.
+
+        ARENA_PHASE=2 (docker_up --phase2) troca o layout da Fase 1 pelo da
+        Fase 2: veja spawn_phase2.
+        """
         cfg = cfg or self.bases_cfg
         if not cfg:
+            return
+        if os.environ.get('ARENA_PHASE', '').strip() == '2':
+            self.spawn_phase2(cfg)
             return
 
         # BASES_SEED overrides config.yaml, and exists so a seed SWEEP costs
@@ -124,6 +138,75 @@ class BiguaSimInterface():
                 f"{len(positions)} bases spawnadas (seed {seed}): "
                 + ", ".join(f"[{x:.2f}, {y:.2f}, {z:.2f}]" for x, y, z in positions)
             )
+
+    def _seed(self, cfg):
+        seed = cfg['seed']
+        override = os.environ.get('BASES_SEED', '').strip()
+        if override:
+            try:
+                seed = int(override)
+            except ValueError:
+                pass
+        return seed
+
+    def _spawn_mesh(self, blueprint, x, y, z):
+        # Y INVERTIDO, como em spawn_bases (SpawnMesh usa o Y do mapa da UE).
+        self.env.send_world_command(
+            "CustomCommand", string_params=["SpawnMesh", blueprint],
+            num_params=[x, -y, z])
+
+    def spawn_phase2(self, cfg):
+        """Fase 2: 3 coletas no topo do bloco com um kit cada, 3 entregas.
+
+        Posições vêm de hydrone_bringup/config/phase2_bases.yaml (frame da
+        arena, Figura 7 das regras) — o MESMO arquivo que a missão lê, para
+        que o sim e o drone nunca discordem de onde as bases estão. Mundo do
+        sim = (4 - x, 4 - y): o bloco da Fase 4 é `house` x[-4,2] y[2,4].
+        A altura das entregas é sorteada por BASES_SEED (regra: 0 a 1,5 m).
+        """
+        import random
+        from ament_index_python.packages import get_package_share_directory
+        path = os.environ.get('PHASE2_LAYOUT') or os.path.join(
+            get_package_share_directory('hydrone_bringup'),
+            'config', 'phase2_bases.yaml')
+        with open(path) as f:
+            lay = yaml.safe_load(f)
+        seed = self._seed(cfg)
+        rng = random.Random(seed)
+        z_lo, z_hi = lay.get('delivery_z_range', [0.0, 1.5])
+        world = lambda x, y: (4.0 - x, 4.0 - y)  # noqa: E731
+        kit_bp = cfg.get('kit_blueprint', KIT_BLUEPRINT)
+
+        pickups, deliveries = [], []
+        for x, y, z in lay['pickup']:
+            wx, wy = world(x, y)
+            self._spawn_mesh(cfg['blueprint'], wx, wy, z)
+            # Um pouco acima do topo: o kit tem física e assenta sozinho.
+            self._spawn_mesh(kit_bp, wx, wy, z + 0.15)
+            pickups.append((wx, wy, z))
+        for d in lay['delivery']:
+            z = d[2] if len(d) > 2 else rng.uniform(z_lo, z_hi)
+            wx, wy = world(d[0], d[1])
+            self._spawn_mesh(cfg['blueprint'], wx, wy, z)
+            deliveries.append((wx, wy, z))
+        self.env.tick()
+        if self.node is not None:
+            fmt = lambda ps: ", ".join(  # noqa: E731
+                f"[{x:.2f}, {y:.2f}, {z:.2f}]" for x, y, z in ps)
+            self.node.get_logger().info(
+                f"fase 2 spawnada (seed {seed}): coletas+kits {fmt(pickups)} | "
+                f"entregas {fmt(deliveries)}")
+
+    def gripper(self, close: bool, agent_name: str):
+        """Abre/fecha a garra do agente. CHAMAR SÓ DA THREAD DO SIMULADOR.
+
+        Mesmo canal do SpawnMesh (CustomCommand), sem comando novo na engine.
+        O agente vai com o sufixo do batch ('uav0-id0'): é assim que o AgentMap
+        da UE o guarda (bs-drone-competition 811ffe7c).
+        """
+        self.env.send_world_command(
+            "CustomCommand", string_params=["Gripper", agent_name + "-id0"],
+            num_params=[1.0 if close else 0.0])
 
     def _get_agent_id(self, agent_name : str):
         split = agent_name.find('_')
