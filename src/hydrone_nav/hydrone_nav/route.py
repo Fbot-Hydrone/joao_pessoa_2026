@@ -92,3 +92,31 @@ def takeoff_base_xy(pads, fallback=(0.0, 0.0)):
         if pad.is_takeoff_base:
             return (pad.position.x, pad.position.y)
     return fallback
+
+
+def plan_deliveries(home, pickups, deliveries):
+    """Phase 2: the order to fly pickup -> delivery pairs, shortest overall.
+
+    Every pickup order (n!) times every assignment of deliveries (n!) — 36
+    tours for the competition's three kits, so exhaustive is exact and free.
+    The tour is home -> p -> d -> p -> d -> ... -> home, horizontal distance.
+
+    Returns [(pickup_index, delivery_index), ...] in flying order.
+    """
+    from itertools import permutations
+
+    def d(a, b):
+        return math.hypot(a[0] - b[0], a[1] - b[1])
+
+    best, best_len = None, float("inf")
+    n = min(len(pickups), len(deliveries))
+    for p_order in permutations(range(len(pickups)), n):
+        for d_order in permutations(range(len(deliveries)), n):
+            here, total = home, 0.0
+            for pi, di in zip(p_order, d_order):
+                total += d(here, pickups[pi]) + d(pickups[pi], deliveries[di])
+                here = deliveries[di]
+            total += d(here, home)
+            if total < best_len:
+                best, best_len = list(zip(p_order, d_order)), total
+    return best or []

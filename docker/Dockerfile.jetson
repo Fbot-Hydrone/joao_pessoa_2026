@@ -158,6 +158,7 @@ RUN python3 -m pip install --no-cache-dir --no-deps \
         ultralytics==8.3.40 ultralytics-thop \
     && python3 -m pip install --no-cache-dir \
         pyyaml tqdm psutil py-cpuinfo pillow "requests>=2.23.0" \
+        dynamixel-sdk \
         "matplotlib>=3.3.0" \
     && python3 -c "import numpy, sys; v = numpy.__version__; print('numpy', v); sys.exit(0 if int(v.split('.')[0]) < 2 else 1)" \
     && python3 -c "from ultralytics import YOLO; print('ultralytics OK')" \

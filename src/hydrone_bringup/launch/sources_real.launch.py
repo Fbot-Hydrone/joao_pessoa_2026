@@ -277,4 +277,22 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration("zed_odom")),
     )
 
-    return LaunchDescription(args + [zed, down_cam, mavros, vision_odom])
+    # ── Payload gripper (Phase 2) — Dynamixel AX-12A ───────────────────────
+    # Serves /hydrone/gripper/command, the same action ardubridge_node serves
+    # in sim. Off by default: Phase 1 flies without it. Positions and torque
+    # are PROVISIONAL until calibrated on the hardware.
+    gripper = Node(
+        package="hydrone_bringup",
+        executable="gripper_dynamixel_node",
+        output="screen",
+        condition=IfCondition(LaunchConfiguration("gripper")),
+        parameters=[{
+            "port": LaunchConfiguration("gripper_port"),
+        }],
+    )
+
+    return LaunchDescription(args + [
+        DeclareLaunchArgument("gripper", default_value="false",
+                              description="Start the AX-12A gripper (Phase 2)."),
+        DeclareLaunchArgument("gripper_port", default_value="/dev/ttyUSB0"),
+        zed, down_cam, mavros, vision_odom, gripper])

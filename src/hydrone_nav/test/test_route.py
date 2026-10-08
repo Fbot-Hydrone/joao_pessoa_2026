@@ -89,3 +89,20 @@ def test_a_pad_on_a_base_we_already_landed_on_is_never_a_candidate():
     """2026-10-07: two map ids on one base, and the mission landed twice."""
     assert not route.is_candidate(pad(5, 1.3, 0.0), visited_xy=[(1.0, 0.1)])
     assert route.is_candidate(pad(5, 2.6, 0.0), visited_xy=[(1.0, 0.1)])
+
+
+def test_phase2_tour_pairs_every_kit_with_its_own_delivery():
+    pick = [(0, 0), (1, 0), (2, 0)]
+    deliv = [(2, 3), (0, 3), (1, 3)]
+    tour = route.plan_deliveries((0, -1), pick, deliv)
+    assert sorted(p for p, _ in tour) == [0, 1, 2]
+    assert sorted(d for _, d in tour) == [0, 1, 2]
+
+
+def test_phase2_tour_is_the_shortest():
+    """Two kits side by side, each with a delivery straight above it: the
+    shortest tour never crosses over."""
+    pick = [(0, 0), (5, 0)]
+    deliv = [(5, 1), (0, 1)]
+    tour = route.plan_deliveries((0, -1), pick, deliv)
+    assert set(tour) == {(0, 1), (1, 0)}

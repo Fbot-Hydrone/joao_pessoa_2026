@@ -34,5 +34,6 @@ setup(
         'down_cam_mimic_node = hydrone_bringup.down_cam_mimic_node:main',
         'rangefinder_bridge = hydrone_bringup.rangefinder_bridge:main',
         'odom_error_node = hydrone_bringup.odom_error_node:main',
+        'gripper_dynamixel_node = hydrone_bringup.gripper_dynamixel_node:main',
     ]},
 )

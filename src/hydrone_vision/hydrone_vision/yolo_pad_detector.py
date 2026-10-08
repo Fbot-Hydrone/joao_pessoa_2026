@@ -125,7 +125,10 @@ class YoloPadDetector:
 
         found: list[PadDetection2D] = []
         if results.masks is None:
-            return found
+            # A DETECT model (no masks), e.g. the Phase 2 kit 'lipo'
+            # (lipo_seg_yolo11.pt is task=detect despite the name): the box
+            # centre is the detection, its area the size.
+            return self._from_boxes(results.boxes, w_img, h_img)
 
         masks = results.masks.data.cpu().numpy()  # (N, h, w) na resolução do modelo
         boxes = results.boxes
@@ -173,5 +176,31 @@ class YoloPadDetector:
                        "yolo_conf": round(confidence, 3)},
             ))
 
+        found.sort(key=lambda d: d.confidence, reverse=True)
+        return found[: self.max_detections]
+
+    def _from_boxes(self, boxes, w_img: int, h_img: int) -> list[PadDetection2D]:
+        found: list[PadDetection2D] = []
+        if boxes is None:
+            return found
+        for i in range(len(boxes)):
+            class_id = int(boxes.cls[i].item())
+            if (self.target_class_ids is not None
+                    and class_id not in self.target_class_ids):
+                continue
+            x0, y0, x1, y1 = (float(v) for v in boxes.xyxy[i].tolist())
+            cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+            if self.ignore_regions and self._inside_ignore_region(
+                    cx, cy, w_img, h_img):
+                continue
+            area = max(x1 - x0, 0.0) * max(y1 - y0, 0.0)
+            confidence = float(boxes.conf[i].item())
+            contour = np.array([[[x0, y0]], [[x1, y0]], [[x1, y1]], [[x0, y1]]],
+                               dtype=np.int32)
+            found.append(PadDetection2D(
+                u=cx, v=cy, radius_px=math.sqrt(area / math.pi), area_px=area,
+                confidence=confidence, contour=contour,
+                scores={"class": self.names.get(class_id, str(class_id)),
+                        "yolo_conf": round(confidence, 3)}))
         found.sort(key=lambda d: d.confidence, reverse=True)
         return found[: self.max_detections]
