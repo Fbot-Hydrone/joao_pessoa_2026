@@ -180,6 +180,17 @@ def test_a_weak_lead_is_not_a_candidate_outside_investigation(node):
     assert node._is_candidate(pad(1, 2.0, 0.0, observations=5))
 
 
+def test_a_second_id_on_a_landed_base_is_not_a_candidate(node):
+    """2026-10-07: pads 4 and 5 on the same base, both landed on."""
+    node.home = (9.0, 9.0)
+    landed = pad(4, 1.0, 1.0, visited=True)
+    twin = pad(5, 1.3, 1.1)
+    set_map(node, landed, twin)
+    assert not node._is_candidate(twin)
+    set_map(node, landed, pad(6, 3.0, 1.0))
+    assert node._is_candidate(pad(6, 3.0, 1.0))
+
+
 def test_anything_sitting_where_we_armed_is_never_a_candidate(node):
     """Belt and braces for a failed takeoff-base registration."""
     node.home = (0.0, 0.0)

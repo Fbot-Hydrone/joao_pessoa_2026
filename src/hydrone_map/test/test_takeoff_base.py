@@ -354,3 +354,47 @@ def test_the_throttle_can_be_turned_off(loud_node, rejections):
         loud_node._cb_detection(detection(camera="forward",
                                           position_valid=False))
     assert len(rejections) == 5
+
+
+# ── One base, two ids ────────────────────────────────────────────────────────
+
+def test_two_entries_that_converge_become_one(node):
+    """2026-10-07: pads 4 and 5 ended on the same base and both were landed on.
+    Entries born > merge_radius apart get pulled onto one base by later looks;
+    once they sit within dedupe_radius they must become one."""
+    arm(node)
+    for _ in range(3):
+        detect(node, 0.0, 0.0)
+    for _ in range(3):
+        detect(node, 2.0, 0.0)
+    assert len(node.pads) == 2
+    young = max(node.pads.values(), key=lambda e: e.id)
+    young.x = 0.5                       # pulled onto the first base
+    detect(node, 0.6, 0.0)              # nearest to it, triggers the check
+    assert len(node.pads) == 1
+    assert next(iter(node.pads.values())).observations == 7
+
+
+def test_a_merge_keeps_the_landed_flag(node):
+    arm(node)
+    for _ in range(3):
+        detect(node, 0.0, 0.0)
+    for _ in range(3):
+        detect(node, 2.0, 0.0)
+    old = min(node.pads.values(), key=lambda e: e.id)
+    young = max(node.pads.values(), key=lambda e: e.id)
+    old.visited = True
+    young.x = 0.4
+    detect(node, 0.5, 0.0)
+    (only,) = node.pads.values()
+    assert only.visited
+
+
+def test_real_bases_are_never_merged(node):
+    """sample_bases keeps bases >= 1.5 m apart."""
+    arm(node)
+    for _ in range(3):
+        detect(node, 0.0, 0.0)
+    for _ in range(3):
+        detect(node, 1.5, 0.0)
+    assert len(node.pads) == 2

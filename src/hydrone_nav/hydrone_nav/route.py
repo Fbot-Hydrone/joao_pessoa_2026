@@ -35,10 +35,17 @@ MIN_OBSERVATIONS = 5
 # A pad this close to where we armed is the takeoff base under another id.
 HOME_RADIUS_M = 1.0
 
+# A pad this close to one we already landed on is THAT base under another id.
+# 2026-10-07: two map entries converged onto the same base and the mission
+# landed on it twice (-5 per repeat). Real bases are >= 1.5 m apart
+# (biguasim_main.bases.sample_bases min_spacing), so 0.8 m never hides one.
+VISITED_RADIUS_M = 0.8
+
 
 def is_candidate(pad, *, blacklist=(), home=None,
                  min_observations=MIN_OBSERVATIONS,
-                 home_radius=HOME_RADIUS_M):
+                 home_radius=HOME_RADIUS_M, visited_xy=(),
+                 visited_radius=VISITED_RADIUS_M):
     """Is this pad worth flying to?
 
     Not if it is the base we took off from, not if we already landed on it,
@@ -56,6 +63,10 @@ def is_candidate(pad, *, blacklist=(), home=None,
     if home is not None:
         if math.hypot(pad.position.x - home[0],
                       pad.position.y - home[1]) < home_radius:
+            return False
+    for vx, vy in visited_xy:
+        if math.hypot(pad.position.x - vx,
+                      pad.position.y - vy) < visited_radius:
             return False
     return True
 

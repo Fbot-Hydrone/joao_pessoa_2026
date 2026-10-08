@@ -83,3 +83,9 @@ def test_two_sightings_are_not_enough_to_be_worth_a_leg():
 def test_a_single_sighting_is_still_not_enough():
     """One frame of blue noise reaches the map."""
     assert not route.is_candidate(pad(1, 2.0, 0.0, observations=1))
+
+
+def test_a_pad_on_a_base_we_already_landed_on_is_never_a_candidate():
+    """2026-10-07: two map ids on one base, and the mission landed twice."""
+    assert not route.is_candidate(pad(5, 1.3, 0.0), visited_xy=[(1.0, 0.1)])
+    assert route.is_candidate(pad(5, 2.6, 0.0), visited_xy=[(1.0, 0.1)])

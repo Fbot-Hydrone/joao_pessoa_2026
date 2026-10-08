@@ -1619,8 +1619,12 @@ class Phase1MissionNode(Node):
         # Deferring it lets the search fly somewhere else — which is the only
         # thing that can put new rays in the map and change the answer.
         n = 1 if self.investigating else route.MIN_OBSERVATIONS
+        visited = [(p.position.x, p.position.y)
+                   for p in (self.pad_map.pads if self.pad_map else ())
+                   if p.visited and int(p.id) != int(pad.id)]
         return route.is_candidate(pad, blacklist=self.blacklist,
-                                  home=self.home, min_observations=n)
+                                  home=self.home, min_observations=n,
+                                  visited_xy=visited)
 
     def _takeoff_base_xy(self) -> tuple[float, float]:
         """Where home is. The map's registered entry if there is one, else the

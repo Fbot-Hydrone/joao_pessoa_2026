@@ -161,6 +161,12 @@ class PadMapNode(Node):
         # Comfortably larger than the projection error, comfortably smaller than
         # the spacing between the arena's bases.
         self.declare_parameter("merge_radius", 1.2)
+        # Two ENTRIES this close are one base. merge_radius only compares a
+        # detection with an entry; two entries born > merge_radius apart from
+        # bad far projections each get pulled onto the same base by later good
+        # looks and never meet. 2026-10-07: pads 4 and 5 both ended at the same
+        # spot, both "landed". Real bases are >= 1.5 m apart.
+        self.declare_parameter("dedupe_radius", 0.8)
         self.declare_parameter("min_confidence", 0.50)
         # Beyond this range a projection is too uncertain to seed the map with.
         # Empty disables it. Set to the belly detector's out_topic once that
@@ -234,6 +240,7 @@ class PadMapNode(Node):
 
         p = lambda name: self.get_parameter(name).value
         self.merge_radius = float(p("merge_radius"))
+        self.dedupe_radius = float(p("dedupe_radius"))
         self.min_conf = float(p("min_confidence"))
         self.max_new_candidate_range = float(p("max_new_candidate_range_m"))
         self.max_range = float(p("max_range_m"))
@@ -472,6 +479,45 @@ class PadMapNode(Node):
                     f"pad {entry.id}: CONFIRMED at "
                     f"({entry.x:.2f}, {entry.y:.2f}) after "
                     f"{entry.observations} looks, conf {entry.confidence:.2f}")
+            self._dedupe(entry)
+
+    def _dedupe(self, moved: _Entry):
+        """Fold any entry within dedupe_radius of `moved` into the older one.
+
+        The older id survives, so a pad the mission already knows keeps its
+        name. Visited wins: if either was landed on, the merged entry was too,
+        and a measured height beats a projected one.
+        """
+        if moved.is_takeoff_base:
+            return
+        for other in list(self.pads.values()):
+            if (other is moved or other.is_takeoff_base
+                    or other.id not in self.pads):
+                continue
+            d = math.hypot(other.x - moved.x, other.y - moved.y)
+            if d >= self.dedupe_radius:
+                continue
+            keep, drop = ((other, moved) if other.id < moved.id
+                          else (moved, other))
+            total = keep.weight + drop.weight
+            keep.x = (keep.x * keep.weight + drop.x * drop.weight) / total
+            keep.y = (keep.y * keep.weight + drop.y * drop.weight) / total
+            keep.weight = total
+            keep.observations += drop.observations
+            keep.confidence = max(keep.confidence, drop.confidence)
+            keep.last_seen = max(keep.last_seen, drop.last_seen)
+            if drop.visited and not keep.visited:
+                keep.visited = True
+            if drop.height_measured and (drop.visited
+                                         or not keep.height_measured):
+                keep.height, keep.z = drop.height, drop.z
+                keep.height_measured = True
+            del self.pads[drop.id]
+            self.get_logger().warn(
+                f"pad {drop.id} merged into pad {keep.id} — "
+                f"{d:.2f} m apart, "
+                f"one base under two ids")
+            moved = keep
 
     def _nearest(self, x: float, y: float) -> _Entry | None:
         """Closest map entry whose claim radius covers (x, y), or None.
