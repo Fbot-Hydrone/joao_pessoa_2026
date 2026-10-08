@@ -29,7 +29,7 @@ than it is over open floor, and the patch it sees is that much smaller.
 
 Deriving the height from the vehicle's altitude and an assumed floor would
 paint a patch 88% too wide over the house, which is exactly the mistake that
-cost the lane spacing its coverage (docs/SEED-SWEEP-2026-09-02.md 3). The
+cost the lane spacing its coverage (docs/historico/SEED-SWEEP-2026-09-02.md 3). The
 rangefinder measures the real distance to whatever is below, so the painted
 patch shrinks over a raised structure on its own — and the thin band that the
 lanes then fail to cover shows up as unpainted floor, which is the whole point

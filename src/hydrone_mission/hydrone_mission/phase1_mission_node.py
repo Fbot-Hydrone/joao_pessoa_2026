@@ -130,13 +130,13 @@ from rosgraph_msgs.msg import Clock
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
-from mavros_msgs.msg import State, StatusText
-from mavros_msgs.srv import CommandBool, CommandTOL, SetMode
+from mavros_msgs.msg import State
 
 from octomap_msgs.msg import Octomap
 
 from sensor_msgs.msg import CameraInfo
 
+from hydrone_controller.touchdown import TouchdownDetector
 from hydrone_controller.vehicle import Vehicle
 from hydrone_nav import coverage, route, servo
 from hydrone_nav import precision_landing as pl
@@ -203,7 +203,6 @@ class Phase1MissionNode(Node):
     TRAVEL = "TRAVEL"
     CONFIRM = "CONFIRM"
     LAND = "LAND"
-    DISARM = "DISARM"
     DWELL = "DWELL"
     DONE = "DONE"
     ABORTED = "ABORTED"
@@ -545,23 +544,6 @@ class Phase1MissionNode(Node):
         # the price of the landing counting at all: the old path was 8.6 s
         # cheaper and scored zero. See disarm_retry_s for where the 7 s went.
         self.declare_parameter("dwell_s", 2.0)
-        # Ceiling on the wait for the FCU to confirm the disarm. Above
-        # DISARM_DELAY (10 s) on purpose: if our own disarm is refused because
-        # ArduPilot does not yet agree the vehicle is down, the auto-disarm
-        # still lands inside this window and is caught by the same test.
-        self.declare_parameter("disarm_timeout_s", 12.0)
-        # How often to re-ask for the disarm, s. Deliberately much shorter than
-        # `retry_period_s`, which is sized for mode and takeoff commands.
-        #
-        # The 7 s above is NOT ArduPilot being slow — it is us asking rarely.
-        # Our touchdown test (land_settle_s of stillness) fires before
-        # ArduPilot's own land detector has latched, so the first disarms are
-        # refused and the wait is then quantised to the retry period. At 2.0 s
-        # that turns a sub-second disagreement into whole seconds of standing
-        # still with the props running. Asking ~5x more often costs nothing —
-        # a refused disarm is a few bytes — and collects the accept the moment
-        # ArduPilot is willing to give it.
-        self.declare_parameter("disarm_retry_s", 0.4)
         # SETTLE ends on EVIDENCE that the estimate stopped moving, not on a
         # stopwatch. `settle_s` stays the ceiling.
         #
@@ -582,7 +564,6 @@ class Phase1MissionNode(Node):
         self.declare_parameter("settle_still_yaw_rate_deg", 8.0)
         self.declare_parameter("velocity_topic",
                                "/mavros/local_position/velocity_local")
-        self.declare_parameter("land_timeout_s", 60.0)
         self.declare_parameter("land_settle_s", 2.0)
         # Touchdown = the reported altitude STOPS CHANGING. How much movement
         # still counts as stopped, m, measured peak-to-peak over land_settle_s.
@@ -602,7 +583,6 @@ class Phase1MissionNode(Node):
         # takeoff_alt above the pad, so a real landing covers far more than
         # this; a hover covers none of it.
         self.declare_parameter("min_descent_m", 0.30)
-        self.declare_parameter("takeoff_timeout_s", 45.0)
         self.declare_parameter("service_timeout_s", 30.0)
         self.declare_parameter("setpoint_hz", 10.0)
         # The box the planner may search in, [min_x, min_y, min_z, max_x,
@@ -674,9 +654,6 @@ class Phase1MissionNode(Node):
         # command is not the same as ArduPilot accepting it, so every command is
         # re-sent on this period until /mavros/state shows the effect.
         self.declare_parameter("retry_period_s", 2.0)
-        # Fly through hydrone_controller (actions) instead of talking to MAVROS
-        # from here. Same flight logic, ported; off until it has flown the seeds.
-        self.declare_parameter("use_controller", False)
 
         p = lambda n: self.get_parameter(n).value
         self.takeoff_alt = float(p("takeoff_alt"))
@@ -740,13 +717,9 @@ class Phase1MissionNode(Node):
         self.investigating = False
         self.fresh_s = float(p("fresh_detection_s"))
         self.dwell_s = float(p("dwell_s"))
-        self.disarm_timeout = float(p("disarm_timeout_s"))
-        self.disarm_retry = float(p("disarm_retry_s"))
-        self.land_timeout = float(p("land_timeout_s"))
         self.land_settle = float(p("land_settle_s"))
         self.land_still_tol = float(p("land_still_tol_m"))
         self.min_descent = float(p("min_descent_m"))
-        self.takeoff_timeout = float(p("takeoff_timeout_s"))
         self.svc_timeout = float(p("service_timeout_s"))
         self.auto_start = bool(p("auto_start"))
         self.retry_period = float(p("retry_period_s"))
@@ -812,14 +785,9 @@ class Phase1MissionNode(Node):
         self._confirm_hits = 0
         self._confirm_seen = 0          # belly frames that arrived at all
         self._confirm_best = 0.0        # best confidence any of them reached
-        self._z_hist: list[tuple[float, float]] = []
-        self._land_entry_z: float | None = None
         self._takeoff_start_z = 0.0
         self._last_down: PadDetection | None = None
         self._last_down_t = 0.0
-        # Last refusal ArduPilot gave us, and when. See _cb_statustext.
-        self._fcu_gripe = ""
-        self._fcu_gripe_t = 0.0
 
         # ── I/O ─────────────────────────────────────────────────────────────
         sensor_qos = QoSProfile(
@@ -836,13 +804,16 @@ class Phase1MissionNode(Node):
         # _stream, _set_mode and _start_call all refuse on None, so the failure
         # mode of forgetting a guard is a log line, not a spinning motor.
         self.pub_plan = self.create_publisher(Path, p("out_plan"), 10)
-        self.use_controller = bool(p("use_controller")) and not self.dry_run
-        self.vehicle = Vehicle(self) if self.use_controller else None
+        # All flying goes through hydrone_controller. A dry run has no vehicle.
+        self.vehicle = None if self.dry_run else Vehicle(self)
+        self._dry_touchdown = TouchdownDetector(
+            settle_s=float(p("land_settle_s")),
+            still_tol_m=float(p("land_still_tol_m")),
+            min_descent_m=float(p("min_descent_m")))
         self._job = None
         self.pub_sp = None if self.dry_run else self.create_publisher(
             PoseStamped,
-            "/hydrone/controller/cmd_pose" if self.use_controller
-            else "/mavros/setpoint_position/local", 10)
+            "/hydrone/controller/cmd_pose", 10)
         self.pub_status = self.create_publisher(
             String, "/hydrone/mission/status", 10)
 
@@ -876,12 +847,6 @@ class Phase1MissionNode(Node):
         self.create_subscription(PadDetection,
                                  self.get_parameter("detections_topic").value,
                                  self._cb_detection, 20)
-        # ArduPilot explains its refusals in STATUSTEXT ("Arm: Throttle too
-        # high", "PreArm: VisOdom: not healthy", ...). MAVROS publishes
-        # statustext/recv BEST_EFFORT; a RELIABLE subscription is
-        # QoS-incompatible and receives nothing at all.
-        self.create_subscription(StatusText, "/mavros/statustext/recv",
-                                 self._cb_statustext, sensor_qos)
 
         # O RELOGIO DA PROVA. Nada mais neste no o usa — nem o tick, nem o
         # stream de setpoint, nem um timeout. So o orcamento de missao.
@@ -899,16 +864,6 @@ class Phase1MissionNode(Node):
         self._sim_clock = None
         self.create_subscription(Clock, "/clock", self._cb_clock, sensor_qos)
 
-        if self.dry_run:
-            self.cli_mode = None
-            self.cli_arm = None
-            self.cli_takeoff = None
-        else:
-            self.cli_mode = self.create_client(SetMode, "/mavros/set_mode")
-            self.cli_arm = self.create_client(CommandBool,
-                                              "/mavros/cmd/arming")
-            self.cli_takeoff = self.create_client(CommandTOL,
-                                                  "/mavros/cmd/takeoff")
         # The map's own services are NOT part of the lockdown: they move no
         # vehicle. Registering the takeoff base and marking a pad visited are
         # exactly the bookkeeping a rehearsal is there to exercise.
@@ -1029,15 +984,6 @@ class Phase1MissionNode(Node):
             self._last_down = msg
             self._last_down_t = self._now()
 
-    def _cb_statustext(self, msg: StatusText):
-        """Remember ArduPilot's most recent arm/pre-arm complaint."""
-        text = msg.text.strip()
-        if text.startswith(("Arm:", "PreArm:")):
-            if text != self._fcu_gripe:
-                self.get_logger().warn(f"FCU refuses: {text}")
-            self._fcu_gripe = text
-            self._fcu_gripe_t = self._now()
-
     def _cb_clock(self, msg: Clock):
         self._sim_clock = msg.clock.sec + msg.clock.nanosec * 1e-9
 
@@ -1048,12 +994,6 @@ class Phase1MissionNode(Node):
         o caso do drone real. Ver a assinatura de /clock no construtor.
         """
         return self._sim_clock if self._sim_clock is not None else self._now()
-
-    def _fcu_reason(self) -> str:
-        """The FCU's refusal, if it is recent enough to be about this attempt."""
-        if self._fcu_gripe and self._now() - self._fcu_gripe_t < 10.0:
-            return self._fcu_gripe
-        return "no reason given by the FCU"
 
     # ────────────────────────────────────────────────────────────────────────
     # Services
@@ -1071,10 +1011,8 @@ class Phase1MissionNode(Node):
         self.get_logger().warn("ABORT requested — landing where we are.")
         self.stream_setpoint = False
         self._enter(self.ABORTED)
-        if self.use_controller:
+        if self.vehicle is not None:
             self.vehicle.land(disarm=True)
-        else:
-            self._set_mode("LAND")
         response.success = True
         response.message = "aborting: landing in place"
         return response
@@ -1185,7 +1123,6 @@ class Phase1MissionNode(Node):
             self.TRAVEL: self._do_travel,
             self.CONFIRM: self._do_confirm,
             self.LAND: self._do_land,
-            self.DISARM: self._do_disarm,
             self.DWELL: self._do_dwell,
         }[self.state]
         handler()
@@ -1198,13 +1135,8 @@ class Phase1MissionNode(Node):
         if not (self.mav_state.connected and self.pose is not None):
             self._throttle("waiting for MAVROS link and a local position...")
             return
-        # Not in dry run: those clients do not exist, so there is nothing to
-        # ask. Waiting on them would hold the rehearsal at WAIT_FCU forever.
-        if not self.dry_run and not (self.cli_arm.service_is_ready()
-                                     and self.cli_mode.service_is_ready()):
-            self._throttle("waiting for MAVROS command services...")
-            return
-        if self.use_controller and not self.vehicle.ready():
+        # Not in dry run: there is no vehicle client, nothing to wait for.
+        if self.vehicle is not None and not self.vehicle.ready():
             self._throttle("waiting for hydrone_controller actions...")
             return
 
@@ -1217,58 +1149,18 @@ class Phase1MissionNode(Node):
     # ── ARMING ───────────────────────────────────────────────────────────────
 
     def _do_arming(self):
-        """GUIDED first, then arm.
+        """Arm in GUIDED, through hydrone_controller's Arm action.
 
-        Retries are driven by elapsed time rather than by the previous call's
-        result: MAVROS acks a mode change that ArduPilot then declines (EKF not
-        ready, pre-arm check pending), so "the call succeeded" is not the same
-        as "the vehicle is in GUIDED". Only /mavros/state settles that.
+        The how (GUIDED before armed, retry on time not on acks) lives in
+        hydrone_controller.controller_node.run_arm. What stays here is WHEN:
+        a landing cycle re-arms only after DISARM confirmed the props stopped,
+        which is also what makes ArduPilot's land detector agree we are down —
+        NAV_TAKEOFF is refused until it does (`takeoff refused three times`
+        killed 45% of runs in logs/param_sweep/ before that was understood).
 
-        GUIDED is checked BEFORE armed, and the reason has not gone away now
-        that DISARM leaves the vehicle genuinely disarmed: the MODE is still
-        LAND when we get here. Taking "armed" as done would send a takeoff while
-        in LAND, which ArduPilot refuses, forever.
-
-        What DID change is that this is now a real arm from a real disarmed
-        state — the same transition ArduPilot expects at the start of any
-        flight — rather than a mode flip on a vehicle that never stopped. It
-        costs about 3.8 s where the mode flip cost 0.2 s (MEASURED 2026-09-18).
-
-        Careful with the refusals in the log: a handful of
-        `NAV_TAKEOFF: FAILED` per takeoff is NORMAL and harmless. It is this
-        node's retry timer re-sending CommandTOL at a vehicle that is already
-        climbing, and it happens on the very first takeoff of a run from a cold,
-        genuinely disarmed vehicle. Counting those is what makes a healthy
-        takeoff look broken: ~5 refusals per takeoff is fine, ~16-23 is a
-        takeoff that never left.
-
-        THE THREE-STRIKE ABORT, and why this state is the suspected cure.
-        `takeoff refused three times` killed 25 of 55 runs in
-        logs/param_sweep/ — 45%, each after burning 3 x takeoff_timeout = 135 s.
-        ArduCopter accepts NAV_TAKEOFF only when armed AND `ap.land_complete`:
-        the FCU itself has to believe it is down. Touchdown here is declared on
-        a stillness heuristic that fires BEFORE ArduPilot's land detector
-        latches, and the old code then commanded takeoff 4.3 s later — while
-        MEASURED disarm acceptance, which needs the same latch, takes 4.7-7.6 s
-        (median 5.2 s). Commanding into that window is a coin flip, which is
-        exactly the shape of the data: ~13-17% of takeoffs failed, with no
-        dependence on pad height or on the (constant) 4.3 s gap.
-
-        Waiting for a CONFIRMED disarm closes the window: `armed=False` cannot
-        happen without the latch, so by the time this state arms again the
-        FCU agrees it is landed. THIS IS A HYPOTHESIS UNDER TEST, not a
-        result — three earlier explanations for the same aborts were killed by
-        the data (an absolute-vs-relative takeoff altitude: refuted, the climb
-        is 2.39-2.41 m from any start height across 275 takeoffs; the gap to
-        touchdown: refuted, 4.3 s whether it worked or not; pad height:
-        refuted, failure rate flat at 12-17%). Do not write it up as fixed
-        without the seed sweep that says so.
-
-        DRY RUN: none of that happens. After `dry_arm_delay_s` on the base the
-        rehearsal simply declares the vehicle armed and moves on, because the
-        arm is not the interesting part — what the arm TRIGGERS is. Registering
-        the takeoff base and opening pad_map's gate both hang off this moment,
-        and both still happen, from REGISTER, exactly as they do in flight.
+        DRY RUN: nothing is sent. After `dry_arm_delay_s` on the base the
+        rehearsal declares the vehicle armed, because what the arm TRIGGERS —
+        registering the takeoff base, opening pad_map's gate — still happens.
         """
         if self.dry_run:
             if self._since_entered() < self.dry_arm_delay:
@@ -1281,53 +1173,21 @@ class Phase1MissionNode(Node):
                         else self.TAKEOFF)
             return
 
-        if self.use_controller:
-            if self._job is None:
-                self._job = self.vehicle.arm()
-            elif self._job.done:
-                if self._job.ok:
-                    self._enter(self.REGISTER if not self.base_registered
-                                else self.TAKEOFF)
-                else:
-                    self.get_logger().warn(
-                        f"arm: {self._job.message} — retrying.")
-                    self._job = None
-            return
-
-        if self.mav_state.mode == "GUIDED" and self.mav_state.armed:
-            # `_takeoff_tries` is NOT reset here. TAKEOFF bounces back to this
-            # state on every refusal, and clearing the counter on the way
-            # through means the three-strike abort can never accumulate —
-            # MEASURED 2026-08-28: after landing on an elevated base at
-            # z=0.89 m the FCU refused takeoff, and the mission sat in
-            # ARMING <-> TAKEOFF for the rest of the flight, retrying every
-            # two seconds and never saying anything but "failed: no reason
-            # given by the FCU".
-            #
-            # DWELL zeroes it when a genuinely new landing cycle starts, which
-            # is the place that means "this is a fresh attempt".
-            self._enter(self.REGISTER if not self.base_registered
-                        else self.TAKEOFF)
-            return
-        if self._poll_call() == "pending":
-            return
-        if self._now() - self._last_cmd_t < self.retry_period:
-            return
-
-        if self.mav_state.mode != "GUIDED":
-            self._set_mode("GUIDED")
-            return
-
-        self._start_call("arm", self.cli_arm, CommandBool.Request(value=True))
-
-        if self._since_entered() > self.takeoff_timeout:
-            self.get_logger().warn(
-                f"still not armed after {self.takeoff_timeout:.0f} s. "
-                f"ArduPilot says: {self._fcu_reason()}. Still retrying. "
-                "(Common causes: no EKF origin yet; no vision pose reaching the "
-                "FCU — check /mavros/vision_pose/pose; a GCS virtual joystick "
-                "holding the throttle stick off minimum.)")
-            self._state_since = self._now()
+        # `_takeoff_tries` is NOT reset here: TAKEOFF bounces back to ARMING on
+        # every refusal, and clearing it on the way through would stop the
+        # three-strike abort from ever accumulating (MEASURED 2026-08-28). DWELL
+        # zeroes it when a genuinely new landing cycle starts.
+        if self._job is None:
+            self._job = self.vehicle.arm()
+        elif self._job.done:
+            if self._job.ok:
+                self._enter(self.REGISTER if not self.base_registered
+                            else self.TAKEOFF)
+            else:
+                self.get_logger().warn(f"arm: {self._job.message} — retrying. "
+                                       "(Common causes: no EKF origin yet; no "
+                                       "vision pose reaching the FCU.)")
+                self._job = None
 
     # ── REGISTER ─────────────────────────────────────────────────────────────
 
@@ -1379,99 +1239,60 @@ class Phase1MissionNode(Node):
     # ── TAKEOFF ──────────────────────────────────────────────────────────────
 
     def _do_takeoff(self):
-        """Ask the FCU to climb to takeoff_alt.
+        """Climb `takeoff_alt` above whatever we stand on, then go to SELECT.
 
-        ArduCopter will not climb from a bare position setpoint in GUIDED — it
-        needs an explicit takeoff — so this is a command, not a setpoint, and the
-        setpoint stream only starts once we are up. The first setpoint holds the
-        position and heading we reached, so nothing moves at the handover.
+        The climb itself is hydrone_controller's Takeoff action (CLIMBED, not
+        absolute altitude; re-sent only if refused and not climbing). Three
+        refusals in one cycle abort the attempt rather than burn the clock.
+
+        DRY RUN: no command and no timeout — the climb check is satisfied when
+        the person actually raises the drone; _pilot_cue does the asking.
         """
-        # CLIMBED, not absolute altitude. takeoff_alt is a height above the
-        # surface we are leaving; pose.z is measured from the plane of the FIRST
-        # takeoff. On any pad at a different height the two disagree by exactly
-        # that difference, and comparing them directly is why the mission hung
-        # here on 2026-08-23: after landing on a pad 0.76 m below the start
-        # plane, a perfect 1.5 m climb reached z=0.74 while this test wanted
-        # 1.35, so the mission re-sent takeoff forever — and ArduPilot rejected
-        # every one of them, because the vehicle was already flying.
-        if self.use_controller:
-            if self._job is None:
-                self._job = self.vehicle.takeoff(self.takeoff_alt,
-                                                 hold_z=self.takeoff_alt)
-                return
-            if not self._job.done:
-                return
-            if not self._job.ok:
-                self._takeoff_tries += 1
-                if self._takeoff_tries > 3:
-                    self.get_logger().error(
-                        f"takeoff refused three times after "
-                        f"{self.landed_count} landing(s): {self._job.message}. "
-                        "Aborting rather than retrying for the rest of the "
-                        "attempt.")
-                    self._enter(self.ABORTED)
-                else:
-                    self.get_logger().warn(
-                        f"takeoff did not lift us ({self._job.message}); "
-                        "retrying.")
-                    self._enter(self.ARMING)
-                return
-
-        climbed = (self.pose.pose.position.z - self._takeoff_start_z
-                   if self.pose is not None else 0.0)
-        if self.pose is not None and (
-                climbed >= self.takeoff_alt - 0.15
-                or (self.use_controller and self._job.ok)):
-            x = self.pose.pose.position.x
-            y = self.pose.pose.position.y
-            yaw = yaw_of(self.pose)
-            self.get_logger().info(
-                f"airborne — climbed {climbed:.2f} m to z="
-                f"{self.pose.pose.position.z:.2f} m, "
-                f"heading {math.degrees(yaw):.0f} deg.")
-            self._goto(x, y, self.takeoff_alt, yaw)
-            if self._land_after_takeoff:
-                # The fallback's second hop: up, then straight back down.
-                self._land_after_takeoff = False
-                self.get_logger().info(
-                    "fallback hop complete — landing to end the run.")
-                self._begin_landing()
-                return
-            self._enter(self.SELECT)
-            return
-
-        # DRY RUN: no command, and deliberately no timeout. The climb check
-        # above is the REAL one — it is satisfied when the person actually
-        # raises the drone — and ArduPilot is not here to refuse anything, so
-        # the "takeoff refused three times, aborting" path below would only
-        # ever fire on somebody being slow with their hands. _pilot_cue does
-        # the asking.
         if self.dry_run:
+            climbed = (self.pose.pose.position.z - self._takeoff_start_z
+                       if self.pose is not None else 0.0)
+            if self.pose is not None and climbed >= self.takeoff_alt - 0.15:
+                self._airborne(climbed)
             return
 
-        if self._poll_call() == "pending":
+        if self._job is None:
+            self._job = self.vehicle.takeoff(self.takeoff_alt,
+                                             hold_z=self.takeoff_alt)
             return
-
-        if self._since_entered() > self.takeoff_timeout:
-            self._takeoff_tries += 1
-            if self._takeoff_tries > 3:
-                self.get_logger().error(
-                    f"takeoff refused three times from z="
-                    f"{self.pose.pose.position.z if self.pose else 0.0:.2f} m "
-                    f"after {self.landed_count} landing(s) — check EKF "
-                    f"origin/home (docs/DEVELOP-PIPELINES.md: no origin -> no "
-                    f"home -> NAV_TAKEOFF fails). Aborting rather than "
-                    f"retrying for the rest of the attempt.")
-                self._enter(self.ABORTED)
-                return
-            self.get_logger().warn("takeoff did not lift us; retrying.")
+        if not self._job.done:
+            return
+        if self._job.ok:
+            self._airborne(self.pose.pose.position.z - self._takeoff_start_z)
+            return
+        self._takeoff_tries += 1
+        if self._takeoff_tries > 3:
+            self.get_logger().error(
+                f"takeoff refused three times after {self.landed_count} "
+                f"landing(s): {self._job.message}. Aborting rather than "
+                "retrying for the rest of the attempt.")
+            self._enter(self.ABORTED)
+        else:
+            self.get_logger().warn(
+                f"takeoff did not lift us ({self._job.message}); retrying.")
             self._enter(self.ARMING)
-            return
 
-        if self._now() - self._last_cmd_t >= self.retry_period:
-            req = CommandTOL.Request()
-            req.altitude = float(self.takeoff_alt)
-            self._start_call("takeoff", self.cli_takeoff, req)
+    def _airborne(self, climbed: float):
+        x = self.pose.pose.position.x
+        y = self.pose.pose.position.y
+        yaw = yaw_of(self.pose)
+        self.get_logger().info(
+            f"airborne — climbed {climbed:.2f} m to z="
+            f"{self.pose.pose.position.z:.2f} m, "
+            f"heading {math.degrees(yaw):.0f} deg.")
+        self._goto(x, y, self.takeoff_alt, yaw)
+        if self._land_after_takeoff:
+            # The fallback's second hop: up, then straight back down.
+            self._land_after_takeoff = False
+            self.get_logger().info(
+                "fallback hop complete — landing to end the run.")
+            self._begin_landing()
+            return
+        self._enter(self.SELECT)
 
     # ── SELECT ───────────────────────────────────────────────────────────────
 
@@ -1794,7 +1615,7 @@ class Phase1MissionNode(Node):
             return
         if self.landing_for == self.LAND_FINAL:
             return
-        if self.state in (self.LAND, self.DISARM, self.DWELL):
+        if self.state in (self.LAND, self.DWELL):
             return
 
         elapsed = self._mission_now() - self._mission_t0
@@ -2483,166 +2304,41 @@ class Phase1MissionNode(Node):
     # ── LAND ─────────────────────────────────────────────────────────────────
 
     def _begin_landing(self):
-        """Hand the descent to the FCU and stop talking to it.
+        """Hand the descent to hydrone_controller and stop streaming.
 
-        The setpoint stream stops here. ArduPilot's LAND has a rangefinder flare
-        and it owns the vehicle from this point; a position setpoint arriving
-        mid-descent is at best ignored and at worst fights it.
+        The controller's Land action does LAND, touchdown detection AND the
+        disarm in one goal (controller_node.run_land). A landing counts only
+        "com hélices desligadas" — the props must be CONFIRMED stopped.
         """
         self.stream_setpoint = False
-        self._z_hist = []
-        # The altitude the descent starts from, so touchdown can require that
-        # the vehicle actually left it.
-        self._land_entry_z = (self.pose.pose.position.z
-                              if self.pose is not None else None)
         self._enter(self.LAND)
-        if self.use_controller:
-            self._job = self.vehicle.land(disarm=True)
+        if self.dry_run:
+            # Touchdown in a rehearsal = the person set the drone down: still
+            # after a real descent. Same detector the controller uses.
+            self._dry_touchdown.reset(self.pose.pose.position.z
+                                      if self.pose is not None else None)
             return
-        self._set_mode("LAND")
+        self._job = self.vehicle.land(disarm=True)
 
     def _do_land(self):
-        """Wait for touchdown. Two independent signals, whichever comes first."""
-        if self.use_controller:
-            # The controller does LAND, touchdown AND the disarm in one goal
-            # (hydrone_controller.controller_node.run_land).
-            if self._job is not None and self._job.done:
-                r = self._job.result
-                if r is None or not r.success:
-                    self.get_logger().warn(
-                        f"land: {self._job.message} — counting it anyway, "
-                        "as the in-node path does after its timeout.")
-                self._settle_landing(
-                    proven=bool(r is not None and r.props_stopped))
-            return
-        # Keep asking until /mavros/state agrees we are in LAND. An acked mode
-        # command that ArduPilot then declined would otherwise leave us hovering
-        # here until the timeout.
-        if (not self.dry_run
-                and self.mav_state.mode != "LAND"
-                and self._poll_call() != "pending"
-                and self._now() - self._last_cmd_t >= self.retry_period):
-            self.get_logger().warn("not in LAND yet; re-sending the mode.")
-            self._set_mode("LAND")
-            return
-
-        # Landed = the FCU disarmed us, or the reported altitude has STOPPED
-        # CHANGING.
-        #
-        # It used to be "z <= 0.5 m", an absolute height above the takeoff
-        # plane, and that is what made the vehicle bail out of LAND just before
-        # touchdown: descending through 0.5 m satisfied it, land_settle_s later
-        # the mission called it landed and moved on to DWELL and TAKEOFF while
-        # the vehicle was still in the air — and ArduPilot then rejected the
-        # takeoff because it had never landed. The threshold was also wrong for
-        # the competition outright: it is measured from the takeoff plane, so a
-        # pad higher than the one we left never reaches 0.5 m at all.
-        #
-        # Stillness has neither problem. It is relative, so it does not care
-        # what height the pad is at, and it cannot be satisfied on the way down:
-        # a descending vehicle moves far more than land_still_tol_m across the
-        # window, a resting one moves only estimator noise.
-        # In a DRY RUN the vehicle is disarmed for the whole run by
-        # construction, so this signal is permanently true and would declare
-        # touchdown the instant LAND was entered — at hover height, writing that
-        # height into the pad. Ignore it there and let stillness-plus-descent
-        # decide, which is what the person setting the drone down produces.
-        disarmed = (not self.dry_run) and (not self.mav_state.armed)
-        still = self._z_is_still()
-        descended = (self._land_entry_z is not None
-                     and self.pose is not None
-                     and (self._land_entry_z - self.pose.pose.position.z)
-                     >= self.min_descent)
-
-        # No extra debounce: _z_is_still already demands a FULL land_settle_s
-        # window of stillness before it returns true, and a disarm is definitive.
-        #
-        # This no longer COUNTS the landing. Stillness plus descent says the
-        # vehicle has stopped moving; the rules ask for something stricter —
-        # "com hélices desligadas" (REGRAS-CBR-2026.pdf, the definition of
-        # pousar) — and a vehicle held in a stable hover satisfies stillness
-        # while its props are still turning. What follows is the state that gets
-        # the props stopped and then checks that they are. See _do_disarm.
-        if disarmed or (still and descended):
-            z = self.pose.pose.position.z if self.pose else 0.0
-            why = "disarmed" if disarmed else "descended and stopped"
-            self.get_logger().info(
-                f"touchdown at z={z:.2f} m ({why}) — stopping the motors "
-                "before this counts as a landing.")
-            self._enter(self.DISARM)
-            return
-
-        if self._since_entered() > self.land_timeout:
-            # The one way into DISARM with NO evidence of touchdown, so it is
-            # the one place the non-forced disarm earns its keep: if the vehicle
-            # is in fact still flying, ArduPilot refuses and DISARM times out
-            # into DWELL, which is exactly where this branch used to go anyway.
-            # Nothing is cut in mid-air on the strength of a timeout.
-            self.get_logger().warn(
-                f"no touchdown within {self.land_timeout:.0f} s — carrying on "
-                "anyway so the mission does not stall here.")
-            self._enter(self.DISARM)
-
-    # ── DISARM ───────────────────────────────────────────────────────────────
-
-    def _do_disarm(self):
-        """Stop the propellers, and do not count the landing until they stop.
-
-        WHY THIS STATE EXISTS, measured. Across the 262 landings in
-        `logs/param_sweep/` and `logs/seed_sweep/`, the number that ever reached
-        `armed=False` is ZERO — every one of them read "descended and stopped".
-        Nothing here ever sent a disarm; the mission relied on ArduCopter's
-        DISARM_DELAY, which is 10 s (mav.parm:281), while DWELL re-armed after
-        4 s. The vehicle touched the base and left again with its props turning.
-
-        The rules do not score that. REGRAS-CBR-2026.pdf defines pousar as
-        touching the base "de forma que seja visível que o mesmo se apoia na
-        base para se manter em uma posição estável e COM HÉLICES DESLIGADAS",
-        and visiting a base as detecting it by vision AND landing on it. A
-        touch-and-go is not a landing, so it is not a visit, so it is not +20 —
-        six times over, and the x2 for the return with it. The run scored 0.
-
-        So the disarm is COMMANDED rather than waited for, which is both correct
-        and faster than the 10 s it was implicitly waiting on and never reaching.
-
-        A NORMAL disarm, never a forced one. MAV_CMD_COMPONENT_ARM_DISARM with
-        the 21196 magic cuts the motors whatever the vehicle is doing, and the
-        signal that brought us here is a heuristic that a stable hover can
-        satisfy. If ArduPilot refuses because it does not agree we are down,
-        that refusal is information and the right answer is to keep asking and
-        let the vehicle finish landing — not to overrule it in mid-air.
-        """
-        # DRY RUN: the vehicle is disarmed for the whole rehearsal by
-        # construction and there is no client to ask, so there is nothing to
-        # prove and nothing to send. The landing is settled on the same evidence
-        # that brought us here.
+        """Wait for the Land goal (or, in a dry run, for stillness)."""
         if self.dry_run:
-            self._settle_landing(proven=True)
+            if self.pose is not None and self._dry_touchdown.update(
+                    self._now(), self.pose.pose.position.z):
+                self._settle_landing(proven=True)
             return
-
-        if not self.mav_state.armed:
-            self._settle_landing(proven=True)
-            return
-
-        if self._since_entered() > self.disarm_timeout:
-            # Past DISARM_DELAY as well as past our own retries. Count it and
-            # carry on: refusing to count it would leave the pad unvisited in
-            # the map, and the mission would fly back and land on it again — a
-            # repeated landing, which is -5. Progress is worth more than
-            # bookkeeping here, but the log has to say the scoring is in doubt.
-            self.get_logger().error(
-                f"STILL ARMED {self.disarm_timeout:.0f} s after touchdown — "
-                f"ArduPilot says: {self._fcu_reason()}. This landing may NOT "
-                "be scored: the rules require the propellers stopped. Counting "
-                "it anyway so the mission does not land on this base twice.")
-            self._settle_landing(proven=False)
-            return
-
-        if self._poll_call() == "pending":
-            return
-        if self._now() - self._last_cmd_t < self.disarm_retry:
-            return
-        self._start_call("disarm", self.cli_arm, CommandBool.Request(value=False))
+        if self._job is not None and self._job.done:
+            r = self._job.result
+            if r is None or not r.success:
+                # Counting it anyway: refusing would leave the pad unvisited
+                # and the mission would land on it again (-5).
+                self.get_logger().warn(
+                    f"land: {self._job.message} — counting it anyway.")
+            elif not r.props_stopped:
+                self.get_logger().error(
+                    f"{r.message}. This landing may NOT be scored: the rules "
+                    "require the propellers stopped.")
+            self._settle_landing(proven=bool(r is not None and r.props_stopped))
 
     def _settle_landing(self, proven: bool):
         """Book the landing that DISARM has just finished proving, then rest."""
@@ -2699,32 +2395,6 @@ class Phase1MissionNode(Node):
             f"Accumulated drift {math.hypot(dx, dy):.2f} m "
             f"(x {dx:+.2f}, y {dy:+.2f}). Compare against err_norm at the end "
             f"of the odom_error CSV — they are the same quantity.")
-
-    def _z_is_still(self) -> bool:
-        """Has the reported altitude stopped moving?
-
-        Peak-to-peak z over the last `land_settle_s`, compared against
-        `land_still_tol_m`. Returns False until the window is actually full, so
-        entering LAND cannot read as "already stopped".
-        """
-        if self.pose is None:
-            return False
-        now = self._now()
-        self._z_hist.append((now, self.pose.pose.position.z))
-
-        # Drop what has aged out, but KEEP the first sample at or before the
-        # cutoff — trimming to exactly the window would leave a span of
-        # land_settle minus one sample period, which never reaches the length
-        # the check below asks for.
-        cutoff = now - self.land_settle
-        while len(self._z_hist) > 1 and self._z_hist[1][0] <= cutoff:
-            self._z_hist.pop(0)
-
-        if now - self._z_hist[0][0] < self.land_settle:
-            # Not a full window yet: entering LAND must not read as stopped.
-            return False
-        zs = [z for _, z in self._z_hist]
-        return (max(zs) - min(zs)) <= self.land_still_tol
 
     def _mark_visited(self, height: float):
         """Tell the pad map we landed, so it stops offering this pad."""
@@ -2789,14 +2459,6 @@ class Phase1MissionNode(Node):
     # Helpers
     # ────────────────────────────────────────────────────────────────────────
 
-    def _set_mode(self, mode: str):
-        if self.cli_mode is None:      # dry run
-            self.get_logger().info(f"[dry] would set mode {mode}.")
-            return
-        req = SetMode.Request()
-        req.custom_mode = mode
-        self._start_call("mode", self.cli_mode, req)
-
     def _start_call(self, tag: str, client, request):
         # The last gate. In dry run the FCU clients are None, so a call site
         # that forgot its own guard lands here and is refused rather than
@@ -2821,9 +2483,7 @@ class Phase1MissionNode(Node):
             return "pending"
         if status != _Call.OK:
             self.get_logger().warn(
-                f"{self._call.name} ({self._pending}) -> {status}"
-                + (f": {self._fcu_reason()}" if self._pending in ("arm", "takeoff")
-                   else ""))
+                f"{self._call.name} ({self._pending}) -> {status}")
         self._call = None
         return status
 
@@ -2928,9 +2588,6 @@ class Phase1MissionNode(Node):
         elif self.state == self.LAND:
             cue = ("PUT THE DRONE DOWN on the pad and let go — touchdown is "
                    "declared when the altitude stops changing.")
-        elif self.state == self.DISARM:
-            cue = ("LEAVE IT ON THE PAD — in flight this is where the motors "
-                   "are stopped. Nothing is sent here.")
         elif self.state == self.DWELL:
             left = max(0.0, self.dwell_s - self._since_entered())
             cue = f"RESTING on the pad — {left:.0f} s, then pick it up again."

@@ -67,7 +67,7 @@ looks from different angles. And across seven arenas the LANES themselves ran
 in only three runs: the perimeter plus land-during-survey usually reaches
 `target_bases` first — helped by the mission counting a landing on bare floor
 as a base visited, which it cannot yet tell apart. See
-docs/SEED-SWEEP-2026-09-02.md.
+docs/historico/SEED-SWEEP-2026-09-02.md.
 
 Like the rest of the autonomy layer this consumes ONLY the agnostic contract
 buses (/zed/zed_node/*, /down_cam/*, /mavros/*), so it is identical in sim and
@@ -79,7 +79,7 @@ from typing import List
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.conditions import IfCondition
+from launch.conditions import IfCondition, UnlessCondition
 from launch.substitutions import (LaunchConfiguration, PathJoinSubstitution,
                                   TextSubstitution)
 from launch_ros.actions import Node
@@ -361,11 +361,6 @@ def generate_launch_description():
                         "arena e pousar fora da base e eliminatorio, entao a "
                         "reserva e dimensionada para o pior trajeto, nao para "
                         "o medio."),
-        DeclareLaunchArgument(
-            "use_controller", default_value="false",
-            description="Voa pelo hydrone_controller (acoes Arm/Takeoff/Land) "
-                        "em vez da missao falar direto com o MAVROS. Mesma "
-                        "logica de voo, portada; desligado ate voar as seeds."),
         DeclareLaunchArgument(
             "trust_map_observations", default_value="20",
             description="Se a barriga nao confirma em confirm_timeout_s mas o "
@@ -999,7 +994,8 @@ def generate_launch_description():
         executable="controller_node",
         name="hydrone_controller",
         output="screen",
-        condition=IfCondition(LaunchConfiguration("use_controller")),
+        # A dry run must have NOTHING able to command the vehicle.
+        condition=UnlessCondition(LaunchConfiguration("dry_run")),
         parameters=[{
             "disarm_timeout_s": ParameterValue(
                 LaunchConfiguration("disarm_timeout_s"), value_type=float),
@@ -1015,18 +1011,12 @@ def generate_launch_description():
         output="screen",
         parameters=[{
             "takeoff_alt": ParameterValue(takeoff_alt, value_type=float),
-            "use_controller": ParameterValue(
-                LaunchConfiguration("use_controller"), value_type=bool),
             "target_bases": ParameterValue(
                 LaunchConfiguration("target_bases"), value_type=int),
             "settle_s": ParameterValue(
                 LaunchConfiguration("settle_s"), value_type=float),
             "dwell_s": ParameterValue(
                 LaunchConfiguration("dwell_s"), value_type=float),
-            "disarm_timeout_s": ParameterValue(
-                LaunchConfiguration("disarm_timeout_s"), value_type=float),
-            "disarm_retry_s": ParameterValue(
-                LaunchConfiguration("disarm_retry_s"), value_type=float),
             # The U's geometry. See the arguments for what 0 means.
             "u_side_x_m": ParameterValue(
                 LaunchConfiguration("u_side_x_m"), value_type=float),

@@ -135,7 +135,8 @@ No drone real, `sources_real.launch.py` troca os `*_mimic` pelos drivers
 | `cloud_filter_node` | hydrone_map | limpa a nuvem **antes** do octomap | |
 | `octomap_server_node` | octomap_server | o mapa 3-D de ocupação | |
 | `map_odom_node` | hydrone_localization | publica `map → odom` medido, unindo as duas árvores de TF | |
-| `phase1_mission_node` | hydrone_mission | a máquina de estados: decola, varre, confirma, pousa, volta | |
+| `controller_node` | hydrone_controller | **o único que comanda o FCU**: ações Arm/Takeoff/GoTo/Land | desligado em `dry_run` |
+| `phase1_mission_node` | hydrone_mission | a estratégia: escolhe base, confirma, pousa, volta. Voa só pelo controller | |
 
 **Ordem que importa:** `cloud_filter` fica entre a câmera e o `octomap_server` de
 propósito. Apontar o octomap direto para a nuvem é a fiação óbvia e a errada —

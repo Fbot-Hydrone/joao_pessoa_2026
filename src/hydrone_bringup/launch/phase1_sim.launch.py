@@ -27,7 +27,7 @@ the sources side: make the sim produce what the real drone produces.
 
 Give it ~30 s after start before expecting movement. With GPS disabled the EKF
 needs the vision pose and a global origin before it will accept a takeoff — see
-docs/DEVELOP-PIPELINES.md. phase1_mission waits for exactly that on its own and
+docs/historico/DEVELOP-PIPELINES.md. phase1_mission waits for exactly that on its own and
 logs what it is waiting for.
 
 Tuning lives in phase1.launch.py — edit a default there, or pass it on the

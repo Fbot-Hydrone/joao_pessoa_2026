@@ -17,7 +17,7 @@
 #                     mapping only; the belly camera is the detector AND the
 #                     position source, placing each pad by casting its pixel
 #                     into the occupancy map. See docs/PHASE1-MISSION.md and
-#                     docs/MAP-SWEEP-2026-09-02.md.
+#                     docs/historico/MAP-SWEEP-2026-09-02.md.
 #   --landing-sites   run the earlier landing-site mission (fly forward and land
 #                     on whatever the belly camera sees). See docs/LANDING-SITES.md.
 #   --zed-detect      run the OLDER division of labour, where the forward ZED

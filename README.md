@@ -28,15 +28,14 @@ project: it starts the BiguaSim⇄ArduPilot physics bridge and ArduPilot SITL
 | `src/hydrone_bringup` | **Entry point.** Launch files + flight parameters (`config/params/`) |
 | `src/biguasim-ros2/biguasim_main` | `ardubridge_node` — BiguaSim as ArduPilot's physics/sensor backend |
 | `src/biguasim-ros2/biguasim_interfaces` | BiguaSim sensor messages (sonar, DVL, …) |
-| `src/hydrone_mission` | Mission state machine (phases 1–4, scoring) |
-| `src/hydrone_nav` | Route planning + precision landing |
-| `src/hydrone_controller` | Setpoint/offboard control |
-| `src/hydrone_vision` | Camera perception: landing pads (classic CV), bases (ArUco), gestures (MediaPipe), QR (pyzbar) |
-| `src/hydrone_msgs` | Custom messages/services (`MissionState`, `SetPhase`, …) |
-| `deps.repos` | Pinned source dependencies (ArduPilot, micro-ROS agent/msgs, XRCE-Gen) |
-| `docker/`, `Dockerfile`, `docker-compose.yml` | Reproducible containerized bringup |
-| `docker-compose.dev.yml` | Dev override: bind-mounts `src/` so code edits need no image rebuild (`docker_up.sh --dev`) |
-| `docs/` | Onboarding notes and historical docs. Start with [`ESTRUTURA-E-COMANDOS.md`](docs/ESTRUTURA-E-COMANDOS.md) — which nodes exist, who starts whom, and what each command actually calls — then [`PHASE1-MISSION.md`](docs/PHASE1-MISSION.md) and [`LANDING-SITES.md`](docs/LANDING-SITES.md) |
+| `src/hydrone_mission` | **One node per phase** — the strategy (`phase1_mission_node`) |
+| `src/hydrone_controller` | **The only link to the FCU.** Actions `Arm`/`Takeoff`/`GoTo`/`Land`; `Vehicle` client for phases |
+| `src/hydrone_nav` | `nav_node` (`NavigateTo`) + libs: navigator, planner, coverage, route, precision_landing, servo |
+| `src/hydrone_vision` | `pad_detector_node` (YOLO or classic CV); `vision_node` start for gestures/QR |
+| `src/hydrone_map` | `pad_map_node` (fused bases), octomap filtering, coverage/debug maps |
+| `src/hydrone_localization` | Visual odometry, VO→MAVROS bridge, `map→odom` |
+| `src/hydrone_msgs` | Messages, services and actions |
+| `docs/` | **Start with [`ARQUITETURA.md`](docs/ARQUITETURA.md) — the structure every phase must follow.** Then [`ESTRUTURA-E-COMANDOS.md`](docs/ESTRUTURA-E-COMANDOS.md) — which nodes exist, who starts whom, and what each command actually calls — then [`PHASE1-MISSION.md`](docs/PHASE1-MISSION.md) and [`LANDING-SITES.md`](docs/LANDING-SITES.md) |
 
 Third-party sources (`src/ardupilot`, `src/micro_ros_agent`, `src/micro_ros_msgs`,
 `tools/Micro-XRCE-DDS-Gen`) are **not committed** — they are pinned in
@@ -63,7 +62,7 @@ BS_SIM_DIR=~/Documents/bs-drone-competition ./scripts/docker_up.sh
 # ...with rviz and the detector's annotated view open:
 ./scripts/docker_up.sh --phase1 --debug
 # the older division of labour, where the ZED detects the bases:
-./scripts/docker_up.sh --zed-detect         # docs/MAP-SWEEP-2026-09-02.md
+./scripts/docker_up.sh --zed-detect         # docs/historico/MAP-SWEEP-2026-09-02.md
 # the earlier landing-site mission (fly forward, land on what you see):
 ./scripts/docker_up.sh --landing-sites      # docs/LANDING-SITES.md
 # any name:=value argument is forwarded to the launch:

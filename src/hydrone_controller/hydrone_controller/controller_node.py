@@ -62,7 +62,22 @@ class ControllerNode(Node):
         self.takeoff_margin = p("takeoff_margin_m", 0.15)
         self.goto_tol = p("goto_tolerance_m", 0.25)
         self.land_timeout = p("land_timeout_s", 60.0)
+        # Ceiling on the wait for the FCU to confirm the disarm. Above
+        # DISARM_DELAY (10 s) on purpose: if our own disarm is refused because
+        # ArduPilot does not yet agree the vehicle is down, the auto-disarm
+        # still lands inside this window and is caught by the same test.
         self.disarm_timeout = p("disarm_timeout_s", 12.0)
+        # How often to re-ask for the disarm, s. Deliberately much shorter than
+        # `retry_period_s`, which is sized for mode and takeoff commands.
+        #
+        # The 7 s above is NOT ArduPilot being slow — it is us asking rarely.
+        # Our touchdown test (land_settle_s of stillness) fires before
+        # ArduPilot's own land detector has latched, so the first disarms are
+        # refused and the wait is then quantised to the retry period. At 2.0 s
+        # that turns a sub-second disagreement into whole seconds of standing
+        # still with the props running. Asking ~5x more often costs nothing —
+        # a refused disarm is a few bytes — and collects the accept the moment
+        # ArduPilot is willing to give it.
         self.disarm_retry = p("disarm_retry_s", 0.4)
         self.legacy_takeoff_alt = p("takeoff_height", 1.2)
         self.touchdown = TouchdownDetector(
