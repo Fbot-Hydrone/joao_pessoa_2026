@@ -1643,6 +1643,14 @@ class Phase1MissionNode(Node):
         self._goto_via_map(hx, hy, self.takeoff_alt, self.setpoint[3])
         self._enter(self.TRAVEL)
 
+    def _clock_note(self) -> str:
+        """Mission time so far, on the clock the BUDGET uses (drone time)."""
+        if self._mission_t0 is None:
+            return ""
+        el = self._mission_now() - self._mission_t0
+        return (f"[mission clock {el:.0f} s of "
+                f"{self.mission_budget_s:.0f} s]")
+
     def _check_budget(self):
         """Give up searching in time to still fly home, if a budget was set.
 
@@ -1664,6 +1672,9 @@ class Phase1MissionNode(Node):
             if self.state in (self.WAIT_FCU, self.ARMING, self.REGISTER):
                 return
             self._mission_t0 = self._mission_now()
+            self.get_logger().info(
+                f"MISSION CLOCK started ({'sim /clock' if self._sim_clock is not None else 'wall'}"
+                f"), budget {self.mission_budget_s:.0f} s.")
             return
         if self.landing_for == self.LAND_FINAL:
             return
@@ -2465,7 +2476,7 @@ class Phase1MissionNode(Node):
             self.landed_count += 1
             self.get_logger().info(
                 f"LANDED on base #{self.landed_count} of {self.target_bases} — "
-                f"resting at z={z:.2f} m ({how}).")
+                f"resting at z={z:.2f} m ({how}). {self._clock_note()}")
             self._mark_visited(z)
             if self.pose is not None:
                 self._landed_xy.append((self.pose.pose.position.x,
@@ -2564,7 +2575,7 @@ class Phase1MissionNode(Node):
         if self.landing_for == self.LAND_FINAL:
             self.get_logger().info(
                 f"mission complete — {self.landed_count} base(s) landed on, "
-                "home on the takeoff base.")
+                f"home on the takeoff base. {self._clock_note()}")
             self._enter(self.DONE)
             return
 
