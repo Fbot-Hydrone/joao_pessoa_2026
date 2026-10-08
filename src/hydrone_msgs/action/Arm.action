@@ -1,0 +1,10 @@
+# GUIDED + arm. Retries until /mavros/state agrees or the deadline passes.
+# MAVROS acks a mode change that ArduPilot may then decline, so success is
+# read from the vehicle state, never from the service reply.
+float32 timeout_s        # 0 -> controller default
+---
+bool success
+string message           # the FCU's last Arm:/PreArm: complaint on failure
+---
+string mode
+bool armed

@@ -1,0 +1,11 @@
+# Straight-line position setpoint and wait for arrival. No obstacle planning:
+# that is hydrone_nav's job, which sends its waypoints through this action.
+geometry_msgs/Point position
+float32 yaw              # rad, ENU
+float32 tolerance        # m; 0 -> controller default
+float32 timeout_s        # 0 -> no deadline
+---
+bool success
+string message
+---
+float32 distance

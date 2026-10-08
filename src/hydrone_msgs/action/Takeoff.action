@@ -1,0 +1,11 @@
+# Climb `altitude` metres above WHATEVER WE STAND ON (not the takeoff plane),
+# then hold at `hold_z` (absolute, local frame). Requires an armed vehicle in
+# GUIDED — send Arm first.
+float32 altitude
+float32 hold_z           # NaN -> hold where the climb ended
+---
+bool success
+string message
+float32 z                # altitude when it finished
+---
+float32 climbed

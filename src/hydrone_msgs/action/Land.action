@@ -1,0 +1,11 @@
+# Hand the descent to ArduPilot's LAND, detect touchdown (FCU disarm, or
+# altitude still after a real descent) and, if `disarm`, stop the props.
+# The rules only count a landing "com helices desligadas".
+bool disarm
+---
+bool success             # touched down
+bool props_stopped       # disarm confirmed by /mavros/state
+float32 z                # resting altitude = the surface's top
+string message
+---
+string phase             # descending | disarming

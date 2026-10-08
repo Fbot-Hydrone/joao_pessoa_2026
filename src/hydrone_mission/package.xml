@@ -13,6 +13,7 @@
   <depend>std_srvs</depend>
   <depend>mavros_msgs</depend>
   <depend>hydrone_msgs</depend>
+  <depend>hydrone_controller</depend>
   <depend>hydrone_nav</depend>
   <depend>hydrone_map</depend>
   <depend>nav_msgs</depend>

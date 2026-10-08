@@ -362,6 +362,11 @@ def generate_launch_description():
                         "reserva e dimensionada para o pior trajeto, nao para "
                         "o medio."),
         DeclareLaunchArgument(
+            "use_controller", default_value="false",
+            description="Voa pelo hydrone_controller (acoes Arm/Takeoff/Land) "
+                        "em vez da missao falar direto com o MAVROS. Mesma "
+                        "logica de voo, portada; desligado ate voar as seeds."),
+        DeclareLaunchArgument(
             "trust_map_observations", default_value="20",
             description="Se a barriga nao confirma em confirm_timeout_s mas o "
                         "mapa tem pelo menos isto de deteccoes da base, pousa "
@@ -989,6 +994,20 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration("map_odom_tf")),
     )
 
+    controller = Node(
+        package="hydrone_controller",
+        executable="controller_node",
+        name="hydrone_controller",
+        output="screen",
+        condition=IfCondition(LaunchConfiguration("use_controller")),
+        parameters=[{
+            "disarm_timeout_s": ParameterValue(
+                LaunchConfiguration("disarm_timeout_s"), value_type=float),
+            "disarm_retry_s": ParameterValue(
+                LaunchConfiguration("disarm_retry_s"), value_type=float),
+        }],
+    )
+
     mission = Node(
         package="hydrone_mission",
         executable="phase1_mission_node",
@@ -996,6 +1015,8 @@ def generate_launch_description():
         output="screen",
         parameters=[{
             "takeoff_alt": ParameterValue(takeoff_alt, value_type=float),
+            "use_controller": ParameterValue(
+                LaunchConfiguration("use_controller"), value_type=bool),
             "target_bases": ParameterValue(
                 LaunchConfiguration("target_bases"), value_type=int),
             "settle_s": ParameterValue(
@@ -1059,5 +1080,6 @@ def generate_launch_description():
         cloud_filter,
         octomap,
         map_odom_tf,
+        controller,
         mission,
     ])

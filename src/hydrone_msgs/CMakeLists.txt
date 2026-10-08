@@ -18,6 +18,10 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/SetPhase.srv"
   "srv/MarkPadVisited.srv"
   "srv/RegisterTakeoffBase.srv"
+  "action/Arm.action"
+  "action/Takeoff.action"
+  "action/GoTo.action"
+  "action/Land.action"
   DEPENDENCIES std_msgs geometry_msgs builtin_interfaces
 )
 

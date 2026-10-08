@@ -137,6 +137,7 @@ from octomap_msgs.msg import Octomap
 
 from sensor_msgs.msg import CameraInfo
 
+from hydrone_controller.vehicle import Vehicle
 from hydrone_map import octree
 from hydrone_nav import coverage, planner, route, servo
 from hydrone_msgs.msg import PadDetection, PadMap
@@ -672,6 +673,9 @@ class Phase1MissionNode(Node):
         # command is not the same as ArduPilot accepting it, so every command is
         # re-sent on this period until /mavros/state shows the effect.
         self.declare_parameter("retry_period_s", 2.0)
+        # Fly through hydrone_controller (actions) instead of talking to MAVROS
+        # from here. Same flight logic, ported; off until it has flown the seeds.
+        self.declare_parameter("use_controller", False)
 
         p = lambda n: self.get_parameter(n).value
         self.takeoff_alt = float(p("takeoff_alt"))
@@ -829,8 +833,13 @@ class Phase1MissionNode(Node):
         # _stream, _set_mode and _start_call all refuse on None, so the failure
         # mode of forgetting a guard is a log line, not a spinning motor.
         self.pub_plan = self.create_publisher(Path, p("out_plan"), 10)
+        self.use_controller = bool(p("use_controller")) and not self.dry_run
+        self.vehicle = Vehicle(self) if self.use_controller else None
+        self._job = None
         self.pub_sp = None if self.dry_run else self.create_publisher(
-            PoseStamped, "/mavros/setpoint_position/local", 10)
+            PoseStamped,
+            "/hydrone/controller/cmd_pose" if self.use_controller
+            else "/mavros/setpoint_position/local", 10)
         self.pub_status = self.create_publisher(
             String, "/hydrone/mission/status", 10)
 
@@ -1087,7 +1096,10 @@ class Phase1MissionNode(Node):
         self.get_logger().warn("ABORT requested — landing where we are.")
         self.stream_setpoint = False
         self._enter(self.ABORTED)
-        self._set_mode("LAND")
+        if self.use_controller:
+            self.vehicle.land(disarm=True)
+        else:
+            self._set_mode("LAND")
         response.success = True
         response.message = "aborting: landing in place"
         return response
@@ -1296,6 +1308,9 @@ class Phase1MissionNode(Node):
                                      and self.cli_mode.service_is_ready()):
             self._throttle("waiting for MAVROS command services...")
             return
+        if self.use_controller and not self.vehicle.ready():
+            self._throttle("waiting for hydrone_controller actions...")
+            return
 
         self.home = (self.pose.pose.position.x, self.pose.pose.position.y)
         self.get_logger().info(
@@ -1368,6 +1383,19 @@ class Phase1MissionNode(Node):
                 "be registered and the map starts accepting detections.")
             self._enter(self.REGISTER if not self.base_registered
                         else self.TAKEOFF)
+            return
+
+        if self.use_controller:
+            if self._job is None:
+                self._job = self.vehicle.arm()
+            elif self._job.done:
+                if self._job.ok:
+                    self._enter(self.REGISTER if not self.base_registered
+                                else self.TAKEOFF)
+                else:
+                    self.get_logger().warn(
+                        f"arm: {self._job.message} — retrying.")
+                    self._job = None
             return
 
         if self.mav_state.mode == "GUIDED" and self.mav_state.armed:
@@ -1470,9 +1498,34 @@ class Phase1MissionNode(Node):
         # plane, a perfect 1.5 m climb reached z=0.74 while this test wanted
         # 1.35, so the mission re-sent takeoff forever — and ArduPilot rejected
         # every one of them, because the vehicle was already flying.
+        if self.use_controller:
+            if self._job is None:
+                self._job = self.vehicle.takeoff(self.takeoff_alt,
+                                                 hold_z=self.takeoff_alt)
+                return
+            if not self._job.done:
+                return
+            if not self._job.ok:
+                self._takeoff_tries += 1
+                if self._takeoff_tries > 3:
+                    self.get_logger().error(
+                        f"takeoff refused three times after "
+                        f"{self.landed_count} landing(s): {self._job.message}. "
+                        "Aborting rather than retrying for the rest of the "
+                        "attempt.")
+                    self._enter(self.ABORTED)
+                else:
+                    self.get_logger().warn(
+                        f"takeoff did not lift us ({self._job.message}); "
+                        "retrying.")
+                    self._enter(self.ARMING)
+                return
+
         climbed = (self.pose.pose.position.z - self._takeoff_start_z
                    if self.pose is not None else 0.0)
-        if self.pose is not None and climbed >= self.takeoff_alt - 0.15:
+        if self.pose is not None and (
+                climbed >= self.takeoff_alt - 0.15
+                or (self.use_controller and self._job.ok)):
             x = self.pose.pose.position.x
             y = self.pose.pose.position.y
             yaw = yaw_of(self.pose)
@@ -2601,10 +2654,25 @@ class Phase1MissionNode(Node):
         self._land_entry_z = (self.pose.pose.position.z
                               if self.pose is not None else None)
         self._enter(self.LAND)
+        if self.use_controller:
+            self._job = self.vehicle.land(disarm=True)
+            return
         self._set_mode("LAND")
 
     def _do_land(self):
         """Wait for touchdown. Two independent signals, whichever comes first."""
+        if self.use_controller:
+            # The controller does LAND, touchdown AND the disarm in one goal
+            # (hydrone_controller.controller_node.run_land).
+            if self._job is not None and self._job.done:
+                r = self._job.result
+                if r is None or not r.success:
+                    self.get_logger().warn(
+                        f"land: {self._job.message} — counting it anyway, "
+                        "as the in-node path does after its timeout.")
+                self._settle_landing(
+                    proven=bool(r is not None and r.props_stopped))
+            return
         # Keep asking until /mavros/state agrees we are in LAND. An acked mode
         # command that ArduPilot then declined would otherwise leave us hovering
         # here until the timeout.
@@ -2938,6 +3006,7 @@ class Phase1MissionNode(Node):
         self._state_since = self._now()
         self._call = None
         self._pending = None
+        self._job = None
         # Let the new state issue its first command immediately rather than
         # waiting out the retry period of whatever the old state was doing.
         self._last_cmd_t = 0.0
