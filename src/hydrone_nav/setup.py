@@ -22,6 +22,7 @@ setup(
     entry_points={
         'console_scripts': [
             'nav_node = hydrone_nav.nav_node:main',
+            'nav_node_legacy = hydrone_nav.nav_node_legacy:main',
         ],
     },
 )

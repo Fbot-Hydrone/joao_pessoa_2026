@@ -22,6 +22,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "action/Takeoff.action"
   "action/GoTo.action"
   "action/Land.action"
+  "action/NavigateTo.action"
   DEPENDENCIES std_msgs geometry_msgs builtin_interfaces
 )
 

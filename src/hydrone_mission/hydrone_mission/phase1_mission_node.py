@@ -138,8 +138,9 @@ from octomap_msgs.msg import Octomap
 from sensor_msgs.msg import CameraInfo
 
 from hydrone_controller.vehicle import Vehicle
-from hydrone_map import octree
-from hydrone_nav import coverage, planner, route, servo
+from hydrone_nav import coverage, route, servo
+from hydrone_nav import precision_landing as pl
+from hydrone_nav.navigator import Navigator, path_msg
 from hydrone_msgs.msg import PadDetection, PadMap
 from hydrone_msgs.srv import MarkPadVisited, RegisterTakeoffBase
 
@@ -794,12 +795,14 @@ class Phase1MissionNode(Node):
         self._blocked_target = False
         # Viewpoints the vehicle could not reach. Not retried: the search would
         # otherwise loop between turning eight times and failing the same trip.
-        self._octomap_msg = None        # raw and latched; see _cb_octomap
-        self.octree_tree = None         # decoded per leg, in _goto_via_map
         b = [float(v) for v in self.get_parameter("plan_bounds").value]
         self.plan_bounds = (tuple(b[:3]), tuple(b[3:]))
         self.plan_allow_unknown = bool(
             self.get_parameter("plan_allow_unknown").value)
+        # Leg planning around the octomap lives in hydrone_nav.navigator.
+        self.nav = Navigator(bounds=self.plan_bounds,
+                             allow_unknown=self.plan_allow_unknown,
+                             log=self.get_logger())
         # pad id -> (refusals that counted, when the last one counted).
         self._call: _Call | None = None
         self._pending: str | None = None    # what _call is for
@@ -963,36 +966,8 @@ class Phase1MissionNode(Node):
         self.pose = msg
 
     def _cb_octomap(self, msg: Octomap):
-        """Keep the newest tree as BYTES. Decoding happens when a leg is planned.
-
-        This decoded eagerly until it was flown and watched. Two things were
-        wrong with that, both measured on a 5.5 minute run:
-
-        * the arena's tree reaches ~86000 nodes, and decoding it at the map's
-          2 Hz means paying for a full deserialize 660 times a flight to answer
-          the two questions a mission actually asks
-        * octomap-python's readBinary prints "Tree size mismatch" to stderr on
-          every call — expected and harmless (see hydrone_map.octree), but at
-          2 Hz it buried the mission's own log. Finding out WHY this run hung
-          meant digging the state lines out from under 600 copies of it.
-
-        The map is latched, so a message kept here is always the current one.
-        """
-        self._octomap_msg = msg
-
-    def _tree(self):
-        """The current tree, decoded now, or None.
-
-        Called at the top of a leg — twice a mission, not twice a second.
-        """
-        if self._octomap_msg is None:
-            return None
-        try:
-            return octree.tree_from_msg(self._octomap_msg)
-        except ValueError as exc:
-            self.get_logger().warn(f"octomap: {exc}",
-                                   throttle_duration_sec=20.0)
-            return None
+        """Latched; kept as bytes and decoded per leg (see Navigator.set_map)."""
+        self.nav.set_map(msg)
 
     def _cb_sweep_cam_info(self, msg: CameraInfo):
         self._sweep_cam_info = msg
@@ -1159,111 +1134,32 @@ class Phase1MissionNode(Node):
         self.stream_setpoint = True
 
     def _goto_via_map(self, x: float, y: float, z: float, yaw: float):
-        """Fly to (x, y, z), around whatever the occupancy map says is there.
+        """Fly to (x, y, z) around whatever the occupancy map says is there.
 
-        Until 2026-08-27 every leg was a single setpoint on a straight line and
-        nothing consulted the map — which is survivable in an 8x8 m open arena
-        and is not survivable in Phase 4's confined space. The map has known
-        what is occupied for weeks; this is what makes the mission read it.
-
-        Three outcomes, and the fall-back is deliberate:
-
-        * the straight line is clear (the usual case) -> one setpoint, exactly
-          the old behaviour, no waypoints and no extra decelerations
-        * it is not, and A* finds a way round -> the simplified waypoints
-        * there is no map yet, or it is too sparse to plan in -> the straight
-          line, with a warning. Refusing to fly because the map is thin would
-          ground the vehicle at takeoff, when the map is always thin. The
-          straight line is what this mission did for its whole life so far, so
-          falling back to it is the status quo, not a new risk.
+        The planning is hydrone_nav.navigator.Navigator.plan; this only turns
+        its Leg into setpoints. A blocked leg is REFUSED and the vehicle holds
+        — flying a leg known to run into something cost the aircraft once.
         """
-        self._leg = []
-        self._blocked_target = False
-        target = (x, y, z)
         here = (self.pose.pose.position.x, self.pose.pose.position.y,
                 self.pose.pose.position.z)
-        # Decoded once, here, and used for every question this leg asks.
-        self.octree_tree = self._tree()
-        occ = self._occupancy()
-        if occ is None:
-            self.get_logger().warn(
-                "no occupancy map — flying the leg straight, unchecked",
-                throttle_duration_sec=20.0)
-            self._goto(x, y, z, yaw)
-            self._publish_plan([here, target], yaw)
-            return
-
-        # `path_hits_obstacle`, not `path_is_clear_inflated`. The strict
-        # version demands the whole leg be MEASURED empty, and in a
-        # half-explored arena almost no leg is — every one would be reported
-        # blocked, which is a warning that means nothing. What has to trigger a
-        # detour is something actually in the way.
-        if not octree.path_hits_obstacle(self.octree_tree, here, target):
-            self._goto(x, y, z, yaw)
-            self._publish_plan([here, target], yaw)
-            return
-
-        self.get_logger().warn(
-            f"the straight leg to ({x:.2f}, {y:.2f}) runs into the map — "
-            f"planning around it")
-        # allow_unknown=True, and this is a deliberate choice for THIS mission,
-        # not a default to carry into Phase 4. The fallback if planning fails
-        # is the straight line, which flies through unknown space without
-        # asking; so a plan that avoids what is known to be occupied and is
-        # otherwise willing to cross unknown is strictly better than what this
-        # mission did before there was a planner. Phase 4's confined space is
-        # where allow_unknown should be False and the map should be dense
-        # enough to afford it.
-        path = planner.plan(occ, here, target,
-                            resolution=self.octree_tree.getResolution(),
-                            bounds=self.plan_bounds,
-                            allow_unknown=self.plan_allow_unknown)
-        if path is None:
-            # The straight line is KNOWN to run into something and no way round
-            # it exists in the map. Flying it anyway was what this did, "relying
-            # on the supervisor" — and what that produced was the drone hitting
-            # a wall. There is no supervisor input in a 2 m leg at cruise.
-            #
-            # Refusing costs one target. Flying it costs the aircraft, and in
-            # the competition it costs the attempt.
-            # SAY WHAT IS THERE. "No way round" is a conclusion, not evidence,
-            # and it has already sent one confirmed base to the blacklist in an
-            # empty arena. These are the states A* actually saw.
-            raw = octree.query(self.octree_tree, (x, y, z))
-            infl = occ((x, y, z))
-            col = " ".join(
-                f"{zz:+.1f}:{octree.query(self.octree_tree, (x, y, zz))[:4]}"
-                for zz in (z - 0.6, z - 0.3, z, z + 0.3, z + 0.6))
+        leg = self.nav.plan(here, (x, y, z), yaw)
+        self._blocked_target = leg.blocked
+        self._publish_plan(leg.path, yaw)
+        if leg.blocked:
             self.get_logger().error(
-                f"({x:.2f}, {y:.2f}, {z:.2f}) is blocked and no way round it "
-                f"exists in the map — REFUSING the leg. Holding position. "
-                f"[goal raw={raw} inflated={infl} | column {col}]")
+                f"{leg.note} — REFUSING the leg. Holding position.")
             self._leg = []
             self._hold()
-            self._blocked_target = True
             return
-
-        path = planner.simplify(
-            path, lambda a, b: not octree.path_hits_obstacle(
-                self.octree_tree, a, b))
-        self.get_logger().info(
-            f"planned {len(path)} waypoints around the obstruction")
-        # path[0] is where we already are; the rest are the leg.
-        self._leg = [(p[0], p[1], p[2], yaw) for p in path[1:]]
-        self._publish_plan(path, yaw)
+        if len(leg.waypoints) > 1:
+            self.get_logger().warn(
+                f"the straight leg to ({x:.2f}, {y:.2f}) runs into the map — "
+                f"{leg.note}")
+        elif leg.note:
+            self.get_logger().warn(leg.note, throttle_duration_sec=20.0)
+        self._leg = list(leg.waypoints)
         wx, wy, wz, wyaw = self._leg.pop(0)
         self._goto(wx, wy, wz, wyaw)
-
-    def _occupancy(self):
-        """The map as a callable for the planner, already inflated, or None.
-
-        Inflated here rather than in the planner because the planner must not
-        know what an octree is — and because the radius is a property of the
-        airframe, which is this node's business.
-        """
-        if self.octree_tree is None:
-            return None
-        return lambda p: octree.inflated_state(self.octree_tree, p)
 
     def _hold(self, yaw: float | None = None):
         """Hold the current setpoint, optionally re-aiming the yaw."""
@@ -2087,19 +1983,10 @@ class Phase1MissionNode(Node):
         """The route, for RViz and for a human to check. Purely informational."""
         if self.pub_plan is None:
             return
-        path = Path()
-        path.header.stamp = self.get_clock().now().to_msg()
-        path.header.frame_id = (self.pose.header.frame_id
-                                if self.pose is not None else "map")
-        for p in points:
-            ps = PoseStamped()
-            ps.header = path.header
-            ps.pose.position.x, ps.pose.position.y = float(p[0]), float(p[1])
-            ps.pose.position.z = float(p[2])
-            ps.pose.orientation.z = math.sin(yaw / 2.0)
-            ps.pose.orientation.w = math.cos(yaw / 2.0)
-            path.poses.append(ps)
-        self.pub_plan.publish(path)
+        self.pub_plan.publish(path_msg(
+            points, yaw,
+            self.pose.header.frame_id if self.pose is not None else "map",
+            self.get_clock().now().to_msg()))
 
     def _do_travel(self):
         """Fly to the setpoint SELECT placed. One leg, one setpoint.
@@ -2479,22 +2366,12 @@ class Phase1MissionNode(Node):
             self._reject_target()
 
     def _height_over_pad(self) -> float:
-        """Camera height above the surface being centred on, in metres.
-
-        The pad's own `height` when the map has one (it is corrected from the
-        rangefinder on the first hover), else the arena floor. Never below a
-        floor of 0.2 m: a non-positive or absurdly small value would blow the
-        servo's scale up instead of down.
-        """
+        """Camera height above the pad being judged (see precision_landing)."""
+        pad = self._target_pad()
         z = self.pose.pose.position.z if self.pose is not None else 0.0
-        top = self.ground_z
-        if self.target_id is not None and self.pad_map is not None:
-            for pad in self.pad_map.pads:
-                if int(pad.id) == int(self.target_id):
-                    if pad.height_measured:
-                        top = float(pad.height)
-                    break
-        return max(z - top, 0.2)
+        top = (float(pad.height) if pad is not None and pad.height_measured
+               else None)
+        return pl.height_over_pad(z, top, self.ground_z)
 
     def _target_pad(self):
         """The map entry of the pad being confirmed, or None."""
@@ -2527,60 +2404,27 @@ class Phase1MissionNode(Node):
         return (speed <= self.settle_still_speed
                 and abs(self._vel.twist.angular.z) <= self.settle_still_yaw_rate)
 
-    def _target_uv_now(self):
-        """Where the pad must sit in the image for the VEHICLE to be over it.
-
-        The servo's own target is where the pad sits when the CAMERA is over
-        it. They are the same point only when the camera is on the axis.
-
-        The shift is computed at the CURRENT height on purpose: the camera
-        offset is a fixed distance in metres, and the number of pixels that
-        distance subtends shrinks as the vehicle comes down. fx and the height
-        are the same two quantities the centimetre budget uses.
-        """
-        u0, v0 = self._servo.target_uv
-        ox, oy = self._belly_offset
+    def _fx(self):
         info = self._sweep_cam_info
-        if (ox == 0.0 and oy == 0.0) or info is None:
-            return u0, v0
-        fx = float(info.k[0])
-        h = self._height_over_pad()
-        if fx <= 0.0 or h <= 0.0:
-            return u0, v0
-        # Body x is forward and the image's +v runs down the frame, which for a
-        # nadir camera is backwards along the body's x. Body y is right, and
-        # +u runs right. A camera AHEAD of the centre must therefore see the
-        # pad BEHIND image centre for the vehicle to be over it.
-        px_per_m = fx / h
-        return u0 - oy * px_per_m, v0 + ox * px_per_m
+        return float(info.k[0]) if info is not None else None
+
+    def _target_uv_now(self):
+        """Where the pad must sit in the image for the VEHICLE to be over it."""
+        fx = self._fx()
+        if fx is None:
+            return self._servo.target_uv
+        return pl.target_uv(self._servo.target_uv, self._belly_offset, fx,
+                            self._height_over_pad())
 
     def _centre_offset_px(self, det):
-        """How far the pad is from where it should sit in the image, in px."""
         if det is None:
             return None
-        u0, v0 = self._target_uv_now()
-        return math.hypot(float(det.u) - u0, float(det.v) - v0)
+        return pl.offset_px((float(det.u), float(det.v)), self._target_uv_now())
 
     def _centre_offset_cm(self, det):
-        """`_centre_offset_px` converted to centimetres on the ground.
-
-        Pinhole, with the two quantities that set the scale both measured
-        rather than assumed: `fx` comes from the belly CameraInfo, so a lens
-        swap needs no edit here, and the distance is the height over THIS pad's
-        top, not the altitude — a 1.6 m pad and a 0.12 m one are photographed
-        from very different distances during the same hover.
-
-        None when the CameraInfo has not arrived; the caller treats that as
-        "cannot judge" and does not veto on it.
-        """
-        off_px = self._centre_offset_px(det)
-        info = self._sweep_cam_info
-        if off_px is None or info is None:
-            return None
-        fx = float(info.k[0])
-        if fx <= 0.0:
-            return None
-        return off_px * (self._height_over_pad() / fx) * 100.0
+        """None when CameraInfo has not arrived: "cannot judge", no veto."""
+        return pl.offset_cm(self._centre_offset_px(det), self._fx(),
+                            self._height_over_pad())
 
     def _centre_on_pad(self, det):
         """Nudge the setpoint so the belly camera's pad moves to `target_uv`.
@@ -2615,9 +2459,7 @@ class Phase1MissionNode(Node):
             self._height_over_pad())
         if step is None:
             return
-        yaw = yaw_of(self.pose)
-        dx = step[0] * math.cos(yaw) - step[1] * math.sin(yaw)
-        dy = step[0] * math.sin(yaw) + step[1] * math.cos(yaw)
+        dx, dy = pl.body_to_world(step, yaw_of(self.pose))
         self.setpoint[0] += dx
         self.setpoint[1] += dy
         self.get_logger().info(

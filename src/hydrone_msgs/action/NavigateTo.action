@@ -1,0 +1,13 @@
+# Fly to `position` around whatever the occupancy map says is in the way.
+# Plans with hydrone_nav.navigator and flies each waypoint through the
+# controller's GoTo. A leg with no way round is REFUSED (result blocked).
+geometry_msgs/Point position
+float32 yaw              # rad, ENU
+float32 tolerance        # m; 0 -> default
+---
+bool success
+bool blocked
+string message
+---
+uint32 waypoint          # index being flown
+uint32 waypoints         # total

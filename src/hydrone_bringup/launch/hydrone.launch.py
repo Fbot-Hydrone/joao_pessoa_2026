@@ -86,7 +86,7 @@ def generate_launch_description():
 
     nav_node = Node(
         package    = "hydrone_nav",
-        executable = "nav_node",
+        executable = "nav_node_legacy",
         name       = "hydrone_nav",
         output     = "screen",
         parameters = [
