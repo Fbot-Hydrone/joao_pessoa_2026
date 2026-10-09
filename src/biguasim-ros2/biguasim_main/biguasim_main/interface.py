@@ -149,11 +149,23 @@ class BiguaSimInterface():
                 pass
         return seed
 
-    def _spawn_mesh(self, blueprint, x, y, z):
-        # Y INVERTIDO, como em spawn_bases (SpawnMesh usa o Y do mapa da UE).
+    def _spawn_mesh(self, blueprint, x, y, z, rpy_deg=None):
+        """SpawnMesh, com rotação opcional (roll, pitch, yaw) em GRAUS no
+        frame do sim.
+
+        Y INVERTIDO, como em spawn_bases: o SpawnMesh usa o Y do mapa da UE.
+        Espelhar Y também espelha os ângulos em torno de X e Z, então roll e
+        yaw trocam de sinal; pitch não. Precisa da engine com a rotação no
+        SpawnMesh (CustomCommand.cpp); numa engine antiga os três números a
+        mais são ignorados e o objeto nasce sem rotação.
+        """
+        nums = [x, -y, z]
+        if rpy_deg is not None:
+            roll, pitch, yaw = rpy_deg
+            nums += [-roll, pitch, -yaw]
         self.env.send_world_command(
             "CustomCommand", string_params=["SpawnMesh", blueprint],
-            num_params=[x, -y, z])
+            num_params=nums)
 
     def spawn_phase2(self, cfg):
         """Fase 2: 3 coletas no topo do bloco com um kit cada, 3 entregas.
@@ -178,11 +190,16 @@ class BiguaSimInterface():
         kit_bp = cfg.get('kit_blueprint', KIT_BLUEPRINT)
 
         pickups, deliveries = [], []
-        for x, y, z in lay['pickup']:
+        kit_yaw = float(lay.get('kit_yaw_deg', 0.0))
+        for pk in lay['pickup']:
+            x, y, z = pk[:3]
             wx, wy = world(x, y)
             self._spawn_mesh(cfg['blueprint'], wx, wy, z)
+            # Yaw do kit no frame da ARENA (4o valor da coleta, ou kit_yaw_deg).
+            # Arena -> mundo do sim é uma rotação de 180 graus.
+            yaw = (pk[3] if len(pk) > 3 else kit_yaw) + 180.0
             # Um pouco acima do topo: o kit tem física e assenta sozinho.
-            self._spawn_mesh(kit_bp, wx, wy, z + 0.15)
+            self._spawn_mesh(kit_bp, wx, wy, z + 0.15, (0.0, 0.0, yaw))
             pickups.append((wx, wy, z))
         for d in lay['delivery']:
             z = d[2] if len(d) > 2 else rng.uniform(z_lo, z_hi)
@@ -197,16 +214,22 @@ class BiguaSimInterface():
                 f"fase 2 spawnada (seed {seed}): coletas+kits {fmt(pickups)} | "
                 f"entregas {fmt(deliveries)}")
 
-    def gripper(self, close: bool, agent_name: str):
+    def gripper(self, close: bool, agent_name: str, reach_cm=None):
         """Abre/fecha a garra do agente. CHAMAR SÓ DA THREAD DO SIMULADOR.
 
         Mesmo canal do SpawnMesh (CustomCommand), sem comando novo na engine.
         O agente vai com o sufixo do batch ('uav0-id0'): é assim que o AgentMap
         da UE o guarda (bs-drone-competition 811ffe7c).
         """
+        nums = [1.0 if close else 0.0]
+        if reach_cm is not None:
+            # Reach Offset do volume de pega, em cm (UE). O drone pousa COM O
+            # KIT ENTRE AS PERNAS, e o volume padrão fica acima dele: o POC
+            # mediu -12 cm (5 da origem do componente + ~7 da altura do kit).
+            nums += [float(v) for v in reach_cm]
         self.env.send_world_command(
             "CustomCommand", string_params=["Gripper", agent_name + "-id0"],
-            num_params=[1.0 if close else 0.0])
+            num_params=nums)
 
     def _get_agent_id(self, agent_name : str):
         split = agent_name.find('_')

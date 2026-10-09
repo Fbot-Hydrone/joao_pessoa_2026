@@ -110,6 +110,11 @@ class ArduBridgeNode(Node):
         self._world_cmds = collections.deque()
         self._agent_name = agent_cfg['agent_name']
         self._gripper_closed = False
+        # Reach Offset (cm) mandado com todo comando da garra; ver
+        # interface.gripper. [] = usar o padrão do blueprint.
+        self.declare_parameter('gripper_reach_cm', [0.0, 0.0, -12.0])
+        reach = list(self.get_parameter('gripper_reach_cm').value)
+        self._gripper_reach = reach if len(reach) == 3 else None
         # Mesma interface que gripper_dynamixel_node oferece no drone real.
         ActionServer(self, Gripper, '/hydrone/gripper/command',
                      self._exec_gripper,
@@ -194,7 +199,7 @@ class ArduBridgeNode(Node):
         done = threading.Event()
 
         def apply():
-            self.interface.gripper(close, self._agent_name)
+            self.interface.gripper(close, self._agent_name, self._gripper_reach)
             done.set()
         self._world_cmds.append(apply)
         res = Gripper.Result()

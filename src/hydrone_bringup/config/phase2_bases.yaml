@@ -12,7 +12,13 @@
 #   ardubridge (sim)     spawna bases e kits; mundo do sim = (4 - x, 4 - y)
 takeoff: [1.03, 0.75]
 
+# Yaw dos kits, graus, frame da arena (so o SIMULADOR usa: na prova a
+# organizacao poe o kit como quiser). Um 4o valor numa coleta sobrescreve.
+# Precisa da engine com rotacao no SpawnMesh (CustomCommand.cpp).
+kit_yaw_deg: 90.0
+
 # Coletas: no topo do bloco da Fase 4, um kit em cada. z = topo da base.
+#   [x, y, z_topo]  ou  [x, y, z_topo, yaw_do_kit]
 pickup:
   - [3.21, 1.35, 1.6]
   - [4.73, 1.35, 1.6]
