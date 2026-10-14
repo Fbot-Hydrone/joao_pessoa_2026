@@ -1,0 +1,19 @@
+# Real drone: the distance_sensor plugin PUBLISHES the downward rangefinder.
+#
+# The sensor is the range half of the DroneCAN optical-flow module
+# (RNGFND1_TYPE=24, FLOW_TYPE=6), facing down (RNGFND1_ORIENT=25, PITCH_270).
+# ArduPilot forwards it as DISTANCE_SENSOR id 0. MAVROS' stock apm_config names
+# that publisher `rangefinder_pub`; the stack reads
+# /mavros/distance_sensor/rangefinder in both worlds, so it is renamed here.
+# The key must be PRIVATE (~/): this MAVROS resolves a bare name against the
+# /mavros namespace, which would publish /mavros/rangefinder instead.
+# The sim counterpart is mavros_distance_sensor.yaml (SUBSCRIBER mode).
+/**/distance_sensor:
+  ros__parameters:
+    config: |
+      ~/rangefinder:
+        id: 0
+        frame_id: "rangefinder_link"
+        field_of_view: 0.1
+        send_tf: false
+        sensor_position: {x: 0.0, y: 0.0, z: -0.05}

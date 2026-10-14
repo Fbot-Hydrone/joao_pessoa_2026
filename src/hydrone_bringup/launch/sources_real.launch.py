@@ -34,10 +34,11 @@ What differs from sim (sources only, never autonomy)
     produces the images, the depth, the cloud and its own visual tracking.
   - down_cam_usb_node replaces down_cam_mimic_node and carries the mount TF the
     mimic used to provide.
-  - The VL53L1X is wired over I2C into the Pixhawk. ArduPilot reads it natively
-    and MAVROS PUBLISHES /mavros/distance_sensor/* — which is why there is no
-    rangefinder_bridge here, and why mavros_distance_sensor.yaml (which puts
-    that plugin in SUBSCRIBER mode) is sim-only.
+  - The downward rangefinder is the range half of the DroneCAN optical-flow
+    module on the Pixhawk's CAN bus. ArduPilot reads it natively and MAVROS
+    PUBLISHES /mavros/distance_sensor/rangefinder (mavros_distance_sensor_real
+    .yaml) — which is why there is no rangefinder_bridge here, and why
+    mavros_distance_sensor.yaml (SUBSCRIBER mode) is sim-only.
   - vision_odom_bridge is AGNOSTIC and runs in both worlds, unchanged.
 
 Why zed_sdk_node and not zed_wrapper
@@ -63,7 +64,8 @@ BEFORE THE FIRST FLIGHT
   * Measure down_cam_mount_xyz / down_cam_mount_rpy_deg on the airframe. The
     defaults are the SIMULATED mount, which is a starting point and not your
     drone.
-  * Check fcu_url matches how the Pixhawk is actually wired.
+  * Check fcu_url matches how the Pixhawk is actually wired (Ethernet
+    by default).
 """
 
 import os
@@ -85,10 +87,16 @@ def generate_launch_description():
     args = [
         # ── Flight controller ───────────────────────────────────────────────
         DeclareLaunchArgument(
-            "fcu_url", default_value="/dev/ttyTHS1:921600",
-            description="How MAVROS reaches the Pixhawk. Serial on the Jetson's "
-                        "UART by default; use /dev/ttyACM0:921600 for USB, or a "
-                        "udp:// URL for a companion link."),
+            "fcu_url",
+            default_value="udp://192.168.144.100:14550@192.168.144.14:14550",
+            description="How MAVROS reaches the Pixhawk. Ethernet by default: "
+                        "the Pixhawk 6X is 192.168.144.14 (NET_P1 = MAVLink "
+                        "UDP server on 14550) and the Orin's enP8p1s0 is "
+                        "192.168.144.100 (NetworkManager profile `pixhawk`). "
+                        "The Pixhawk only streams once it has heard from us, "
+                        "which the remote half of this URL does. Use "
+                        "/dev/ttyTHS1:921600 for the UART or "
+                        "/dev/ttyACM0:921600 for USB."),
         DeclareLaunchArgument("gcs_url", default_value=""),
 
         # ── Forward ZED ─────────────────────────────────────────────────────
@@ -123,18 +131,18 @@ def generate_launch_description():
         # ── Belly camera ────────────────────────────────────────────────────
         DeclareLaunchArgument(
             "down_cam_device",
-            default_value="/dev/v4l/by-path/"
-                          "platform-70090000.xusb-usb-0:2.2:1.0-video-index0",
-            description="The belly camera, addressed BY USB PORT rather than "
-                        "as /dev/videoN. Enumeration order is not stable: the "
-                        "C270 and the ZED both register V4L2 nodes, and after "
-                        "a reboot or a replug the ZED can take video0 — which "
-                        "would feed stereo side-by-side frames to the pad "
+            default_value="/dev/v4l/by-id/"
+                          "usb-046d_0825_7F0905D0-video-index0",
+            description="The belly camera, addressed BY SERIAL NUMBER rather "
+                        "than as /dev/videoN. Enumeration order is not stable: "
+                        "the C270 and the ZED both register V4L2 nodes, and "
+                        "after a reboot or a replug the ZED can take video0 — "
+                        "which would feed stereo side-by-side frames to the pad "
                         "detector with nothing reporting an error. This path "
-                        "is the port on the airframe, so it survives swapping "
-                        "the camera for another C270. It does NOT survive "
-                        "moving it to a different USB socket: re-read "
-                        "`ls -l /dev/v4l/by-path/` if you do."),
+                        "is THIS C270 (serial 7F0905D0), so it survives moving "
+                        "it to any USB socket on the Orin. It does NOT survive "
+                        "swapping the camera: re-read `ls -l /dev/v4l/by-id/` "
+                        "if you do."),
         DeclareLaunchArgument("down_cam_width", default_value="640"),
         DeclareLaunchArgument("down_cam_height", default_value="480"),
         DeclareLaunchArgument("down_cam_fps", default_value="15"),
@@ -243,9 +251,9 @@ def generate_launch_description():
     #
     #   mavros_distance_sensor.yaml — puts the distance_sensor plugin in
     #     SUBSCRIBER mode so rangefinder_bridge can feed SITL. On the drone the
-    #     plugin PUBLISHES /mavros/distance_sensor/* from the VL53L1X that
-    #     ArduPilot read over I2C, which is what the autonomy layer reads in
-    #     both worlds.
+    #     plugin PUBLISHES /mavros/distance_sensor/rangefinder from the
+    #     optical-flow module's rangefinder (mavros_distance_sensor_real.yaml),
+    #     which is what the autonomy layer reads in both worlds.
     #   timeouts.yaml — widens MAVROS's steady-clock command timeouts because
     #     BiguaSim runs below real time. Real time runs at real time.
     mavros = Node(
@@ -255,6 +263,8 @@ def generate_launch_description():
         parameters=[
             os.path.join(mavros_share, "launch", "apm_pluginlists.yaml"),
             os.path.join(mavros_share, "launch", "apm_config.yaml"),
+            os.path.join(bringup_pkg, "config",
+                         "mavros_distance_sensor_real.yaml"),
             {
                 "fcu_url": LaunchConfiguration("fcu_url"),
                 "gcs_url": LaunchConfiguration("gcs_url"),
