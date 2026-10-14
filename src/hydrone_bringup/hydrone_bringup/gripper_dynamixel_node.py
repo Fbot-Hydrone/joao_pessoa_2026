@@ -61,6 +61,18 @@ class GripperDynamixelNode(Node):
         self.pkt = PacketHandler(1.0)
         if not (self.port_h.openPort() and self.port_h.setBaudRate(self.baud)):
             raise RuntimeError(f"cannot open {self.port} at {self.baud}")
+        # Opening the port toggles DTR, which RESETS an ArbotiX-M bridge. Stay
+        # SILENT through its ~2 s bootloader window -- bytes arriving then keep
+        # it in the bootloader and the firmware never starts -- and then wait
+        # for the servo to answer before the setup writes below.
+        time.sleep(3.0)
+        deadline = time.monotonic() + 10.0
+        while self.pkt.read2ByteTxRx(
+                self.port_h, self.dxl_id, ADDR_PRESENT_POSITION)[1] != 0:
+            if time.monotonic() > deadline:
+                raise RuntimeError(
+                    f"AX-12A id {self.dxl_id} not answering on {self.port}")
+            time.sleep(0.2)
         self._w2(ADDR_TORQUE_LIMIT, self.torque_limit)
         self._w2(ADDR_MOVING_SPEED, self.speed)
         self._w1(ADDR_TORQUE_ENABLE, 1)
@@ -73,17 +85,32 @@ class GripperDynamixelNode(Node):
             f"open {self.open_pos}, closed {self.closed_pos}")
 
     # ── raw register access ─────────────────────────────────────────────────
+    # Retried: through an ArbotiX-M bridge an occasional packet goes missing
+    # (its parser falls out of step when polled hard), and an unchecked
+    # failure reads as position 0 or a goal that was never sent.
+    def _txrx(self, fn, *args):
+        for _ in range(3):
+            out = fn(self.port_h, self.dxl_id, *args)
+            if out[-2 if len(out) == 3 else 0] == 0:   # COMM_SUCCESS
+                return out
+            self.port_h.clearPort()
+            time.sleep(0.05)
+        self.get_logger().warn(
+            f"AX-12A id {self.dxl_id}: no answer after 3 tries",
+            throttle_duration_sec=2.0)
+        return out
+
     def _w1(self, addr, v):
-        self.pkt.write1ByteTxRx(self.port_h, self.dxl_id, addr, int(v))
+        self._txrx(self.pkt.write1ByteTxRx, addr, int(v))
 
     def _w2(self, addr, v):
-        self.pkt.write2ByteTxRx(self.port_h, self.dxl_id, addr, int(v))
+        self._txrx(self.pkt.write2ByteTxRx, addr, int(v))
 
     def _r1(self, addr):
-        return self.pkt.read1ByteTxRx(self.port_h, self.dxl_id, addr)[0]
+        return self._txrx(self.pkt.read1ByteTxRx, addr)[0]
 
     def _r2(self, addr):
-        return self.pkt.read2ByteTxRx(self.port_h, self.dxl_id, addr)[0]
+        return self._txrx(self.pkt.read2ByteTxRx, addr)[0]
 
     def _load(self):
         return self._r2(ADDR_PRESENT_LOAD) & 0x3FF   # magnitude, drop direction
@@ -100,7 +127,7 @@ class GripperDynamixelNode(Node):
             span = max(abs(self.closed_pos - self.open_pos), 1)
             gh.publish_feedback(Gripper.Feedback(
                 position=abs(pos - self.open_pos) / span))
-            time.sleep(0.05)
+            time.sleep(0.2)   # an ArbotiX bridge drops packets polled faster
         pos, load = self._r2(ADDR_PRESENT_POSITION), self._load()
         res = Gripper.Result(success=True)
         if close:

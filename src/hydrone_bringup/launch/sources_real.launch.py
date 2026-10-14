@@ -289,8 +289,16 @@ def generate_launch_description():
 
     # ── Payload gripper (Phase 2) — Dynamixel AX-12A ───────────────────────
     # Serves /hydrone/gripper/command, the same action ardubridge_node serves
-    # in sim. Off by default: Phase 1 flies without it. Positions and torque
-    # are PROVISIONAL until calibrated on the hardware.
+    # in sim. Off by default: Phase 1 flies without it.
+    #
+    # The servo is reached through an ArbotiX-M running the official ArbotiX
+    # "ros" firmware: 115200 baud on the USB side, and it passes servo
+    # READ/WRITE packets through to the 1 Mbps Dynamixel bus. Positions were
+    # measured by hand on 2026-10-14 (joint mode, CW 0 / CCW 1023): closed 765,
+    # open 254 (opening is clockwise = decreasing). The cam disc was remounted
+    # so the whole travel sits inside the AX-12A's 0..300 deg sensing range;
+    # mounted across its dead zone, the servo reads 0/1023 and loses itself.
+    # The targets keep 10 ticks off each mechanical stop.
     gripper = Node(
         package="hydrone_bringup",
         executable="gripper_dynamixel_node",
@@ -298,11 +306,18 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration("gripper")),
         parameters=[{
             "port": LaunchConfiguration("gripper_port"),
+            "baudrate": 115200,
+            "open_position": 264,
+            "closed_position": 755,
         }],
     )
 
     return LaunchDescription(args + [
         DeclareLaunchArgument("gripper", default_value="false",
                               description="Start the AX-12A gripper (Phase 2)."),
-        DeclareLaunchArgument("gripper_port", default_value="/dev/ttyUSB0"),
+        DeclareLaunchArgument(
+            "gripper_port",
+            default_value="/dev/serial/by-id/"
+                          "usb-FTDI_FT232R_USB_UART_AK06RLGW-if00-port0",
+            description="The ArbotiX-M's FTDI cable, by serial number."),
         zed, down_cam, mavros, vision_odom, gripper])
