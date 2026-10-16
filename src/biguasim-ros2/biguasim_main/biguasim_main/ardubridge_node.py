@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
 import collections
+import os
 import threading
+import time
 import rclpy
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -115,6 +117,18 @@ class ArduBridgeNode(Node):
         self.declare_parameter('gripper_reach_cm', [0.0, 0.0, -12.0])
         reach = list(self.get_parameter('gripper_reach_cm').value)
         self._gripper_reach = reach if len(reach) == 3 else None
+        # O BiguaSim não tem sensor de pega, mas a garra da engine escreve no
+        # log o que fez ("UGripperComponent: picked up <kit>", "released").
+        # Lido logo após cada comando, vira o `holding` que o AX-12A dá no
+        # real (posição + carga) — a missão usa o mesmo caminho nos dois.
+        # MEDIDO 2026-10-16: com `holding` = comando, 11 de 18 "pegas" foram
+        # no ar e a missão "entregou" kits que não carregava.
+        self.declare_parameter('engine_log', os.path.expanduser(
+            '~/.local/share/biguasim/1.0.0/worlds/Competition/Linux/'
+            'Biguasim/Saved/Logs/HolodeckLog.txt'))
+        self.declare_parameter('grasp_wait_s', 3.0)
+        self._engine_log = self.get_parameter('engine_log').value
+        self._grasp_wait = self.get_parameter('grasp_wait_s').value
         # Mesma interface que gripper_dynamixel_node oferece no drone real.
         ActionServer(self, Gripper, '/hydrone/gripper/command',
                      self._exec_gripper,
@@ -189,14 +203,13 @@ class ArduBridgeNode(Node):
             bridge.close()
 
     def _exec_gripper(self, gh):
-        """Fecha/abre a garra no simulador e espera o comando ser aplicado.
-
-        Não há sensor de pega no BiguaSim: `holding` repete o comando. Quem
-        precisa saber se pegou de verdade confirma por visão (kit sumiu da
-        base) — phase2_mission_node faz isso.
-        """
+        """Fecha/abre a garra no simulador; `holding` vem do log da engine."""
         close = bool(gh.request.close)
         done = threading.Event()
+        try:
+            log_at = os.path.getsize(self._engine_log)
+        except OSError:
+            log_at = None
 
         def apply():
             self.interface.gripper(close, self._agent_name, self._gripper_reach)
@@ -209,10 +222,37 @@ class ArduBridgeNode(Node):
             return res
         self._gripper_closed = close
         gh.publish_feedback(Gripper.Feedback(position=1.0 if close else 0.0))
-        res.success, res.holding = True, close
-        res.message = "closed (sim: no grasp sensor)" if close else "opened"
+        res.success = True
+        if log_at is None:
+            res.holding = close
+            res.message = ("closed (engine log not found: holding UNKNOWN)"
+                           if close else "opened")
+        else:
+            res.holding, res.message = self._engine_grasp(close, log_at)
         gh.succeed()
         return res
+
+    def _engine_grasp(self, close, log_at):
+        """(holding, message) from the engine log lines after `log_at`.
+
+        The attach shows up ~1 s after the command; a close on a kit already
+        held logs only "segurando: <kit>".
+        """
+        new = ""
+        deadline = time.monotonic() + self._grasp_wait
+        while time.monotonic() < deadline:
+            with open(self._engine_log, 'rb') as fh:
+                fh.seek(log_at)
+                new = fh.read().decode('utf-8', 'replace')
+            if close and ("picked up" in new
+                          or "segurando: BP_" in new):
+                return True, "closed — HOLDING (engine: picked up)"
+            if not close and ("released" in new or "segurando: nada" in new):
+                break
+            time.sleep(0.2)
+        if close:
+            return False, "closed — EMPTY (engine: nothing in reach)"
+        return False, "opened"
 
     def _publish_clock(self, sim_time):
         msg = Clock()

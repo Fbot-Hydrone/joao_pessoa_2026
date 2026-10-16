@@ -49,6 +49,7 @@ from hydrone_controller.gripper import Gripper
 from hydrone_controller.vehicle import Job, Vehicle
 from hydrone_nav import route
 from hydrone_nav.arena import arena_to_map, load_layout
+from hydrone_nav import precision_landing as pl
 from hydrone_nav.precision_landing import body_to_world
 from hydrone_nav.visual_descent import LOST, READY, VisualDescent
 
@@ -109,7 +110,7 @@ class Phase2MissionNode(Node):
         self.pick_retries = p("pick_retries", 1)
         # How a grab is confirmed:
         #   "gripper" — the Gripper result's `holding` (the AX-12A measures it
-        #               by load; the sim reports the command). Default.
+        #               by load; the sim reads the engine log). Default.
         #   "vision"  — hover over the pickup and check the kit left the base.
         #               Needs a kit detector that does not fire on the base's
         #               reflections: the current 'lipo' model does (2026-10-09
@@ -129,6 +130,12 @@ class Phase2MissionNode(Node):
             fine_px=p("visual_fine_px", 40.0),
             gain=p("visual_gain", 0.6),
             axes=tuple(p("visual_axes", [-1.0, -1.0])))
+        self._centre_uv = self.descend.target_uv
+        # Belly camera position from the vehicle centre, m, body [x forward,
+        # y right] — same convention as phase 1's belly_offset_xy. The real
+        # drone moves the webcam off the gripper's axis so the carried kit
+        # does not cover the base (2026-10-16); the sim camera is on the axis.
+        self.belly_offset = tuple(p("belly_offset_xy", [0.0, 0.0]))
 
         self.vehicle = Vehicle(self)
         self.gripper = Gripper(self)
@@ -337,12 +344,14 @@ class Phase2MissionNode(Node):
     def _do_descend(self):
         """Centre on the KIT (pickup) or the BASE (delivery) while descending."""
         kind, tx, ty = self.target
+        h = self.range_m if self.range_m is not None else self.cruise
         if kind == "pickup":
             dets = [(u, v) for u, v, _ in self.kits.fresh(self.fresh_s)]
         else:
             dets = [(u, v) for u, v, _ in self.bases.fresh(self.fresh_s)
                     + self.rings.fresh(self.fresh_s)]
-        h = self.range_m if self.range_m is not None else self.cruise
+        self.descend.target_uv = pl.target_uv(self._centre_uv, self.belly_offset,
+                                              self.fx or 0.0, h)
         if kind == "delivery" and (not dets or self._give_up_visual):
             # The kit covers the middle of the image: from cruise the ring is
             # smaller than the kit and stays hidden until ~1.6 m (MEASURED

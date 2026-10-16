@@ -3,8 +3,9 @@
 bool close               # true = close (grab), false = open (release)
 ---
 bool success             # the command was carried out
-bool holding             # something is in the gripper (UNKNOWN in sim: no
-                         # grasp sensor there, so it reports `close`)
+bool holding             # something is in the gripper. Real: the AX-12A
+                         # stopped short with load. Sim: the engine logged
+                         # "picked up" (ardubridge reads HolodeckLog)
 string message
 ---
 float32 position         # 0 = fully open, 1 = fully closed

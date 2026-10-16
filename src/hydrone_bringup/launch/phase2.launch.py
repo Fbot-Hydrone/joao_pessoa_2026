@@ -21,6 +21,7 @@ simulator sources under it.
 Positions: hydrone_bringup/config/phase2_bases.yaml (arena frame, Figure 7).
 """
 import os
+from typing import List
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -44,6 +45,9 @@ def generate_launch_description():
                               description="Rotacao arena->map. Sim: -90."),
         DeclareLaunchArgument("cruise_alt", default_value="2.5"),
         DeclareLaunchArgument("mission_budget_s", default_value="600.0"),
+        # Belly webcam from the vehicle centre, m [x forward, y right]. Real
+        # drone: measure the mount. Sim: on the axis.
+        DeclareLaunchArgument("belly_offset_xy", default_value="[0.0, 0.0]"),
         DeclareLaunchArgument("debug", default_value="false"),
     ]
     ignore = [0.75, 0.0, 1.0, 0.22, 0.0, 0.78, 0.16, 1.0]   # airframe in frame
@@ -112,6 +116,9 @@ def generate_launch_description():
                 LaunchConfiguration("cruise_alt"), value_type=float),
             "mission_budget_s": ParameterValue(
                 LaunchConfiguration("mission_budget_s"), value_type=float),
+            "belly_offset_xy": ParameterValue(
+                LaunchConfiguration("belly_offset_xy"),
+                value_type=List[float]),
         }])
 
     rqt = Node(package="rqt_image_view", executable="rqt_image_view",
