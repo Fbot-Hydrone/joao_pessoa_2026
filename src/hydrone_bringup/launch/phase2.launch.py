@@ -15,6 +15,7 @@ simulator sources under it.
   map_odom             map -> odom TF
   pad_detector_down    the BASES (YOLO base_pouso) — delivery descent
   kit_detector         the KITS (YOLO 'lipo') — pickup descent + verify
+  ring_detector        the base's yellow RING — delivery fallback (kit hides it)
   phase2_mission_node  the strategy
 
 Positions: hydrone_bringup/config/phase2_bases.yaml (arena frame, Figure 7).
@@ -96,6 +97,10 @@ def generate_launch_description():
     kits = detector("kit_detector", "kit", "lipo_seg_yolo11.pt",
                     ["lipo"], "/hydrone/kits/detections", 960, 0.50)
 
+    # Delivery fallback: the base's yellow ring around the carried kit.
+    rings = Node(package="hydrone_vision", executable="ring_detector_node",
+                 name="ring_detector", output="screen")
+
     mission = Node(
         package="hydrone_mission", executable="phase2_mission_node",
         name="phase2_mission", output="screen",
@@ -114,4 +119,4 @@ def generate_launch_description():
                condition=IfCondition(LaunchConfiguration("debug")))
 
     return LaunchDescription(args + [controller, nav, cloud_filter, octomap,
-                                     map_odom, bases, kits, mission, rqt])
+                                     map_odom, bases, kits, rings, mission, rqt])
