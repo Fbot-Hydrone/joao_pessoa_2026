@@ -47,7 +47,7 @@ exporta `ARENA_PHASE=2`, que faz o ardubridge spawnar o layout da Fase 2.
 | `hydrone_controller/gripper.py` | Cliente `Gripper.close()/open()` → Job, como o `Vehicle` |
 | `biguasim_main` (ardubridge + interface.py) | Sim: spawna bases e kits (`ARENA_PHASE=2`) e serve a ação da garra |
 | `hydrone_bringup/gripper_dynamixel_node.py` | Real: AX-12A (Protocol 1.0, U2D2). `sources_real.launch.py gripper:=true` |
-| `hydrone_vision/models/lipo_seg_yolo11.pt` | YOLO do kit (detecção, classe `lipo`) |
+| `hydrone_vision/models/lipo_mix_yolo11s.pt` | YOLO do kit (detecção, classe `lipo`): yolo11s treinado com o sim + 128 fotos reais da C270 (2026-10-27). Dataset em `~/Documents/kit_dataset_mix` |
 
 ## 4. A máquina de estados
 

@@ -98,7 +98,7 @@ def generate_launch_description():
 
     bases = detector("pad_detector_down", "down", "pad_seg_yolo11.pt",
                      ["base_pouso"], "/hydrone/pads/down/detections", 640, 0.30)
-    kits = detector("kit_detector", "kit", "lipo_seg_yolo11.pt",
+    kits = detector("kit_detector", "kit", "lipo_mix_yolo11s.pt",
                     ["lipo"], "/hydrone/kits/detections", 960, 0.50)
 
     # Delivery fallback: the base's yellow ring around the carried kit.
