@@ -12,6 +12,18 @@
 #   ardubridge (sim)     spawna bases e kits; mundo do sim = (4 - x, 4 - y)
 takeoff: [1.03, 0.75]
 
+# Qualquer posicao abaixo (e o takeoff) aceita, no lugar de metros, um indice
+# do GRID do chao -- se a organizacao der "a base fica no quadrado X":
+#   - {grid: [col, lin]}                 entrega
+#   - {grid: [col, lin], z: 1.6}         coleta (yaw opcional: yaw: 90)
+# Indice 0 = canto da arena junto da decolagem. centre: node poe a base no
+# CRUZAMENTO das linhas col e lin (como a Figura 7 desenha: base A = [9, 14]);
+# centre: cell, no meio do quadrado [col, lin]. Ajustar no dia se preciso.
+grid:
+  step_m: 0.5
+  origin_m: [0.0, 0.0]
+  centre: node
+
 # Yaw dos kits, graus, frame da arena (so o SIMULADOR usa: na prova a
 # organizacao poe o kit como quiser). Um 4o valor numa coleta sobrescreve.
 # Precisa da engine com rotacao no SpawnMesh (CustomCommand.cpp).

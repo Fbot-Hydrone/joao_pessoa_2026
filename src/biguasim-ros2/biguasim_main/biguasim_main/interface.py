@@ -181,8 +181,12 @@ class BiguaSimInterface():
         path = os.environ.get('PHASE2_LAYOUT') or os.path.join(
             get_package_share_directory('hydrone_bringup'),
             'config', 'phase2_bases.yaml')
+        from hydrone_nav.arena import load_layout
         with open(path) as f:
-            lay = yaml.safe_load(f)
+            raw = yaml.safe_load(f)
+        # Pela mesma funcao da missao: as entradas podem vir em grid.
+        layout = load_layout(path)
+        lay = dict(raw, pickup=layout.pickup, delivery=layout.delivery)
         seed = self._seed(cfg)
         rng = random.Random(seed)
         z_lo, z_hi = lay.get('delivery_z_range', [0.0, 1.5])
