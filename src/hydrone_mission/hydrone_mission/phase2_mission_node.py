@@ -125,6 +125,16 @@ class Phase2MissionNode(Node):
         self.pickup_touch = p("pickup_touch", True)
         self.touch_range = p("touch_range_m", 0.22)
         self.touch_timeout = p("touch_timeout_s", 20.0)
+        # Keep correcting the touch point by camera on the way down. The fix
+        # taken at 1.2 m comes from ONE frame and missed the kit by 25-54 cm
+        # (2026-10-16/27: a reflection picked, or the vehicle drifting below).
+        # Between these heights the reflections are gone and the kit is still
+        # whole in the frame (MEASURED 2026-10-16: one detection below ~0.9 m,
+        # the kit overflows the image under ~0.35 m).
+        self.touch_track_max_h = p("touch_track_max_m", 0.9)
+        self.touch_track_min_h = p("touch_track_min_m", 0.35)
+        self.touch_track_gate = p("touch_track_gate_m", 0.35)
+        self.touch_track_gain = p("touch_track_gain", 0.5)
         self.descend = VisualDescent(
             descend_to_m=p("visual_descend_to_m", 1.2),
             fine_px=p("visual_fine_px", 40.0),
@@ -426,8 +436,34 @@ class Phase2MissionNode(Node):
         p = self.pose.pose.position
         return p.x + wx, p.y + wy
 
+    def _track_kit(self):
+        """Pull the touch point towards the kit seen in the newest frame."""
+        h = self.range_m
+        if (h is None or not self.touch_track_min_h <= h <= self.touch_track_max_h
+                or self.kits.stamp == self._used_stamp):
+            return
+        self._used_stamp = self.kits.stamp
+        self.descend.target_uv = pl.target_uv(self._centre_uv, self.belly_offset,
+                                              self.fx or 0.0, h)
+        kx, ky = self._touch_xy
+        seen = [self._kit_world_xy((u, v), h)
+                for u, v, _ in self.kits.fresh(self.fresh_s)]
+        seen = [w for w in seen
+                if math.hypot(w[0] - kx, w[1] - ky) <= self.touch_track_gate]
+        if not seen:
+            return
+        wx, wy = min(seen, key=lambda w: math.hypot(w[0] - kx, w[1] - ky))
+        g = self.touch_track_gain
+        self._touch_xy = (kx + g * (wx - kx), ky + g * (wy - ky))
+        self.get_logger().info(
+            f"pickup: kit at {h:.2f} m is {math.hypot(wx - kx, wy - ky) * 100:.0f}"
+            " cm from the touch point — correcting",
+            throttle_duration_sec=0.5)
+
     def _do_touch(self):
         """Descend on the kit's XY under position control; grab near contact."""
+        if self._job is None:
+            self._track_kit()
         kx, ky = self._touch_xy
         p = self.pose.pose.position
         touched = (self.range_m is not None

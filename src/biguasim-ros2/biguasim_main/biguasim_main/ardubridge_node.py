@@ -117,6 +117,14 @@ class ArduBridgeNode(Node):
         self.declare_parameter('gripper_reach_cm', [0.0, 0.0, -12.0])
         reach = list(self.get_parameter('gripper_reach_cm').value)
         self._gripper_reach = reach if len(reach) == 3 else None
+        # Meio-tamanho da caixa de pega (cm, UE). O padrão do blueprint
+        # (12, 7, 7) exige o kit a ~10 cm do centro; no real as mandíbulas
+        # puxam pro meio qualquer kit entre as pernas. PROVISÓRIO até medir o
+        # vão do trem de pouso. Precisa da engine de 2026-10-27 (CustomCommand
+        # aceita o extent); [] = usar o do blueprint.
+        self.declare_parameter('gripper_extent_cm', [20.0, 15.0, 7.0])
+        extent = list(self.get_parameter('gripper_extent_cm').value)
+        self._gripper_extent = extent if len(extent) == 3 else None
         # O BiguaSim não tem sensor de pega, mas a garra da engine escreve no
         # log o que fez ("UGripperComponent: picked up <kit>", "released").
         # Lido logo após cada comando, vira o `holding` que o AX-12A dá no
@@ -212,7 +220,8 @@ class ArduBridgeNode(Node):
             log_at = None
 
         def apply():
-            self.interface.gripper(close, self._agent_name, self._gripper_reach)
+            self.interface.gripper(close, self._agent_name, self._gripper_reach,
+                                   self._gripper_extent)
             done.set()
         self._world_cmds.append(apply)
         res = Gripper.Result()
