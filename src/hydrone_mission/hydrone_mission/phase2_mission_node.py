@@ -108,6 +108,11 @@ class Phase2MissionNode(Node):
         self.verify_max_px = p("verify_max_radius_px", 45.0)
         self.verify_centre_px = p("verify_centre_px", 160.0)
         self.pick_retries = p("pick_retries", 1)
+        # Pickup, kit lost on the way down: climb back to cruise over the known
+        # position and look again this many times before going in blind.
+        self.takeoff_ok_range = p("takeoff_ok_range_m", 0.7)
+        self.reacquire_max = p("reacquire_max", 2)
+        self._reacquires = 0
         # How a grab is confirmed:
         #   "gripper" — the Gripper result's `holding` (the AX-12A measures it
         #               by load; the sim reads the engine log). Default.
@@ -298,7 +303,13 @@ class Phase2MissionNode(Node):
             return
         if not self._job.done:
             return
-        if self._job.ok:
+        # ArduPilot climbs to `climb` over the surface under the rangefinder, so
+        # from a base it can stop short of the climb the controller counts and
+        # the job fails with the vehicle hovering fine. MEASURED 2026-10-30,
+        # seed 1: z 0.71 -> 1.50, range 1.00, level; four "failures", no return.
+        airborne = (self.range_m is not None
+                    and self.range_m >= self.takeoff_ok_range)
+        if self._job.ok or airborne:
             if self.t0 is None:
                 self.t0 = self.mission_now()
                 self.get_logger().info(
@@ -309,6 +320,13 @@ class Phase2MissionNode(Node):
             self.after_takeoff()
             return
         self.takeoff_tries += 1
+        q = self.pose.pose.orientation
+        roll = math.atan2(2 * (q.w * q.x + q.y * q.z), 1 - 2 * (q.x ** 2 + q.y ** 2))
+        pitch = math.asin(max(-1.0, min(1.0, 2 * (q.w * q.y - q.z * q.x))))
+        self.get_logger().warn(
+            f"takeoff failed ({self._job.message}): roll "
+            f"{math.degrees(roll):.0f} pitch {math.degrees(pitch):.0f} deg, "
+            f"z {self.pose.pose.position.z:.2f}, range {self.range_m}")
         if self.takeoff_tries > 3:
             self.get_logger().error(f"takeoff refused 3x: {self._job.message}")
             self._enter(self.ABORTED)
@@ -371,6 +389,7 @@ class Phase2MissionNode(Node):
             return
         step = self.descend.update(dets, h, self.fx, self.now())
         if step.phase == READY:
+            self._reacquires = 0
             self.get_logger().info(
                 f"{kind}: centred at {h:.2f} m ({step.err_px:.0f} px) — "
                 + ("touching down on it" if kind == "pickup"
@@ -386,6 +405,13 @@ class Phase2MissionNode(Node):
                                    "on the known position.")
             self._give_up_visual = True
             return
+        if (kind == "pickup" and self._reacquires < self.reacquire_max
+                and (step.phase == LOST or self._elapsed() > self.descent_timeout)):
+            self._reacquires += 1
+            self._task(f"pickup: kit lost at {h:.2f} m — climbing to look again "
+                       f"({self._reacquires}/{self.reacquire_max})")
+            self._enter(self.GOTO)
+            return
         if step.phase == LOST or self._elapsed() > self.descent_timeout:
             # Positions are KNOWN (rules): land on the layout position rather
             # than hover forever — but never off it, so re-centre there first.
@@ -396,6 +422,7 @@ class Phase2MissionNode(Node):
             # Fly back over it at cruise (the nudges may have moved us) and
             # land on arrival, blind.
             self._blind = True
+            self._reacquires = 0
             self._enter(self.GOTO)
             return
         stamp = (self.kits.stamp if kind == "pickup"
