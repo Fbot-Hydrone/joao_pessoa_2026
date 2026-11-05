@@ -33,22 +33,27 @@ delete this node and launch zed_wrapper instead. The contract above is what
 makes that a drop-in swap, and it is why the topic names are the wrapper's and
 not something of our own choosing.
 
-The first-generation ZED has no IMU
------------------------------------
-So there is no /zed/zed_node/imu/data here, and the SDK's positional tracking is
-visual-only rather than stereo-inertial. Nothing in the landing-site or Phase 1
-stacks subscribes to the IMU topic — zed_mimic publishes one because BiguaSim
-offers it — but be aware the odometry is weaker than the ZED 2i's would be, and
-that this is a property of the camera, not of this node.
+IMU
+---
+The drone's camera is a ZED 2i: tracking fuses its IMU and the world is levelled
+by gravity. A first-gen ZED (no IMU) also works, tracking is then visual-only
+and the world is the lens' start pose; the odometry handles both. No
+/zed/zed_node/imu/data is published, nothing in the stack reads it.
 
 Frames
 ------
-Identical to zed_mimic_node, deliberately:
+Same tree as zed_mimic_node:
 
     odom -> base_link                     (broadcast, from SDK tracking)
-    base_link -> zed_camera_link          (static, the mount)
-              -> zed_left_camera_frame    (static, identity)
-              -> zed_left_camera_optical_frame  (static, RPY(-90,0,-90))
+    base_link -> zed_camera_link          (static, the mount: xyz + rpy)
+              -> zed_left_camera_frame    (static, +half baseline in y; cloud)
+              -> zed_left_camera_optical_frame  (static, RPY(-90,0,-90), or
+                                                 turned 180 about Z when the
+                                                 images are rotated upright)
+
+The drone's ZED sits upside down and 15 deg nose down (camera_rpy_deg
+[180, 15, 0]). The SDK's image flip would hide that, but it turns IMU fusion
+off, so the flip is done here instead and the mount says the truth.
 
 `pad_detector_node` looks up base_link -> zed_left_camera_optical_frame and
 nothing else, so the intermediate links exist to match the wrapper's tree rather
@@ -56,7 +61,6 @@ than because anything reads them.
 """
 
 import array
-import math
 
 import numpy as np
 
@@ -70,16 +74,17 @@ from nav_msgs.msg import Odometry
 from sensor_msgs.msg import CameraInfo, Image, PointCloud2, PointField
 from tf2_ros import StaticTransformBroadcaster, TransformBroadcaster
 
+from hydrone_bringup.camera_mount import (
+    OPTICAL_QUAT, OPTICAL_QUAT_ROT180, base_from_camera_pose, is_upside_down,
+    mount_matrix, quat_from_matrix, quat_from_rpy_deg,
+    rotate_intrinsics_180, transform)
+
 
 FRAME_ODOM = "odom"
 FRAME_BASE = "base_link"
 FRAME_CAMERA = "zed_camera_link"
 FRAME_LEFT_CAM = "zed_left_camera_frame"
 FRAME_OPTICAL = "zed_left_camera_optical_frame"
-
-# Robot convention (X fwd, Y left, Z up) -> optical (Z fwd, X right, Y down).
-# The standard ROS camera_link -> camera_optical_frame quaternion, RPY(-90,0,-90).
-OPTICAL_QUAT = (-0.5, 0.5, -0.5, 0.5)   # (x, y, z, w)
 
 RESOLUTIONS = {"VGA", "HD720", "HD1080", "HD2K"}
 DEPTH_MODES = {"NONE", "PERFORMANCE", "QUALITY", "ULTRA", "NEURAL"}
@@ -111,8 +116,17 @@ class ZedSdkNode(Node):
         # else owns the position estimate.
         self.declare_parameter("publish_odom", True)
         self.declare_parameter("publish_tf", True)
-        # Where the camera sits on the airframe, metres in base_link.
-        self.declare_parameter("camera_offset_xyz", [0.10, 0.0, 0.0])
+        # The mount, base_link -> zed_camera_link (camera body centre).
+        # Defaults are the t15 support (drones/supports/parts/zed_mount.py):
+        # upside down, 15 deg nose down, body centre 8 cm ahead of and 3.7 cm
+        # under the frame centre. rpy is [roll, pitch, yaw] deg, +pitch = down.
+        self.declare_parameter("camera_offset_xyz", [0.080, 0.0, -0.037])
+        self.declare_parameter("camera_rpy_deg", [180.0, 15.0, 0.0])
+        # An upside-down camera gives upside-down images. Rotate them (and
+        # depth) 180 deg so consumers see them upright; the optical frame and
+        # cx/cy follow. The SDK's own flip is not used because it turns off
+        # IMU fusion in tracking. No-op for an upright mount.
+        self.declare_parameter("upright_images", True)
         self.declare_parameter("serial_number", 0)
 
         p = lambda n: self.get_parameter(n).value
@@ -122,6 +136,9 @@ class ZedSdkNode(Node):
         self.cloud_stride = max(int(p("point_cloud_stride")), 1)
         self.want_odom = bool(p("publish_odom"))
         self.publish_tf = bool(p("publish_tf"))
+        self.rpy_deg = [float(v) for v in p("camera_rpy_deg")]
+        self.rotate_180 = bool(p("upright_images")) and is_upside_down(
+            self.rpy_deg)
 
         resolution = str(p("resolution")).upper()
         depth_mode = str(p("depth_mode")).upper()
@@ -164,12 +181,30 @@ class ZedSdkNode(Node):
         calib = info.camera_configuration.calibration_parameters.left_cam
         self.fx, self.fy = float(calib.fx), float(calib.fy)
         self.cx, self.cy = float(calib.cx), float(calib.cy)
+        if self.rotate_180:
+            self.cx, self.cy = rotate_intrinsics_180(
+                self.cx, self.cy, self.width, self.height)
+        # The SDK's images, cloud and pose all belong to the LEFT lens, half a
+        # baseline to the camera's left (on the drone's right when inverted).
+        self.half_baseline = float(
+            info.camera_configuration.calibration_parameters
+            .get_camera_baseline()) / 2.0
+        # With an IMU the tracking world is levelled by gravity, without one it
+        # is the lens' start pose; base_from_camera_pose needs to know which.
+        self.gravity_world = bool(
+            info.sensors_configuration.accelerometer_parameters.is_available)
+        self.T_base_left = mount_matrix(
+            p("camera_offset_xyz"), self.rpy_deg) @ transform(
+            (0.0, self.half_baseline, 0.0), (0.0, 0.0, 0.0, 1.0))
         self.get_logger().info(
             f"ZED {info.camera_model} sn {info.serial_number} open at "
             f"{self.width}x{self.height} — fx={self.fx:.1f} fy={self.fy:.1f} "
             f"cx={self.cx:.1f} cy={self.cy:.1f}, depth {depth_mode}, "
             f"cloud {'on' if self.want_cloud else 'off'}, "
-            f"odom {'on' if self.want_odom else 'off'}")
+            f"odom {'on' if self.want_odom else 'off'}, mount rpy "
+            f"{self.rpy_deg} deg, baseline {2 * self.half_baseline:.3f} m, "
+            f"images {'rotated 180' if self.rotate_180 else 'as is'}, "
+            f"tracking world {'gravity' if self.gravity_world else 'start pose'}")
 
         if self.want_odom:
             track = sl.PositionalTrackingParameters()
@@ -227,14 +262,17 @@ class ZedSdkNode(Node):
         mount.transform.translation.x = float(ox)
         mount.transform.translation.y = float(oy)
         mount.transform.translation.z = float(oz)
-        mount.transform.rotation.w = 1.0        # looking straight forward
+        (mount.transform.rotation.x,
+         mount.transform.rotation.y,
+         mount.transform.rotation.z,
+         mount.transform.rotation.w) = quat_from_rpy_deg(self.rpy_deg)
 
-        # Identity, as in sim: the SDK already hands us the LEFT camera's
-        # measurements, so there is no baseline left to account for here.
+        # The SDK measures from the left lens, half a baseline to the left.
         left_cam = TransformStamped()
         left_cam.header.stamp = stamp
         left_cam.header.frame_id = FRAME_CAMERA
         left_cam.child_frame_id = FRAME_LEFT_CAM
+        left_cam.transform.translation.y = self.half_baseline
         left_cam.transform.rotation.w = 1.0
 
         optical = TransformStamped()
@@ -244,7 +282,8 @@ class ZedSdkNode(Node):
         (optical.transform.rotation.x,
          optical.transform.rotation.y,
          optical.transform.rotation.z,
-         optical.transform.rotation.w) = OPTICAL_QUAT
+         optical.transform.rotation.w) = (
+            OPTICAL_QUAT_ROT180 if self.rotate_180 else OPTICAL_QUAT)
 
         self.tf_static.sendTransform([mount, left_cam, optical])
 
@@ -286,6 +325,8 @@ class ZedSdkNode(Node):
         in numpy precisely to avoid cv_bridge, and it does not know about BGRA.
         """
         bgra = mat.get_data()
+        if self.rotate_180:
+            bgra = bgra[::-1, ::-1]
         bgr = np.ascontiguousarray(bgra[:, :, :3])
         msg = Image()
         msg.header.stamp = stamp
@@ -312,6 +353,8 @@ class ZedSdkNode(Node):
         far-plane sentinel.
         """
         depth = np.asarray(mat.get_data(), dtype=np.float32)
+        if self.rotate_180:
+            depth = depth[::-1, ::-1]
         bad = ~np.isfinite(depth)
         bad |= (depth < self.min_depth) | (depth > self.max_depth)
         depth = np.where(bad, np.float32("nan"), depth)
@@ -351,7 +394,11 @@ class ZedSdkNode(Node):
         return info
 
     def _cloud_msg(self, mat, stamp) -> PointCloud2:
-        """XYZ cloud, subsampled, in the optical frame.
+        """XYZ cloud, subsampled, in the left lens frame.
+
+        The SDK gives XYZ in init.coordinate_system (X fwd, Z up), NOT optical,
+        so it is stamped zed_left_camera_frame. Never rotated with the images:
+        it stays in the physical lens frame and TF places it.
 
         Strided rather than full: feature_map_node voxelises whatever it gets,
         so a quarter of the points cost a quarter of the bandwidth and change
@@ -365,7 +412,7 @@ class ZedSdkNode(Node):
 
         msg = PointCloud2()
         msg.header.stamp = stamp
-        msg.header.frame_id = FRAME_OPTICAL
+        msg.header.frame_id = FRAME_LEFT_CAM
         msg.height = 1
         msg.width = int(xyz.shape[0])
         msg.fields = [
@@ -387,11 +434,11 @@ class ZedSdkNode(Node):
     def _publish_odom(self, stamp):
         """The SDK's visual tracking, as odom -> base_link.
 
-        The pose the SDK reports is the CAMERA's. What the rest of the stack
-        wants is the vehicle's, so the mount offset is subtracted back out —
-        otherwise every reported position is wrong by the length of the arm the
-        camera sits on, which is small but constant and therefore never averages
-        away.
+        The pose the SDK reports is the LEFT LENS', tilted and maybe upside
+        down. The mount (and the lever arm) is taken back out so this is the
+        vehicle's — see camera_mount.base_from_camera_pose. With the IMU the
+        world takes a few seconds after start to level (seen up to 10 deg off
+        at 3 s, 0.3 deg from 6 s on the bench, 2026-11-05).
         """
         sl = self.sl
         state = self.cam.get_position(self._pose, sl.REFERENCE_FRAME.WORLD)
@@ -400,12 +447,12 @@ class ZedSdkNode(Node):
                 f"positional tracking: {state}", throttle_duration_sec=5.0)
             return
 
-        t = self._pose.get_translation().get()
-        q = self._pose.get_orientation().get()      # (x, y, z, w)
-        ox, oy, oz = self.get_parameter("camera_offset_xyz").value
-        rot = _quat_to_matrix(q)
-        base = np.asarray(t, dtype=float) - rot @ np.array(
-            [float(ox), float(oy), float(oz)])
+        T_world_left = transform(self._pose.get_translation().get(),
+                                 self._pose.get_orientation().get())
+        T = base_from_camera_pose(T_world_left, self.T_base_left,
+                                  self.gravity_world)
+        base = T[:3, 3]
+        q = quat_from_matrix(T[:3, :3])
 
         odom = Odometry()
         odom.header.stamp = stamp
@@ -441,19 +488,6 @@ class ZedSdkNode(Node):
         except Exception:
             pass
         super().destroy_node()
-
-
-def _quat_to_matrix(q) -> np.ndarray:
-    x, y, z, w = (float(v) for v in q)
-    n = math.sqrt(x * x + y * y + z * z + w * w)
-    if n == 0.0:
-        return np.eye(3)
-    x, y, z, w = x / n, y / n, z / n, w / n
-    return np.array([
-        [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
-        [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
-        [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
-    ])
 
 
 def main(args=None):

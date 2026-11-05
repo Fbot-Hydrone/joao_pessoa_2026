@@ -124,9 +124,15 @@ def generate_launch_description():
                         "the FCU. Set false if something else owns the position "
                         "estimate."),
         DeclareLaunchArgument(
-            "zed_offset_xyz", default_value="[0.10, 0.0, 0.0]",
-            description="Where the ZED sits on the airframe, metres in "
-                        "base_link."),
+            "zed_offset_xyz", default_value="[0.080, 0.0, -0.037]",
+            description="Where the ZED body centre sits on the airframe, "
+                        "metres in base_link. Default: the t15 support's CAD "
+                        "(drones/supports/parts/zed_mount.py)."),
+        DeclareLaunchArgument(
+            "zed_rpy_deg", default_value="[180.0, 15.0, 0.0]",
+            description="ZED mount rotation [roll, pitch, yaw] deg, +pitch = "
+                        "lens down. Default: the t15 support, upside down and "
+                        "15 deg down. For the t00/t25 blocks use pitch 0/25."),
 
         # ── Belly camera ────────────────────────────────────────────────────
         DeclareLaunchArgument(
@@ -204,6 +210,9 @@ def generate_launch_description():
                 LaunchConfiguration("zed_odom"), value_type=bool),
             "camera_offset_xyz": ParameterValue(
                 LaunchConfiguration("zed_offset_xyz"),
+                value_type=List[float]),
+            "camera_rpy_deg": ParameterValue(
+                LaunchConfiguration("zed_rpy_deg"),
                 value_type=List[float]),
         }],
     )
