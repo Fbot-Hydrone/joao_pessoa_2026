@@ -44,11 +44,13 @@ RUN git clone --depth 1 https://github.com/Livox-SDK/Livox-SDK2.git /tmp/Livox-S
     && cmake --build /tmp/Livox-SDK2/build -j"$(nproc)" \
     && cmake --install /tmp/Livox-SDK2/build \
     && ldconfig && rm -rf /tmp/Livox-SDK2
-RUN git clone --depth 1 https://github.com/Livox-SDK/livox_ros_driver2.git \
+# DISTRO_ROS, not HUMBLE_ROS: without it the driver's CMake leaves
+# LIVOX_INTERFACES_INCLUDE_DIRECTORIES NOTFOUND and the build stops.
+RUN git clone --depth 1 --branch 1.2.6 https://github.com/Livox-SDK/livox_ros_driver2.git \
         /opt/livox_ws/src/livox_ros_driver2 \
     && cd /opt/livox_ws/src/livox_ros_driver2 && cp package_ROS2.xml package.xml \
     && cd /opt/livox_ws && . /opt/ros/humble/setup.sh \
-    && colcon build --cmake-args -DROS_EDITION=ROS2 -DHUMBLE_ROS=humble -DCMAKE_BUILD_TYPE=Release \
+    && colcon build --cmake-args -DROS_EDITION=ROS2 -DDISTRO_ROS=humble -DCMAKE_BUILD_TYPE=Release \
     && rm -rf build log
 
 WORKDIR /ws
