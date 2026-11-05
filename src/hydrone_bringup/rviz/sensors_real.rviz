@@ -1,0 +1,59 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 1
+      Plane Cell Count: 20
+      Reference Frame: <Fixed Frame>
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: true
+      Show Names: true
+      Marker Scale: 0.5
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Livox Mid-360
+      Enabled: true
+      Topic:
+        Value: /livox/lidar
+        Reliability Policy: Best Effort
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 5
+      Style: Points
+      Size (Pixels): 2
+      Color Transformer: Intensity
+      Decay Time: 0
+    - Class: rviz_default_plugins/Range
+      Name: Rangefinder
+      Enabled: true
+      Topic:
+        Value: /mavros/rangefinder_pub
+        Reliability Policy: Best Effort
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 5
+      Color: 255; 200; 0
+      Alpha: 0.5
+  Enabled: true
+  Global Options:
+    Fixed Frame: base_link
+    Background Color: 48; 48; 48
+    Frame Rate: 30
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 12
+      Pitch: 0.6
+      Yaw: 0.8
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 0
