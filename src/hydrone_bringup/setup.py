@@ -18,6 +18,8 @@ setup(
             glob('config/*.yaml')),
         (os.path.join('share', package_name, 'config', 'params'),
             glob('config/params/*.parm')),
+        (os.path.join('share', package_name, 'config', 'livox'),
+            glob('config/livox/*.json')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,

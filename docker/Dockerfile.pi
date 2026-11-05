@@ -1,0 +1,80 @@
+# Hydrone on the Raspberry Pi 5 (arm64): phases 3 and 4 on the real Kopis X8.
+#
+#   docker compose -f docker-compose.pi.yml build      # on the Pi, ~1 h the first time
+#   docker compose -f docker-compose.pi.yml run --rm hydrone \
+#       ros2 launch hydrone_bringup phase4_real.launch.py
+#
+# The Pi runs Debian 13 (trixie), which has no ROS 2 Humble packages, so the
+# stack lives in this Ubuntu 22.04 image. Only what the real phase 3/4 launches
+# start is built: no SITL, no simulator client, no ZED, no YOLO.
+
+FROM ros:humble-ros-base
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git build-essential cmake python3-pip python3-colcon-common-extensions \
+    && rm -rf /var/lib/apt/lists/*
+
+# MAVROS build/run deps — the same list as the main Dockerfile, which builds it
+# from source because the humble binaries were dropped from packages.ros.org.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ros-humble-mavlink ros-humble-diagnostic-updater \
+      ros-humble-eigen-stl-containers ros-humble-geographic-msgs \
+      ros-humble-ament-cmake-google-benchmark \
+      libasio-dev libgeographic-dev geographiclib-tools python3-click \
+    && (geographiclib-get-geoids egm96-5 || true) \
+    && rm -rf /var/lib/apt/lists/*
+
+# FAST-LIO and the hydrone nodes
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ros-humble-pcl-ros ros-humble-tf2-ros ros-humble-visualization-msgs \
+      ros-humble-std-srvs libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# numpy < 2: same pin as the main Dockerfile. Headless OpenCV: the Pi has no
+# display, and gesture_camera runs with show:=false.
+RUN pip3 install --no-cache-dir "numpy<2" opencv-python-headless mediapipe pymavlink
+
+# Livox-SDK2 + the full livox_ros_driver2, in an underlay. src/livox_ros_driver2
+# in this repo is only its messages (enough for the sim); the real Mid-360
+# needs the driver, which installs the same livox_ros_driver2 package.
+RUN git clone --depth 1 https://github.com/Livox-SDK/Livox-SDK2.git /tmp/Livox-SDK2 \
+    && cmake -S /tmp/Livox-SDK2 -B /tmp/Livox-SDK2/build -DCMAKE_BUILD_TYPE=Release \
+    && cmake --build /tmp/Livox-SDK2/build -j"$(nproc)" \
+    && cmake --install /tmp/Livox-SDK2/build \
+    && ldconfig && rm -rf /tmp/Livox-SDK2
+RUN git clone --depth 1 https://github.com/Livox-SDK/livox_ros_driver2.git \
+        /opt/livox_ws/src/livox_ros_driver2 \
+    && cd /opt/livox_ws/src/livox_ros_driver2 && cp package_ROS2.xml package.xml \
+    && cd /opt/livox_ws && . /opt/ros/humble/setup.sh \
+    && colcon build --cmake-args -DROS_EDITION=ROS2 -DHUMBLE_ROS=humble -DCMAKE_BUILD_TYPE=Release \
+    && rm -rf build log
+
+WORKDIR /ws
+
+# MAVROS 2.14.0 — the pin and its reason are in deps.repos on phase2: 2.15
+# discards plugin parameter files and the drone never arms.
+RUN git clone https://github.com/mavlink/mavros.git src/mavros \
+    && git -C src/mavros checkout 9a192906400156f841e81123c60581be9ff29099
+RUN . /opt/ros/humble/setup.sh && \
+    MAKEFLAGS=-j2 colcon build --executor sequential --cmake-args -DCMAKE_BUILD_TYPE=Release \
+      --packages-up-to mavros mavros_extras \
+    && rm -rf build log
+
+# Project packages — LAST, so a source edit replays only this build.
+# The repo's livox_ros_driver2 (messages only) is dropped: the underlay's wins.
+COPY src/ src/
+RUN rm -rf src/livox_ros_driver2 && \
+    . /opt/livox_ws/install/setup.sh && . /ws/install/setup.sh && \
+    MAKEFLAGS=-j2 colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release \
+      --packages-select hydrone_msgs hydrone_bringup hydrone_mission fast_lio hydrone_lio \
+    && rm -rf build log
+
+ENV HYDRONE_MAPS=/ws/maps
+RUN printf '%s\n' \
+    'source /opt/ros/humble/setup.bash' \
+    'source /opt/livox_ws/install/setup.bash' \
+    'source /ws/install/setup.bash' >> /etc/bash.bashrc
+
+CMD ["bash"]

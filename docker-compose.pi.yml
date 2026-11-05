@@ -1,0 +1,23 @@
+# The real drone, on its Raspberry Pi 5. See docker/Dockerfile.pi.
+#
+#   docker compose -f docker-compose.pi.yml build
+#   docker compose -f docker-compose.pi.yml run --rm hydrone \
+#       ros2 launch hydrone_bringup phase3_real.launch.py
+services:
+  hydrone:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.pi
+    image: hydrone-pi
+    # host network: the Mid-360 talks UDP on eth0, and DDS to the team computer
+    network_mode: host
+    ipc: host
+    # the Pixhawk (UART or USB) and the camera
+    privileged: true
+    volumes:
+      - /dev:/dev
+      - ./maps:/ws/maps
+    environment:
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+    entrypoint: ["bash", "-c", "source /etc/bash.bashrc && exec \"$@\"", "--"]
+    command: ["bash"]

@@ -12,6 +12,8 @@ tested headless (docs/Phase 4 Maze Explorer.md). This node only:
   out  /mavros/setpoint_velocity/cmd_vel_unstamped at cmd_hz (ArduPilot drops
        GUIDED velocity control after ~1 s of silence, so this never stops)
        arm / GUIDED / takeoff / land over the MAVROS services
+  srv  /hydrone/phase4/start (std_srvs/Trigger) arms and flies, when auto_start
+       is off (the real drone: nothing arms until the team computer says so)
   dbg  /hydrone/maze/{grid,path,markers,phase}
 
 Frames: the core plans in `odom` (base_link at takeoff, x forward, y left).
@@ -34,6 +36,7 @@ from mavros_msgs.srv import CommandBool, CommandTOL, SetMode
 from nav_msgs.msg import OccupancyGrid, Odometry, Path
 from sensor_msgs.msg import PointCloud2
 from std_msgs.msg import ColorRGBA, String
+from std_srvs.srv import Trigger
 from visualization_msgs.msg import Marker, MarkerArray
 
 from hydrone_mission.maze.mission import Mission, MissionParams
@@ -113,6 +116,9 @@ class MazeNode(Node):
         self.pub_path = self.create_publisher(Path, '/hydrone/maze/path', 1)
         self.pub_mark = self.create_publisher(MarkerArray, '/hydrone/maze/markers', 1)
 
+        self.create_service(Trigger, '/hydrone/phase4/start', self._srv_start)
+        self.start_requested = False
+
         self.cli_mode = self.create_client(SetMode, '/mavros/set_mode')
         self.cli_arm = self.create_client(CommandBool, '/mavros/cmd/arming')
         self.cli_takeoff = self.create_client(CommandTOL, '/mavros/cmd/takeoff')
@@ -124,6 +130,15 @@ class MazeNode(Node):
         self.get_logger().info('phase4_maze_node up: waiting for LIO odometry')
 
     # ── inputs ──────────────────────────────────────────────────────────────
+    def _srv_start(self, _req, res):
+        if self.started or self.start_requested:
+            res.success, res.message = False, 'already started'
+            return res
+        self.start_requested = True
+        self.get_logger().info('start requested by the team computer')
+        res.success, res.message = True, f"starting after {self.par['start_delay']:.0f} s of odometry"
+        return res
+
     def _state_cb(self, m):
         self.state = m
 
@@ -215,7 +230,8 @@ class MazeNode(Node):
         if self.pose is None:
             return
         if not self.started:
-            if self.par['auto_start'] and self.t_pose - self.t_first >= self.par['start_delay']:
+            go = self.par['auto_start'] or self.start_requested
+            if go and self.t_pose - self.t_first >= self.par['start_delay']:
                 self.started = True
                 self.get_logger().info('starting the mission')
             return
