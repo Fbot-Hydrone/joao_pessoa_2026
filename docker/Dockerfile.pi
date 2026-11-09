@@ -82,6 +82,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends ros-humble-cv-b
                         hydrone_bringup hydrone_mission fast_lio hydrone_lio \
     && rm -rf build log
 
+# rviz2 on the Pi's own screen (HDMI); last so it does not rebuild the above
+RUN apt-get update && apt-get install -y --no-install-recommends ros-humble-rviz2 \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV HYDRONE_MAPS=/ws/maps
 RUN printf '%s\n' \
     'source /opt/ros/humble/setup.bash' \

@@ -17,8 +17,11 @@ services:
     volumes:
       - /dev:/dev
       - ./maps:/ws/maps
+      - ./src/hydrone_bringup/rviz:/ws/rviz:ro
+      - /tmp/.X11-unix:/tmp/.X11-unix
     environment:
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - DISPLAY=${DISPLAY:-:0}
     # not /etc/bash.bashrc: Ubuntu's returns early in a non-interactive shell
     entrypoint: ["bash", "-c", "source /opt/ros/humble/setup.bash && source /opt/livox_ws/install/setup.bash && source /ws/install/setup.bash && exec \"$@\"", "--"]
     command: ["bash"]
