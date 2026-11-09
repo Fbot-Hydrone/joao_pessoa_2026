@@ -59,6 +59,10 @@ WORKDIR /ws
 # discards plugin parameter files and the drone never arms.
 RUN git clone https://github.com/mavlink/mavros.git src/mavros \
     && git -C src/mavros checkout 9a192906400156f841e81123c60581be9ff29099
+# Whatever mavros' package.xml asks for beyond the list above (angles, ...).
+RUN apt-get update && rosdep update --rosdistro humble \
+    && rosdep install --from-paths src/mavros --ignore-src -y --rosdistro humble \
+    && rm -rf /var/lib/apt/lists/*
 RUN . /opt/ros/humble/setup.sh && \
     MAKEFLAGS=-j2 colcon build --executor sequential --cmake-args -DCMAKE_BUILD_TYPE=Release \
       --packages-up-to mavros mavros_extras \
