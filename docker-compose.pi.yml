@@ -19,5 +19,6 @@ services:
       - ./maps:/ws/maps
     environment:
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
-    entrypoint: ["bash", "-c", "source /etc/bash.bashrc && exec \"$@\"", "--"]
+    # not /etc/bash.bashrc: Ubuntu's returns early in a non-interactive shell
+    entrypoint: ["bash", "-c", "source /opt/ros/humble/setup.bash && source /opt/livox_ws/install/setup.bash && source /ws/install/setup.bash && exec \"$@\"", "--"]
     command: ["bash"]
