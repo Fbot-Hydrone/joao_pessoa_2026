@@ -71,10 +71,15 @@ RUN . /opt/ros/humble/setup.sh && \
 # Project packages — LAST, so a source edit replays only this build.
 # The repo's livox_ros_driver2 (messages only) is dropped: the underlay's wins.
 COPY src/ src/
-RUN rm -rf src/livox_ros_driver2 && \
+# hydrone_bringup depends on controller, nav and vision (all ament_python);
+# cv_bridge is here, not above, so adding it did not rebuild mavros.
+RUN apt-get update && apt-get install -y --no-install-recommends ros-humble-cv-bridge \
+    && rm -rf /var/lib/apt/lists/* && \
+    rm -rf src/livox_ros_driver2 && \
     . /opt/livox_ws/install/setup.sh && . /ws/install/setup.sh && \
     MAKEFLAGS=-j2 colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release \
-      --packages-select hydrone_msgs hydrone_bringup hydrone_mission fast_lio hydrone_lio \
+      --packages-select hydrone_msgs hydrone_controller hydrone_nav hydrone_vision \
+                        hydrone_bringup hydrone_mission fast_lio hydrone_lio \
     && rm -rf build log
 
 ENV HYDRONE_MAPS=/ws/maps
