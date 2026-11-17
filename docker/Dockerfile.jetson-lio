@@ -11,8 +11,15 @@
 #   fast_lio, hydrone_lio                   the LIO odometry
 #   hydrone_confined                        the phase 4 known-maze stack
 #   mediapipe                               gesture_camera (phase 3)
-# The Tegra X1 has 4 GB: every compile here is -j1 (FAST-LIO's PCL templates
-# take >1.5 GB per job), so the first build is slow but does not swap to death.
+# Build time on the Tegra X1 (4 GB + 6.9 GB swap), what makes it bearable:
+#   * run it in MAXN with jetson_clocks (scripts/jetson_up.sh --build34 does):
+#     the 5 W mode turns two of the four cores off
+#   * Livox-SDK2 and the driver are many small files: -j4
+#   * FAST-LIO is three files, laserMapping.cpp being most of the time and
+#     ~1.5 GB of PCL templates: -j2, so the small ones overlap with it
+#     without the two big ones ever meeting in RAM
+#   * the hydrone_* packages are ament_python, seconds; and they are
+#     bind-mounted at run time, so editing them never rebuilds this image
 ARG BASE_IMAGE=hydrone-jetson:humble
 FROM ${BASE_IMAGE}
 
@@ -38,21 +45,21 @@ RUN python3 -m pip install --no-cache-dir "numpy<2" absl-py attrs flatbuffers \
 
 RUN git clone --depth 1 https://github.com/Livox-SDK/Livox-SDK2.git /tmp/Livox-SDK2 \
     && cmake -S /tmp/Livox-SDK2 -B /tmp/Livox-SDK2/build -DCMAKE_BUILD_TYPE=Release \
-    && cmake --build /tmp/Livox-SDK2/build -j2 \
+    && cmake --build /tmp/Livox-SDK2/build -j4 \
     && cmake --install /tmp/Livox-SDK2/build \
     && ldconfig && rm -rf /tmp/Livox-SDK2
 RUN git clone --depth 1 --branch 1.2.6 https://github.com/Livox-SDK/livox_ros_driver2.git \
         /opt/livox_ws/src/livox_ros_driver2 \
     && cd /opt/livox_ws/src/livox_ros_driver2 && cp package_ROS2.xml package.xml \
     && cd /opt/livox_ws && . /opt/ros/humble/setup.sh \
-    && MAKEFLAGS=-j1 colcon build --cmake-args -DROS_EDITION=ROS2 -DDISTRO_ROS=humble -DCMAKE_BUILD_TYPE=Release \
+    && MAKEFLAGS=-j4 colcon build --cmake-args -DROS_EDITION=ROS2 -DDISTRO_ROS=humble -DCMAKE_BUILD_TYPE=Release \
     && rm -rf build log
 
 # FAST-LIO first and alone: it is the slow one and changes least.
 WORKDIR /ws
 COPY src/fast_lio src/fast_lio
 RUN . /opt/ros/humble/setup.sh && . /opt/livox_ws/install/setup.sh \
-    && MAKEFLAGS=-j1 colcon build --symlink-install --executor sequential \
+    && MAKEFLAGS=-j2 colcon build --symlink-install \
          --cmake-args -DCMAKE_BUILD_TYPE=Release --packages-select fast_lio
 
 # The project packages, as Dockerfile.jetson does it but with the new ones.
@@ -66,7 +73,7 @@ COPY src/hydrone_mission    src/hydrone_mission
 COPY src/hydrone_controller src/hydrone_controller
 COPY src/hydrone_lio        src/hydrone_lio
 RUN . /opt/ros/humble/setup.sh && . /opt/livox_ws/install/setup.sh && . /ws/install/setup.sh \
-    && MAKEFLAGS=-j1 colcon build --symlink-install --executor sequential \
+    && MAKEFLAGS=-j4 colcon build --symlink-install \
         --packages-select hydrone_msgs hydrone_controller hydrone_bringup hydrone_vision \
                           hydrone_nav hydrone_confined hydrone_mission hydrone_lio
 

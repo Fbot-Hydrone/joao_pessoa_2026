@@ -21,6 +21,21 @@
 #   ./scripts/jetson_up.sh --rebuild                # after a .msg/setup.py edit
 #   ./scripts/jetson_up.sh --build                  # rebuild the image first
 #   ./scripts/jetson_up.sh --wifi                   # force the wifi; the link
+#
+# ── PHASES 3 AND 4 (Livox Mid-360 + FAST-LIO, image hydrone-jetson-lio) ─────
+#   ./scripts/jetson_up.sh --build34                # build that image (MAXN +
+#                                                   # jetson_clocks first)
+#   ./scripts/jetson_up.sh --sensors34              # Livox + Pixhawk, READ ONLY
+#   ./scripts/jetson_up.sh --phase4                 # Livox + FAST-LIO + MAVROS,
+#                                                   # no mission: carry it by
+#                                                   # hand, watch /hydrone/lio/odom
+#   ./scripts/jetson_up.sh --phase4 mission:=maze   # + the maze; it waits for
+#       ros2 service call /hydrone/phase4/start std_srvs/srv/Trigger
+#   ./scripts/jetson_up.sh --phase3                 # + phase3_hri_node and the
+#                                                   # gesture camera (/dev/video0)
+#       ros2 service call /hydrone/phase3/start std_srvs/srv/Trigger
+#   The Mid-360 sends to 192.168.1.50 on eth0 (config/livox/mid360.json); the
+#   Pixhawk is FCU_URL, by default its ethernet link (eth0 192.168.144.10).
 #                                                   # is chosen for you by
 #                                                   # default (see below)
 #
@@ -134,6 +149,8 @@ NO_DEV=false
 DRY=false
 WANT_MAP=false
 MODE=auto
+LIO=false
+BUILD34=false
 launch_args=()
 
 # The belly camera's ChArUco target. Defaults are the calib.io board in use
@@ -151,6 +168,10 @@ for arg in "$@"; do
         --phase1)        LAUNCH=phase1_real.launch.py ;;
         --dry)           LAUNCH=phase1_dry.launch.py; DRY=true ;;
         --sources)       LAUNCH=sources_real.launch.py ;;
+        --sensors34)     LAUNCH=sensors_real.launch.py; LIO=true ;;
+        --phase4)        LAUNCH=phase4_real.launch.py; LIO=true ;;
+        --phase3)        LAUNCH=phase3_real.launch.py; LIO=true ;;
+        --build34)       BUILD34=true; LIO=true ;;
         --map)           WANT_MAP=true ;;
         --shell)         SHELL_MODE=true ;;
         --calibrate)     CALIBRATE=true ;;
@@ -166,6 +187,29 @@ for arg in "$@"; do
         *) echo "unknown argument: $arg" >&2; exit 2 ;;
     esac
 done
+
+# ── Phases 3/4: their own image, their own preflight ───────────────────────
+if [ "$LIO" = true ]; then
+    IMAGE="${IMAGE_LIO:-hydrone-jetson-lio:humble}"
+    FCU_URL="${FCU_URL:-udp://:14550@192.168.144.14:14550}"
+    if [ "$BUILD34" = true ]; then
+        # MAXN + max clocks: the 5 W mode switches two of the four cores off
+        sudo nvpmodel -m 0 && sudo jetson_clocks || true
+        exec docker build -f docker/Dockerfile.jetson-lio -t "$IMAGE" .
+    fi
+    if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+        echo "ERROR: no $IMAGE. Build it once: $0 --build34" >&2
+        exit 1
+    fi
+    if ! ip -4 addr show | grep -q 'inet 192\.168\.1\.50/'; then
+        echo "WARNING: no 192.168.1.50 on this host: the Mid-360 sends there and" >&2
+        echo "  nothing will arrive.  sudo ip addr add 192.168.1.50/24 dev eth0" >&2
+    fi
+    ping -c1 -W1 192.168.1.145 >/dev/null 2>&1 ||
+        echo "WARNING: the Mid-360 (192.168.1.145) does not answer. Powered? Cable?" >&2
+    launch_args+=("fcu_url:=$FCU_URL")
+    [ "$LAUNCH" = sensors_real.launch.py ] && launch_args+=("fcu:=true")
+fi
 
 dds_iface_setup "$MODE"
 # The trailing note is not decoration: with --auto the viewers work the link
@@ -190,8 +234,10 @@ if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
     echo "Image $IMAGE not found — building it." >&2
     DO_BUILD=true
 fi
-if ! ls /dev/video* >/dev/null 2>&1; then
-    echo "WARNING: no /dev/video* on this host. Is the ZED plugged in?" >&2
+if [ "$LIO" = true ] && [ "$LAUNCH" != phase3_real.launch.py ]; then
+    :   # phase 4 and the sensor check use no camera
+elif ! ls /dev/video* >/dev/null 2>&1; then
+    echo "WARNING: no /dev/video* on this host. Is the camera plugged in?" >&2
 fi
 
 if [ "$DO_BUILD" = true ]; then
@@ -259,6 +305,12 @@ if [ "$NO_DEV" = false ]; then
                hydrone_msgs hydrone_nav hydrone_vision; do
         run_args+=(-v "$PWD/src/$pkg:/ws/src/$pkg")
     done
+    [ "$LIO" = true ] && run_args+=(-v "$PWD/src/hydrone_lio:/ws/src/hydrone_lio")
+fi
+# the LIO map is saved under $HYDRONE_MAPS; keep it on the host
+if [ "$LIO" = true ]; then
+    mkdir -p "$PWD/maps"
+    run_args+=(-v "$PWD/maps:/ws/maps")
 fi
 
 # PYTHONDONTWRITEBYTECODE: the container is root and the mounts are the host's
@@ -412,7 +464,7 @@ inner+='_relink() {
     [ -e "$ins/$n" ] || ln -s "$bld/$n" "$ins/$n"
   done
 }
-for _p in hydrone_bringup hydrone_controller hydrone_confined hydrone_mission hydrone_nav hydrone_vision; do
+for _p in hydrone_bringup hydrone_controller hydrone_confined hydrone_mission hydrone_nav hydrone_vision hydrone_lio; do
   _s=/ws/src/$_p; _b=/ws/build/$_p; _i=/ws/install/$_p/share/$_p
   [ -d "$_s/launch" ] && _relink "$_s/launch" "$_b/launch" "$_i/launch" "*.launch.py"
   [ -d "$_s/config" ] && _relink "$_s/config" "$_b/config" "$_i/config" "*.yaml"
@@ -429,7 +481,9 @@ if [ "$DO_REBUILD" = true ]; then
     # the code at its current state.
     inner+=". /opt/ros/humble/setup.sh && colcon build --symlink-install "
     inner+="--packages-select hydrone_msgs hydrone_controller hydrone_bringup "
-    inner+="hydrone_vision hydrone_nav hydrone_confined hydrone_mission && . /ws/install/setup.sh && "
+    inner+="hydrone_vision hydrone_nav hydrone_confined hydrone_mission"
+    [ "$LIO" = true ] && inner+=" hydrone_lio"
+    inner+=" && . /ws/install/setup.sh && "
 fi
 # `exec` so that ros2 launch becomes PID 1 in the container. Without it PID 1
 # is this bash, and bash does NOT forward signals to a child it is waiting on:
