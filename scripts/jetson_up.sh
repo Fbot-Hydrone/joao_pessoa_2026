@@ -255,7 +255,7 @@ run_args=(
 # same reason as docker-compose.dev.yml: a whole-src mount would shadow
 # anything the image built in place under /ws/src.
 if [ "$NO_DEV" = false ]; then
-    for pkg in hydrone_bringup hydrone_controller hydrone_mission \
+    for pkg in hydrone_bringup hydrone_controller hydrone_mission hydrone_confined \
                hydrone_msgs hydrone_nav hydrone_vision; do
         run_args+=(-v "$PWD/src/$pkg:/ws/src/$pkg")
     done
@@ -412,7 +412,7 @@ inner+='_relink() {
     [ -e "$ins/$n" ] || ln -s "$bld/$n" "$ins/$n"
   done
 }
-for _p in hydrone_bringup hydrone_controller hydrone_mission hydrone_nav hydrone_vision; do
+for _p in hydrone_bringup hydrone_controller hydrone_confined hydrone_mission hydrone_nav hydrone_vision; do
   _s=/ws/src/$_p; _b=/ws/build/$_p; _i=/ws/install/$_p/share/$_p
   [ -d "$_s/launch" ] && _relink "$_s/launch" "$_b/launch" "$_i/launch" "*.launch.py"
   [ -d "$_s/config" ] && _relink "$_s/config" "$_b/config" "$_i/config" "*.yaml"
@@ -429,7 +429,7 @@ if [ "$DO_REBUILD" = true ]; then
     # the code at its current state.
     inner+=". /opt/ros/humble/setup.sh && colcon build --symlink-install "
     inner+="--packages-select hydrone_msgs hydrone_controller hydrone_bringup "
-    inner+="hydrone_vision hydrone_nav hydrone_mission && . /ws/install/setup.sh && "
+    inner+="hydrone_vision hydrone_nav hydrone_confined hydrone_mission && . /ws/install/setup.sh && "
 fi
 # `exec` so that ros2 launch becomes PID 1 in the container. Without it PID 1
 # is this bash, and bash does NOT forward signals to a child it is waiting on:

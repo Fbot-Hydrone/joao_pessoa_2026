@@ -8,8 +8,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from hydrone_mission.maze.morph import dilate, dilate4, label
-from hydrone_mission.maze.planner import line_free
+from hydrone_confined.core.morph import dilate, dilate4, label
+from hydrone_confined.core.planner import line_free
 
 
 @dataclass

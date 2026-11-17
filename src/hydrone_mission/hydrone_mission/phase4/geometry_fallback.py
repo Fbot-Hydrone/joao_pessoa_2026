@@ -12,8 +12,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from hydrone_mission.maze.arena import robust_rect
-from hydrone_mission.maze.openings import Opening
+from hydrone_confined.core.arena import robust_rect
+from hydrone_confined.core.openings import Opening
 
 
 @dataclass

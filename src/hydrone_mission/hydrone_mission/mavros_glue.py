@@ -1,0 +1,189 @@
+"""The MAVROS side every mission core needs, once.
+
+A mission core returns Commands (velocity / hold / takeoff / land) in its
+planning frame. This base node turns them into MAVROS:
+  - arm, GUIDED and takeoff over the services, one step per command tick
+  - land once
+  - a velocity setpoint every cmd_hz tick, whatever else is happening:
+    ArduPilot drops GUIDED velocity control after ~1 s of silence
+  - hold still when the pose or the sensor stream goes stale
+  - an uncommanded disarm after arming (RC kill) latches the mission as
+    aborted: never re-arm on our own
+  - start only once the FCU has a home: before that EKF3 isn't flying on the
+    external nav yet (AHRS still on DCM under a slow sim) and a takeoff is
+    accepted and then silently not flown
+
+Frames: the planning frame is whatever vision_odom_bridge feeds the EKF (the
+LIO odom, or the map frame through pose_mux). The bridge turns it +90 deg into
+MAVROS' local ENU, so velocities go out the same way (odom_to_enu).
+"""
+import numpy as np
+from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
+
+from geometry_msgs.msg import PoseStamped, Twist
+from mavros_msgs.msg import HomePosition, State
+from mavros_msgs.srv import CommandBool, CommandTOL, SetMode
+from std_srvs.srv import Trigger
+
+from hydrone_confined.nodes.rosutil import odom_to_enu
+
+
+class MavrosMissionNode(Node):
+
+    def __init__(self, name, extra_params=()):
+        super().__init__(name)
+        p = self.declare_parameters('', [
+            ('cmd_hz', 20.0),
+            ('start_delay', 5.0),               # s of pose before arming
+            ('stale_s', 2.0),                   # no sensor tick for this long -> hold
+            ('auto_start', True),
+            ('wait_home', True),              # start only once the FCU has a home
+            # with auto_start off (the real drone) nothing arms until the team
+            # computer calls this Trigger
+            ('start_service', '/hydrone/phase4/start'),
+        ] + list(extra_params))
+        self.par = {q.name: q.value for q in p}
+        self.state = State()
+        self.local = None
+        self.pose = None                        # latest pose in the planning frame
+        self.t_pose = None
+        self.t_first = None
+        self.t_tick = None                      # last time the core was stepped
+        self.cmd = None
+        self.armed_z = None
+        self.started = False
+        self.takeoff_sent = False
+        self.t_takeoff = -1e9
+        self.land_sent = False
+        self.finished = False
+        self._pending = []
+        self._last_call = {}
+        self.home = False
+        self.create_subscription(State, '/mavros/state', self._state_cb, 10)
+        self.create_subscription(HomePosition, '/mavros/home_position/home', self._home_cb,
+                                 qos_profile_sensor_data)
+        self.create_subscription(PoseStamped, '/mavros/local_position/pose', self._local_cb,
+                                 qos_profile_sensor_data)
+        self.pub_vel = self.create_publisher(Twist, '/mavros/setpoint_velocity/cmd_vel_unstamped', 10)
+        self.cli_mode = self.create_client(SetMode, '/mavros/set_mode')
+        self.cli_arm = self.create_client(CommandBool, '/mavros/cmd/arming')
+        self.cli_takeoff = self.create_client(CommandTOL, '/mavros/cmd/takeoff')
+        self.cli_land = self.create_client(CommandTOL, '/mavros/cmd/land')
+        self.start_requested = False
+        self.create_service(Trigger, self.par['start_service'], self._srv_start)
+        self.create_timer(1.0 / max(self.par['cmd_hz'], 1.0), self._control)
+
+    def _srv_start(self, _req, res):
+        if self.started or self.start_requested:
+            res.success, res.message = False, 'already started'
+            return res
+        self.start_requested = True
+        self.get_logger().info('start requested by the team computer')
+        res.success, res.message = True, f"starting after {self.par['start_delay']:.0f} s of pose"
+        return res
+
+    def _state_cb(self, m):
+        self.state = m
+
+    def _home_cb(self, m):
+        if not self.home:
+            self.get_logger().info('FCU has a home: EKF is up')
+        self.home = True
+
+    def _local_cb(self, m):
+        self.local = np.array([m.pose.position.x, m.pose.position.y, m.pose.position.z])
+
+    def set_pose(self, t, pose):
+        self.pose, self.t_pose = pose, t
+        if self.t_first is None:
+            self.t_first = t
+
+    def _call(self, cli, req, what):
+        # one request per service per second: a slow FCU (SITL under a slow
+        # sim) otherwise gets a GUIDED request on every sensor tick
+        now = self.get_clock().now().nanoseconds * 1e-9
+        if now - self._last_call.get(what, -1e9) < 1.0:
+            return
+        self._last_call[what] = now
+        if not cli.service_is_ready():
+            self.get_logger().warn(f'{what}: service not ready')
+            return
+        fut = cli.call_async(req)
+        fut.add_done_callback(lambda f, w=what: self.get_logger().info(f'{w}: {f.result()}'))
+        self._pending.append(fut)
+
+    def act(self, cmd, t):
+        """Take a core command: MAVROS calls now, the velocity on the timer."""
+        self.cmd, self.t_tick = cmd, t
+        if self.takeoff_sent and not self.state.armed and not self.land_sent:
+            # disarmed after we armed and took off: the RC kill switch, or the
+            # FCU giving up. The RC only ever disables the drone, so this
+            # latches: never re-arm, never command again
+            if not self.finished:
+                self.get_logger().error('disarmed without being told to: mission ABORTED (not re-arming)')
+            self.finished = True
+            return
+        if self.finished:
+            return
+        if cmd.kind == 'takeoff':
+            if not self.started:
+                return
+            if self.state.mode != 'GUIDED':
+                self._call(self.cli_mode, SetMode.Request(custom_mode='GUIDED'), 'GUIDED')
+                return
+            if not self.state.armed:
+                self._call(self.cli_arm, CommandBool.Request(value=True), 'arm')
+                return
+            if self.armed_z is None:
+                self.armed_z = float(self.pose[0][2])
+            climbed = float(self.pose[0][2]) - self.armed_z > 0.1
+            if not self.takeoff_sent or (not climbed and t - self.t_takeoff > 6.0):
+                alt = float(cmd.z) - self.armed_z
+                if self.takeoff_sent:
+                    self.get_logger().warn('takeoff accepted but not climbing, sending it again')
+                self.takeoff_sent, self.t_takeoff = True, t
+                self.get_logger().info(f'takeoff to z {cmd.z:.2f} ({alt:.2f} m above here)')
+                self._last_call.pop('takeoff', None)
+                self._call(self.cli_takeoff, CommandTOL.Request(altitude=alt), 'takeoff')
+        elif cmd.kind == 'land':
+            if not self.land_sent:
+                self.land_sent = True
+                self.finished = True
+                self.get_logger().info('landing')
+                self._call(self.cli_land, CommandTOL.Request(), 'land')
+
+    def _control(self):
+        """Publish a velocity setpoint every tick, whatever else is going on."""
+        if self.pose is None or (self.finished and not self.land_sent):
+            return
+        if not self.started:
+            go = self.par['auto_start'] or self.start_requested
+            if go and self.t_pose - self.t_first >= self.par['start_delay']:
+                if self.par['wait_home'] and not self.home:
+                    self.get_logger().info('waiting for the FCU home (EKF3 on external nav)',
+                                           throttle_duration_sec=5.0)
+                    return
+                self.started = True
+                self.get_logger().info('starting the mission')
+            return
+        if self.land_sent:
+            return
+        # takeoff climbs on the FCU's own ramp; don't fight it with velocities
+        if self.cmd is not None and self.cmd.kind == 'takeoff':
+            return
+        v = np.zeros(3)
+        wz = 0.0
+        stale = self.t_tick is None or (self.t_pose - self.t_tick) > self.par['stale_s']
+        if stale:
+            if self.t_tick is not None:
+                self.get_logger().warn('no sensor tick for too long — holding still',
+                                       throttle_duration_sec=2.0)
+        elif self.cmd is not None and self.cmd.kind == 'velocity':
+            v = np.asarray(self.cmd.velocity, dtype=float)
+            wz = float(self.cmd.yaw_rate or 0.0)
+        enu = odom_to_enu(v)
+        msg = Twist()
+        msg.linear.x, msg.linear.y, msg.linear.z = (float(a) for a in enu)
+        msg.angular.z = wz
+        self.pub_vel.publish(msg)

@@ -138,6 +138,7 @@ COPY src/hydrone_msgs      src/hydrone_msgs
 COPY src/hydrone_bringup   src/hydrone_bringup
 COPY src/hydrone_vision    src/hydrone_vision
 COPY src/hydrone_nav       src/hydrone_nav
+COPY src/hydrone_confined  src/hydrone_confined
 COPY src/hydrone_mission   src/hydrone_mission
 COPY src/hydrone_controller src/hydrone_controller
 # hydrone_controller is in the list because hydrone_bringup DEPENDS on it:
@@ -147,7 +148,7 @@ COPY src/hydrone_controller src/hydrone_controller
 RUN . /opt/ros/humble/setup.sh \
     && colcon build --symlink-install \
         --packages-select hydrone_msgs hydrone_controller hydrone_bringup \
-                          hydrone_vision hydrone_nav hydrone_mission
+                          hydrone_vision hydrone_nav hydrone_confined hydrone_mission
 
 # libsl_zed.so lives outside the default search path; `tegra` is where the host's
 # libcuda is injected and `tegra-egl` where its EGL vendor driver is. The

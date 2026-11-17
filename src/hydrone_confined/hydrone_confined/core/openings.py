@@ -13,7 +13,7 @@ import math
 
 import numpy as np
 
-from hydrone_mission.maze.morph import close, dilate, dilate4, fill_holes, label
+from hydrone_confined.core.morph import close, dilate, dilate4, fill_holes, label
 
 
 @dataclass

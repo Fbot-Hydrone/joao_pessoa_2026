@@ -23,10 +23,10 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
 sys.path.insert(0, '/ws/src/hydrone_mission')
-from hydrone_mission.maze.arena import arena_from_grid  # noqa: E402
-from hydrone_mission.maze.grid import GridParams, OccupancyGrid  # noqa: E402
-from hydrone_mission.maze.openings import detect_openings, window_extent  # noqa: E402
-from hydrone_mission.maze import geometry_fallback as gf  # noqa: E402
+from hydrone_confined.core.arena import arena_from_grid  # noqa: E402
+from hydrone_confined.core.grid import GridParams, OccupancyGrid  # noqa: E402
+from hydrone_confined.core.openings import detect_openings, window_extent  # noqa: E402
+from hydrone_mission.phase4 import geometry_fallback as gf  # noqa: E402
 
 LIDAR_UP = 0.1          # Mid-360 above base_link
 CAMERA_INIT_TO_ODOM = np.array([0.0, 0.0, 0.1])

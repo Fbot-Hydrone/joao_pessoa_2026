@@ -12,6 +12,7 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        ('share/' + package_name + '/config/phase4/known_maps', glob('config/phase4/known_maps/*.yaml')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -28,6 +29,7 @@ setup(
             'phase3_hri_node = hydrone_mission.phase3_hri_node:main',
             'gesture_terminal = hydrone_mission.gesture_terminal:main',
             'gesture_camera = hydrone_mission.gesture_camera:main',
+            'phase4_known_node = hydrone_mission.phase4_known_node:main',
         ],
     },
 )

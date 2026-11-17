@@ -108,7 +108,7 @@ RUN . /opt/ros/humble/setup.sh && \
     colcon build --symlink-install \
       --packages-select hydrone_msgs biguasim_interfaces biguasim_main \
         hydrone_bringup hydrone_vision hydrone_controller hydrone_nav \
-        hydrone_mission livox_ros_driver2 fast_lio hydrone_lio
+        hydrone_confined hydrone_mission livox_ros_driver2 fast_lio hydrone_lio
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["ros2", "launch", "hydrone_bringup", "hydrone_sim.launch.py"]
