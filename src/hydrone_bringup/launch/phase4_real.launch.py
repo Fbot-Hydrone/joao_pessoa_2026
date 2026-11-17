@@ -5,6 +5,7 @@ PHASE 4 on the REAL Kopis X8 (Raspberry Pi 5, Livox Mid-360, Pixhawk):
 
     ros2 launch hydrone_bringup phase4_real.launch.py                 # vehicle only
     ros2 launch hydrone_bringup phase4_real.launch.py mission:=maze   # + the maze
+    ros2 launch hydrone_bringup phase4_real.launch.py mission:=known  # + the known maze
     ros2 service call /hydrone/phase4/start std_srvs/srv/Trigger       # then: go
 
 The real-hardware counterpart of phase4_sim.launch.py. Everything above the
@@ -19,6 +20,10 @@ sources is the same node with the same parameters; what differs:
   motion_prior_node   only with gate:=true — it needs ESC RPM telemetry on
                       /mavros/esc_telemetry/telemetry, which the sim fakes
   no odom_error_node  there is no ground truth to measure against
+  stream_rate_node    ArduPilot 4.7 streams nothing until asked (no SRx_ params);
+                      SITL does, so the sim needs no such node
+  mission:=known      same nodes as the sim; the cloud is the driver's CustomMsg
+                      (cloud_type livox) and the map the rulebook's, not BiguaSim's
 
 Mount: the sim reads it from the scenario file; here it is lidar_mount /
 lidar_rpy_deg, defaulting to the scenario's (0.1 m over base_link). Measure it.
@@ -106,10 +111,18 @@ def _launch_setup(context, *args, **kwargs):
         ],
     )
 
+    streams = Node(
+        package='hydrone_bringup', executable='stream_rate_node', output='screen',
+    )
+
+    mission = lc('mission')
+    map_yaml = lc('map_yaml') or os.path.join(
+        get_package_share_directory('hydrone_mission'), 'config', 'phase4', 'known_maps', 'rulebook.yaml')
     lio_nav = Node(
         package='hydrone_bringup', executable='vision_odom_bridge', name='lio_nav',
         output='screen',
-        parameters=[{'in_odom': '/hydrone/lio/odom',
+        # known: the EKF flies on pose_mux (LIO held to the map), as in the sim
+        parameters=[{'in_odom': '/hydrone/nav/odom' if mission == 'known' else '/hydrone/lio/odom',
                      'out_speed': '/mavros/vision_speed/speed_twist'}],
     )
 
@@ -131,7 +144,23 @@ def _launch_setup(context, *args, **kwargs):
         }],
     )
 
-    return [livox, fast_lio, adapter, prior, mavros, lio_nav, lio_map, maze]
+    known = []
+    if mission == 'known':
+        auto = lc('auto_start').lower() == 'true'
+        known = [
+            Node(package='hydrone_confined', executable='beam_localizer_node', name='beam_localizer',
+                 output='screen',
+                 parameters=[{'map_yaml': map_yaml, 'cloud': '/livox/lidar', 'cloud_type': 'livox',
+                              'mount_xyz': mount_xyz}]),
+            Node(package='hydrone_confined', executable='pose_mux_node', name='pose_mux', output='screen',
+                 parameters=[{'map_yaml': map_yaml, 'odom': '/hydrone/lio/odom'}]),
+            Node(package='hydrone_mission', executable='phase4_known_node', output='screen',
+                 parameters=[{'map_yaml': map_yaml, 'lidar_mount': mount_xyz,
+                              'cloud': '/livox/lidar', 'cloud_type': 'livox',
+                              'auto_start': auto}]),
+        ]
+
+    return [livox, fast_lio, adapter, prior, mavros, streams, lio_nav, lio_map, maze] + known
 
 
 def generate_launch_description():
@@ -155,11 +184,16 @@ def generate_launch_description():
         DeclareLaunchArgument('load_map', default_value='false'),
         DeclareLaunchArgument(
             'mission', default_value='none',
-            description="'maze' runs phase4_maze_node; none just brings the vehicle up."),
+            description="'maze' runs phase4_maze_node, 'known' the known-map stack "
+                        '(beam_localizer + pose_mux + phase4_known_node); none just '
+                        'brings the vehicle up.'),
+        DeclareLaunchArgument(
+            'map_yaml', default_value='',
+            description='mission:=known map; empty = config/phase4/known_maps/rulebook.yaml.'),
         DeclareLaunchArgument('flight_z', default_value='0.5'),
         DeclareLaunchArgument(
             'auto_start', default_value='false',
-            description='false: the maze waits for /hydrone/phase4/start. true arms '
+            description='false: the mission waits for /hydrone/phase4/start. true arms '
                         'by itself 5 s after odometry: sim habit, not for the drone.'),
         OpaqueFunction(function=_launch_setup),
     ])

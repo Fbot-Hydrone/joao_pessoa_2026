@@ -85,7 +85,13 @@ def _launch_setup(context, *args, **kwargs):
         ],
     )
 
-    return [livox, tf_livox, tf_range, mavros]
+    # ArduPilot 4.7 streams nothing until asked: without this the FCU topics stay empty
+    streams = Node(
+        package='hydrone_bringup', executable='stream_rate_node', output='screen',
+        condition=IfCondition(LaunchConfiguration('fcu')),
+    )
+
+    return [livox, tf_livox, tf_range, mavros, streams]
 
 
 def generate_launch_description():

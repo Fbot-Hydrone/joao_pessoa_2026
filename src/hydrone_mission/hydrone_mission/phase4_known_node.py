@@ -9,7 +9,9 @@ in   /hydrone/nav/odom            the pose that flies (pose_mux), map frame
      /beam_localizer/sectors      guard sectors
      /beam_localizer/status       healthy or not
      /hydrone/qr                  std_msgs/String, a QR letter each time one is read
-     <cloud> + /mavros/imu/data   only for the explorer fallback's map
+     <cloud> + /mavros/imu/data   only for the explorer fallback's map; PointCloud2
+                                  (cloud_type pc2, the sim's /livox/lidar_pc) or the real
+                                  driver's livox_ros_driver2/CustomMsg (cloud_type livox)
 out  /hydrone/nav/source          'odom' | 'map', what the mission wants the mux on
      MAVROS velocity / arm / GUIDED / takeoff / land (mavros_glue)
 dbg  /hydrone/maze/{phase,path,markers}
@@ -33,7 +35,7 @@ from visualization_msgs.msg import Marker, MarkerArray
 
 from hydrone_confined.core.beams import Beams, level
 from hydrone_confined.core.known_map import KnownMap
-from hydrone_confined.nodes.rosutil import cloud_xyz, quat_to_rpy, stamp_s
+from hydrone_confined.nodes.rosutil import cloud_xyz, livox_custom_xyz, quat_to_rpy, stamp_s
 from hydrone_mission.mavros_glue import MavrosMissionNode
 from hydrone_mission.phase4.explore_mission import Mission, MissionParams
 from hydrone_mission.phase4.known_mission import HANDOVER_BANDS, KnownMission, KnownParams
@@ -60,6 +62,7 @@ class KnownNode(MavrosMissionNode):
             ('qr_target', 5),
             ('explore_fallback', True),
             ('cloud', '/livox/lidar_pc'),
+            ('cloud_type', 'pc2'),              # pc2 / livox
             ('lidar_mount', [0.0, 0.0, 0.1]),
             ('max_points', 15000),
             ('debug_hz', 2.0),
@@ -88,7 +91,11 @@ class KnownNode(MavrosMissionNode):
         self.create_subscription(DiagnosticStatus, '/beam_localizer/status', self._status_cb, 10)
         self.create_subscription(String, '/hydrone/qr', lambda m: self.qr_new.append(m.data), rel)
         if kp.explore_fallback:
-            self.create_subscription(PointCloud2, p['cloud'], self._cloud_cb, sq)
+            if p['cloud_type'] == 'livox':
+                from livox_ros_driver2.msg import CustomMsg
+                self.create_subscription(CustomMsg, p['cloud'], self._cloud_raw, sq, raw=True)
+            else:
+                self.create_subscription(PointCloud2, p['cloud'], self._cloud_cb, sq)
             self.create_subscription(Imu, '/mavros/imu/data', self._imu_cb, sq)
         self.pub_source = self.create_publisher(String, '/hydrone/nav/source', 10)
         self.pub_phase = self.create_publisher(String, '/hydrone/maze/phase', 10)
@@ -119,6 +126,12 @@ class KnownNode(MavrosMissionNode):
         n = m.width * m.height
         stride = max(1, int(math.ceil(n / max(self.par['max_points'], 1000))))
         self.scan_body = cloud_xyz(m, stride)
+
+    def _cloud_raw(self, data):
+        # raw=True hands over the CDR bytes (as beam_localizer reads them)
+        pts = livox_custom_xyz(data)
+        stride = max(1, int(math.ceil(len(pts) / max(self.par['max_points'], 1000))))
+        self.scan_body = pts[::stride]
 
     def _scan_nav(self):
         """The latest scan, levelled and put in the map frame through the nav pose."""

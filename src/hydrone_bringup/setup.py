@@ -38,5 +38,6 @@ setup(
         'odom_error_node = hydrone_bringup.odom_error_node:main',
         'map_odom_node = hydrone_bringup.map_odom_node:main',
         'livox_mimic_node = hydrone_bringup.livox_mimic_node:main',
+        'stream_rate_node = hydrone_bringup.stream_rate_node:main',
     ]},
 )

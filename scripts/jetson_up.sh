@@ -35,7 +35,7 @@
 #                                                   # gesture camera (/dev/video0)
 #       ros2 service call /hydrone/phase3/start std_srvs/srv/Trigger
 #   The Mid-360 sends to 192.168.1.50 on eth0 (config/livox/mid360.json); the
-#   Pixhawk is FCU_URL, by default its ethernet link (eth0 192.168.144.10).
+#   Pixhawk is FCU_URL, by default its USB (/dev/ttyACM0, the CubeBlack).
 #                                                   # is chosen for you by
 #                                                   # default (see below)
 #
@@ -191,7 +191,7 @@ done
 # ── Phases 3/4: their own image, their own preflight ───────────────────────
 if [ "$LIO" = true ]; then
     IMAGE="${IMAGE_LIO:-hydrone-jetson-lio:humble}"
-    FCU_URL="${FCU_URL:-udp://:14550@192.168.144.14:14550}"
+    FCU_URL="${FCU_URL:-/dev/ttyACM0:115200}"
     if [ "$BUILD34" = true ]; then
         # MAXN + max clocks: the 5 W mode switches two of the four cores off
         sudo nvpmodel -m 0 && sudo jetson_clocks || true
