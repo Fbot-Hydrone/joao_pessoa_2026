@@ -1,18 +1,38 @@
-# MAVROS apm_pluginlists.yaml with vision_speed_estimate allowed (phase 4 sends LIO velocity).
+# MAVROS plugins for the real Kopis X8 (phase 4, and phase 3 through it).
+# Only what the repo's nodes use: the stock apm_pluginlists loads ~56 plugins,
+# each decoding its MAVLink and publishing topics nobody reads, and MAVROS was
+# the heaviest process on the Jetson Nano (~1 core).
+#   sys_status        /mavros/state, set_mode, set_stream_rate, set_message_interval, statustext
+#   sys_time          FCU clock sync (stamps of everything below)
+#   command           cmd/arming, cmd/takeoff, cmd/land
+#   imu               imu/data
+#   local_position    local_position/pose, velocity_local
+#   global_position   global_position/set_gp_origin (lio_nav's EKF origin)
+#   home_position     home_position/home (mavros_glue waits on it)
+#   setpoint_position setpoint_position/local
+#   setpoint_velocity setpoint_velocity/cmd_vel(_unstamped)
+#   vision_pose       vision_pose/pose (LIO pose to the EKF)
+#   vision_speed      vision_speed/speed_twist (LIO velocity to the EKF)
+#   distance_sensor   distance_sensor/rangefinder
+#   rangefinder       rangefinder/rangefinder
+#   esc_telemetry     esc_telemetry/telemetry (motion_prior_node, gate:=true)
+# A plugin is loaded when it matches the allowlist; '*' denies the rest.
 /**:
   ros__parameters:
     plugin_denylist:
-      # common
-      - actuator_control
-      - ftp
-      - hil
-      # extras
-      - altitude
-      - debug_value
-      - image_pub
-      - px4flow
-      - vibration
-      - wheel_odometry
-
-    # plugin_allowlist:
-    #   - 'sys_*'
+      - '*'
+    plugin_allowlist:
+      - sys_status
+      - sys_time
+      - command
+      - imu
+      - local_position
+      - global_position
+      - home_position
+      - setpoint_position
+      - setpoint_velocity
+      - vision_pose
+      - vision_speed
+      - distance_sensor
+      - rangefinder
+      - esc_telemetry

@@ -21,7 +21,9 @@ sources is the same node with the same parameters; what differs:
                       /mavros/esc_telemetry/telemetry, which the sim fakes
   no odom_error_node  there is no ground truth to measure against
   stream_rate_node    ArduPilot 4.7 streams nothing until asked (no SRx_ params);
-                      SITL does, so the sim needs no such node
+                      SITL does, so the sim needs no such node. Here it asks for
+                      only the messages the allowed MAVROS plugins use
+                      (mavros_pluginlists_phase4.yaml), not every stream
   mission:=known      same nodes as the sim; the cloud is the driver's CustomMsg
                       (cloud_type livox) and the map the rulebook's, not BiguaSim's
 
@@ -98,7 +100,7 @@ def _launch_setup(context, *args, **kwargs):
         package='mavros', executable='mavros_node', output='screen',
         respawn=True, respawn_delay=3.0,
         parameters=[
-            # apm_pluginlists minus vision_speed_estimate, which the LIO velocity needs
+            # only the plugins the repo's nodes use (vision_speed included: the LIO velocity)
             os.path.join(lio_pkg, 'config', 'mavros_pluginlists_phase4.yaml'),
             os.path.join(mavros_share, 'launch', 'apm_config.yaml'),
             {
@@ -111,8 +113,15 @@ def _launch_setup(context, *args, **kwargs):
         ],
     )
 
+    # Only the MAVLink the allowed plugins turn into topics, each at the 20 Hz the
+    # "all streams" request used to give: SYS_STATUS 1, SYSTEM_TIME 2, RAW_IMU 27
+    # (imu/data accel), SCALED_PRESSURE 29 (raw baro), ATTITUDE 30,
+    # LOCAL_POSITION_NED 32, DISTANCE_SENSOR 132, BATTERY_STATUS 147,
+    # RANGEFINDER 173, HOME_POSITION 242, ESC_TELEMETRY_1_TO_4 11030 (ArduPilot
+    # sends every ESC group from it and denies 11031)
     streams = Node(
         package='hydrone_bringup', executable='stream_rate_node', output='screen',
+        parameters=[{'messages': '1,2,27,29,30,32,132,147,173,242,11030'}],
     )
 
     mission = lc('mission')
