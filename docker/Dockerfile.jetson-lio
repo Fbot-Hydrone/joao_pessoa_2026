@@ -1,0 +1,76 @@
+# Phases 3 and 4 on the Jetson Nano: the phase-1 image + Livox + FAST-LIO.
+#
+#   docker build -f docker/Dockerfile.jetson-lio -t hydrone-jetson-lio:humble .
+#   ./scripts/jetson_up.sh --sensors34 | --phase4 | --phase3
+#
+# Built ON TOP of hydrone-jetson:humble (docker/Dockerfile.jetson) instead of
+# repeating it: that image already has Humble, MAVROS, pcl_ros and cv_bridge,
+# and its ZED SDK layer needs an installer that has to be fetched by hand.
+# What is added is what docker/Dockerfile.pi adds for the Kopis X8:
+#   Livox-SDK2 + livox_ros_driver2 1.2.6   the real Mid-360 (an underlay)
+#   fast_lio, hydrone_lio                   the LIO odometry
+#   hydrone_confined                        the phase 4 known-maze stack
+#   mediapipe                               gesture_camera (phase 3)
+# The Tegra X1 has 4 GB: every compile here is -j1 (FAST-LIO's PCL templates
+# take >1.5 GB per job), so the first build is slow but does not swap to death.
+ARG BASE_IMAGE=hydrone-jetson:humble
+FROM ${BASE_IMAGE}
+
+ENV DEBIAN_FRONTEND=noninteractive
+SHELL ["/bin/bash", "-c"]
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git build-essential cmake python3-colcon-common-extensions \
+      ros-humble-pcl-ros ros-humble-pcl-conversions ros-humble-tf2-ros \
+      ros-humble-visualization-msgs ros-humble-std-srvs ros-humble-cv-bridge \
+      libpcl-dev libeigen3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# mediapipe pinned to the last release that still accepts numpy 1: numpy 2
+# segfaults the image's apt cv2 (see Dockerfile.jetson). --no-deps on mediapipe
+# so pip cannot pull opencv-contrib-python / numpy 2 behind our back; its real
+# runtime deps are listed by hand.
+RUN python3 -m pip install --no-cache-dir "numpy<2" absl-py attrs flatbuffers \
+      "protobuf>=4.25.3,<5" sounddevice matplotlib \
+    && python3 -m pip install --no-cache-dir --no-deps "mediapipe==0.10.14" \
+    && python3 -c "import numpy, sys; sys.exit(0 if int(numpy.__version__.split('.')[0]) < 2 else 1)" \
+    && python3 -c "import mediapipe; print('mediapipe', mediapipe.__version__)"
+
+RUN git clone --depth 1 https://github.com/Livox-SDK/Livox-SDK2.git /tmp/Livox-SDK2 \
+    && cmake -S /tmp/Livox-SDK2 -B /tmp/Livox-SDK2/build -DCMAKE_BUILD_TYPE=Release \
+    && cmake --build /tmp/Livox-SDK2/build -j2 \
+    && cmake --install /tmp/Livox-SDK2/build \
+    && ldconfig && rm -rf /tmp/Livox-SDK2
+RUN git clone --depth 1 --branch 1.2.6 https://github.com/Livox-SDK/livox_ros_driver2.git \
+        /opt/livox_ws/src/livox_ros_driver2 \
+    && cd /opt/livox_ws/src/livox_ros_driver2 && cp package_ROS2.xml package.xml \
+    && cd /opt/livox_ws && . /opt/ros/humble/setup.sh \
+    && MAKEFLAGS=-j1 colcon build --cmake-args -DROS_EDITION=ROS2 -DDISTRO_ROS=humble -DCMAKE_BUILD_TYPE=Release \
+    && rm -rf build log
+
+# FAST-LIO first and alone: it is the slow one and changes least.
+WORKDIR /ws
+COPY src/fast_lio src/fast_lio
+RUN . /opt/ros/humble/setup.sh && . /opt/livox_ws/install/setup.sh \
+    && MAKEFLAGS=-j1 colcon build --symlink-install --executor sequential \
+         --cmake-args -DCMAKE_BUILD_TYPE=Release --packages-select fast_lio
+
+# The project packages, as Dockerfile.jetson does it but with the new ones.
+# hydrone_localization / hydrone_map from the phase-1 image are left alone.
+COPY src/hydrone_msgs       src/hydrone_msgs
+COPY src/hydrone_bringup    src/hydrone_bringup
+COPY src/hydrone_vision     src/hydrone_vision
+COPY src/hydrone_nav        src/hydrone_nav
+COPY src/hydrone_confined   src/hydrone_confined
+COPY src/hydrone_mission    src/hydrone_mission
+COPY src/hydrone_controller src/hydrone_controller
+COPY src/hydrone_lio        src/hydrone_lio
+RUN . /opt/ros/humble/setup.sh && . /opt/livox_ws/install/setup.sh && . /ws/install/setup.sh \
+    && MAKEFLAGS=-j1 colcon build --symlink-install --executor sequential \
+        --packages-select hydrone_msgs hydrone_controller hydrone_bringup hydrone_vision \
+                          hydrone_nav hydrone_confined hydrone_mission hydrone_lio
+
+ENV HYDRONE_MAPS=/ws/maps
+# the entrypoint sources /ws/install; the Livox underlay has to come first
+RUN sed -i 's#^\(.*\)/ws/install/setup\.\(ba\)\?sh#. /opt/livox_ws/install/setup.sh\n&#' /entrypoint.sh \
+    && grep -n "livox_ws\|/ws/install" /entrypoint.sh
