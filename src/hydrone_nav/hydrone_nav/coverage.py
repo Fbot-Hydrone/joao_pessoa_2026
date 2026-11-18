@@ -527,6 +527,114 @@ def camera_lawnmower(bounds, *, swath_m, z=2.0, overlap=0.25, margin_m=0.5,
     return out
 
 
+def mirror_bounds_y(bounds):
+    """The planning box reflected across y = 0."""
+    (min_x, min_y, min_z), (max_x, max_y, max_z) = bounds
+    return ((min_x, -max_y, min_z), (max_x, -min_y, max_z))
+
+
+def mirror_path_y(path):
+    """(x, y, z, yaw) waypoints reflected across y = 0: left <-> right for a
+    nose along x. Its own inverse."""
+    return [(x, -y, z, -yaw) for (x, y, z, yaw) in path]
+
+
+def nearest_corner_index(corners, here, tie_m=0.5):
+    """Index of the corner nearest `here`, or 0 when it is a tie.
+
+    Taking off from the middle of the arena puts all four corners at the same
+    distance, and plain nearest-wins then hands the choice to a few
+    centimetres of pose noise — in the simulator the pose starts at exactly
+    (0, 0) and the tie always went to corner 0, on the real drone it would go
+    anywhere. Within `tie_m` of the nearest, corner 0 wins, as in the
+    simulator, and back-left for sweep_side 'left'.
+    """
+    d = [math.dist(c, here) for c in corners]
+    best = min(range(len(d)), key=lambda k: d[k])
+    return 0 if d[0] - d[best] < tie_m else best
+
+
+def quarter_turns(yaw):
+    """A heading snapped to the nearest axis, as a count of 90 deg turns 0..3."""
+    return int(round(yaw / (math.pi / 2.0))) % 4
+
+
+def rotate_xy_90(xy, k):
+    """A point turned k * 90 deg counter-clockwise about the origin."""
+    x, y = xy
+    for _ in range(k % 4):
+        x, y = -y, x
+    return (x, y)
+
+
+def rotate_bounds_90(bounds, k):
+    """The planning box turned k * 90 deg about the origin (still a box)."""
+    (min_x, min_y, min_z), (max_x, max_y, max_z) = bounds
+    a = rotate_xy_90((min_x, min_y), k)
+    b = rotate_xy_90((max_x, max_y), k)
+    return ((min(a[0], b[0]), min(a[1], b[1]), min_z),
+            (max(a[0], b[0]), max(a[1], b[1]), max_z))
+
+
+def rotate_path_90(path, k):
+    """(x, y, z, yaw) waypoints turned k * 90 deg about the origin."""
+    out = []
+    for (x, y, z, yaw) in path:
+        rx, ry = rotate_xy_90((x, y), k)
+        out.append((rx, ry, z, yaw + (k % 4) * math.pi / 2.0))
+    return out
+
+
+# The takeoff heading the sweeps were designed and tuned under, in the FCU's
+# map frame. vision_odom_bridge turns the odometry +90 deg into ENU, so in the
+# simulator AND on the drone (91 deg, 2026-11-17) the nose sits along +y of the
+# map at takeoff. At this heading sweep_side 'right' is the sweep unchanged.
+DESIGN_HEADING = math.pi / 2.0
+
+
+def _design_turns(home_yaw):
+    return quarter_turns(home_yaw - DESIGN_HEADING)
+
+
+def sweep_frame_bounds(bounds, home_yaw, side):
+    """The box a sweep is BUILT on: the design frame, where the nose at
+    takeoff points along +y as in the simulator.
+
+    `plan_bounds` is turned into it by the takeoff heading's offset from
+    DESIGN_HEADING, snapped to a quarter turn (the box is centred on the
+    takeoff point and axis-aligned, so only a quarter turn maps it onto
+    itself) — a no-op at the usual ~90 deg. side 'left' then reflects it
+    across the nose line (x -> -x). Undo with `sweep_frame_path`.
+    """
+    b = rotate_bounds_90(bounds, -_design_turns(home_yaw))
+    return mirror_bounds_x(b) if side == "left" else b
+
+
+def sweep_frame_xy(xy, home_yaw, side):
+    """A map point (the vehicle) in the frame `sweep_frame_bounds` builds in."""
+    x, y = rotate_xy_90(xy, -_design_turns(home_yaw))
+    return (-x, y) if side == "left" else (x, y)
+
+
+def sweep_frame_path(path, home_yaw, side):
+    """A path built on `sweep_frame_bounds`, back in the map frame."""
+    if side == "left":
+        path = mirror_path_x(path)
+    return rotate_path_90(path, _design_turns(home_yaw))
+
+
+def mirror_bounds_x(bounds):
+    """The planning box reflected across x = 0."""
+    (min_x, min_y, min_z), (max_x, max_y, max_z) = bounds
+    return ((-max_x, min_y, min_z), (-min_x, max_y, max_z))
+
+
+def mirror_path_x(path):
+    """(x, y, z, yaw) waypoints reflected across x = 0: left <-> right for a
+    nose along y. Its own inverse."""
+    return [(-x, y, z, math.pi - yaw) for (x, y, z, yaw) in path]
+
+
 def _sweep_rect(bounds, inset_m, side_x_m, side_y_m):
     """The rectangle a sweep is flown on, or None if it collapses.
 

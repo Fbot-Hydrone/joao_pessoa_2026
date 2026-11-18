@@ -133,6 +133,15 @@ def generate_launch_description():
             description="ZED mount rotation [roll, pitch, yaw] deg, +pitch = "
                         "lens down. Default: the t15 support, upside down and "
                         "15 deg down. For the t00/t25 blocks use pitch 0/25."),
+        DeclareLaunchArgument(
+            "zed_tilt_from_imu", default_value="true",
+            description="Measure the ZED's roll and pitch with its own IMU at "
+                        "start and use those instead of zed_rpy_deg's (yaw "
+                        "always comes from zed_rpy_deg). The drone must be "
+                        "still and level when the stack starts. A reading "
+                        "that is not 1 g, or is more than 10 deg from "
+                        "zed_rpy_deg, is refused and zed_rpy_deg is used. "
+                        "2026-11-17: the t15 support measured 11.7 deg."),
 
         # ── Belly camera ────────────────────────────────────────────────────
         DeclareLaunchArgument(
@@ -214,6 +223,8 @@ def generate_launch_description():
             "camera_rpy_deg": ParameterValue(
                 LaunchConfiguration("zed_rpy_deg"),
                 value_type=List[float]),
+            "camera_tilt_from_imu": ParameterValue(
+                LaunchConfiguration("zed_tilt_from_imu"), value_type=bool),
         }],
     )
 

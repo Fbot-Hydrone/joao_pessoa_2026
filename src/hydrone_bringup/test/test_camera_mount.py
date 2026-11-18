@@ -12,7 +12,7 @@ import pytest
 from hydrone_bringup.camera_mount import (
     OPTICAL_QUAT, OPTICAL_QUAT_ROT180, base_from_camera_pose, is_upside_down,
     matrix_from_quat, mount_matrix, quat_from_matrix, quat_from_rpy_deg,
-    rotate_intrinsics_180, transform)
+    rotate_intrinsics_180, rpy_from_gravity, transform, wrap_deg)
 
 TILTS = [0.0, 10.0, 15.0, 25.0, 45.0]
 ROLLS = [0.0, 180.0]
@@ -135,3 +135,26 @@ def test_rotated_image_and_frame_agree():
         u2, v2 = _project(R_flip.T @ P, cx2, cy2)
         assert u2 == pytest.approx((W - 1) - u)
         assert v2 == pytest.approx((H - 1) - v)
+
+
+# ── Mount tilt measured by the camera's own IMU ─────────────────────────────
+
+@pytest.mark.parametrize("roll", ROLLS)
+@pytest.mark.parametrize("pitch", TILTS + [-10.0])
+@pytest.mark.parametrize("yaw", [0.0, 30.0])
+def test_rpy_from_gravity_inverts_the_mount(roll, pitch, yaw):
+    """A level vehicle's up, seen from the camera, gives the mount back."""
+    R = mount_matrix((0, 0, 0), [roll, pitch, yaw])[:3, :3]
+    acc = R.T @ np.array([0.0, 0.0, 9.81])
+    r, p, y = rpy_from_gravity(acc, yaw_deg=yaw, roll_hint_deg=roll)
+    assert wrap_deg(r - roll) == pytest.approx(0.0, abs=1e-6)
+    assert p == pytest.approx(pitch, abs=1e-6)
+    assert y == yaw
+
+
+def test_rpy_from_gravity_drone_bench_2026_11_17():
+    """The drone's ZED 2i on the bench: inverted, 11.7 deg down, not 15."""
+    r, p, _ = rpy_from_gravity((-1.987, 0.017, -9.583), roll_hint_deg=180.0)
+    assert r == pytest.approx(179.9, abs=0.1)
+    assert p == pytest.approx(11.7, abs=0.1)
+    assert is_upside_down([r, p, 0.0])

@@ -82,6 +82,32 @@ def mount_matrix(xyz, rpy_deg):
     return transform(xyz, quat_from_rpy_deg(rpy_deg))
 
 
+def rpy_from_gravity(acc_cam, yaw_deg=0.0, roll_hint_deg=0.0):
+    """The mount's roll and pitch, read off the camera's own accelerometer.
+
+    `acc_cam` is the specific force the IMU reads at REST, in the camera body
+    frame (X fwd / Y left / Z up, the SDK's RIGHT_HANDED_Z_UP_X_FWD): it points
+    UP, magnitude g. With the vehicle level, that vector is the body's +Z seen
+    from the camera, R^T·(0, 0, 1), and for R = Rz·Ry·Rx yaw drops out of it —
+    so yaw cannot be measured this way and is passed through.
+
+    Roll is returned on the branch closest to `roll_hint_deg`, so an inverted
+    mount reads 180 (or 179.9) rather than -179.9 and the log compares like
+    with like. Assumes the vehicle itself is level: any tilt of the airframe on
+    the ground goes into the answer.
+    """
+    ax, ay, az = (float(v) for v in acc_cam)
+    roll = math.degrees(math.atan2(ay, az))
+    pitch = math.degrees(math.atan2(-ax, math.hypot(ay, az)))
+    roll = roll_hint_deg + wrap_deg(roll - roll_hint_deg)
+    return [roll, pitch, float(yaw_deg)]
+
+
+def wrap_deg(a):
+    """An angle in degrees, wrapped to [-180, 180)."""
+    return (float(a) + 180.0) % 360.0 - 180.0
+
+
 def is_upside_down(rpy_deg):
     """True when the camera's own up points below the body's horizon."""
     return mount_matrix((0, 0, 0), rpy_deg)[2, 2] < 0.0

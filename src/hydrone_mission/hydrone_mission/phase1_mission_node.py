@@ -344,6 +344,13 @@ class Phase1MissionNode(Node):
         # The second is an EXPERIMENT and is opt-in for that reason: the first
         # is the one that has landed on four bases in a measured run.
         self.declare_parameter("search_mode", "u")
+        # Which hand the mapping sets off on, seen from the NOSE AT TAKEOFF.
+        # 'right' is the sweep exactly as the simulator flies it; 'left' is its
+        # mirror image across the nose line — same perimeter, lanes and U, but
+        # it runs off to the left and goes round the other way. Sweeps are
+        # built relative to the takeoff heading (coverage.sweep_frame_bounds),
+        # so this holds however the FCU's map happens to be turned.
+        self.declare_parameter("sweep_side", "right")
         # Where the belly camera's intrinsics come from, for map_sweep. The
         # lane pitch is derived from them at run time and cannot be a constant:
         # the simulated belly camera covers 5.0 m across at 2.5 m and the real
@@ -603,6 +610,17 @@ class Phase1MissionNode(Node):
         # this; a hover covers none of it.
         self.declare_parameter("min_descent_m", 0.30)
         self.declare_parameter("service_timeout_s", 30.0)
+        # Do not take the home pose until the FCU's HEADING has stopped
+        # moving: it must hold within fcu_settle_yaw_deg for fcu_settle_s.
+        # MEASURED on the drone 2026-11-17: home was taken 10 s before the
+        # FCU accepted the vision origin, at heading 9 deg, and the EKF yaw
+        # then swung 6 -> 50 -> 82 -> 101 -> 107 deg over ~40 s with the
+        # vehicle standing still. Home, the takeoff height and the sweep's
+        # orientation were all read off that moving estimate. After
+        # fcu_settle_timeout_s it goes ahead anyway, loudly. 0 disables.
+        self.declare_parameter("fcu_settle_s", 5.0)
+        self.declare_parameter("fcu_settle_yaw_deg", 2.0)
+        self.declare_parameter("fcu_settle_timeout_s", 120.0)
         self.declare_parameter("setpoint_hz", 10.0)
         # The box the planner may search in, [min_x, min_y, min_z, max_x,
         # max_y, max_z] in the pose frame. Worth setting: without bounds a
@@ -705,6 +723,11 @@ class Phase1MissionNode(Node):
             raise ValueError(
                 f"search_mode must be 'u' or 'map_sweep', got "
                 f"{self.search_mode!r}")
+        self.sweep_side = str(p("sweep_side")).strip().lower()
+        if self.sweep_side not in ("right", "left"):
+            raise ValueError(
+                f"sweep_side must be 'right' or 'left', got "
+                f"{self.sweep_side!r}")
         self.sweep_overlap = float(p("sweep_overlap"))
         self.sweep_max_surface = float(p("sweep_max_surface_m"))
         # Belly-camera intrinsics, filled by a subscription when map_sweep is
@@ -756,6 +779,9 @@ class Phase1MissionNode(Node):
         self.land_still_tol = float(p("land_still_tol_m"))
         self.min_descent = float(p("min_descent_m"))
         self.svc_timeout = float(p("service_timeout_s"))
+        self.fcu_settle_s = float(p("fcu_settle_s"))
+        self.fcu_settle_yaw_deg = float(p("fcu_settle_yaw_deg"))
+        self.fcu_settle_timeout_s = float(p("fcu_settle_timeout_s"))
         self.auto_start = bool(p("auto_start"))
         self.retry_period = float(p("retry_period_s"))
         self.dry_run = bool(p("dry_run"))
@@ -1069,6 +1095,7 @@ class Phase1MissionNode(Node):
     def _reset(self):
         self.state = self.WAIT_FCU
         self.home = None
+        self.home_yaw = coverage.DESIGN_HEADING
         self.base_registered = False
         self.landed_count = 0
         self._landed_xy = []
@@ -1189,12 +1216,54 @@ class Phase1MissionNode(Node):
         if self.vehicle is not None and not self.vehicle.ready():
             self._throttle("waiting for hydrone_controller actions...")
             return
+        if not self._fcu_heading_settled():
+            return
 
         self.home = (self.pose.pose.position.x, self.pose.pose.position.y)
+        self.home_yaw = yaw_of(self.pose)
         self.get_logger().info(
             f"home = ({self.home[0]:.2f}, {self.home[1]:.2f}), heading "
             f"{math.degrees(yaw_of(self.pose)):.0f} deg.")
         self._enter(self.ARMING)
+
+    def _fcu_heading_settled(self) -> bool:
+        """True once the FCU's yaw has held still for fcu_settle_s. See the
+        fcu_settle_s parameter for why. getattr defaults: a node built
+        without __init__ (the unit tests) does not wait."""
+        settle_s = getattr(self, "fcu_settle_s", 0.0)
+        if settle_s <= 0.0:
+            return True
+        now = self.get_clock().now().nanoseconds * 1e-9
+        yaw = yaw_of(self.pose)
+        if getattr(self, "_settle_hist", None) is None:
+            self._settle_hist = []
+            self._settle_t0 = now
+        hist = self._settle_hist
+        hist.append((now, yaw))
+        while hist and now - hist[0][0] > settle_s:
+            hist.pop(0)
+        spread = max(abs(math.degrees(math.atan2(math.sin(y - yaw),
+                                                 math.cos(y - yaw))))
+                     for _, y in hist)
+        waited = now - self._settle_t0
+        full = now - hist[0][0] >= settle_s * 0.9
+        if full and spread <= self.fcu_settle_yaw_deg:
+            self.get_logger().info(
+                f"FCU heading settled at {math.degrees(yaw):.0f} deg "
+                f"(within {spread:.1f} deg for {settle_s:.0f} s, after "
+                f"{waited:.0f} s).")
+            return True
+        if waited >= self.fcu_settle_timeout_s:
+            self.get_logger().error(
+                f"FCU heading still moving {spread:.1f} deg over "
+                f"{settle_s:.0f} s after {waited:.0f} s — taking home anyway. "
+                f"The EKF is not converged: check the vision feed and "
+                f"EK3_SRC1_YAW before flying.")
+            return True
+        self._throttle(
+            f"waiting for the FCU heading to settle — moved {spread:.1f} deg "
+            f"in the last {settle_s:.0f} s (now {math.degrees(yaw):.0f} deg).")
+        return False
 
     # ── ARMING ───────────────────────────────────────────────────────────────
 
@@ -1743,12 +1812,13 @@ class Phase1MissionNode(Node):
         be any.
         """
         if self._level == 1:
-            self._survey_path = coverage.perimeter_sweep(
-                self.plan_bounds, inset_m=self.survey_inset_m,
+            self._survey_path = self._sided(coverage.perimeter_sweep(
+                self._sweep_bounds(), inset_m=self.survey_inset_m,
                 z=self.takeoff_alt, start_corner=self._nearest_corner(),
-                side_x_m=self.u_side_x_m, side_y_m=self.u_side_y_m)
+                side_x_m=self.u_side_x_m, side_y_m=self.u_side_y_m))
             self.get_logger().info(
-                f"MAP SWEEP 1/2: closed perimeter at {self.takeoff_alt:.1f} m "
+                f"MAP SWEEP 1/2 (sweep_side {self.sweep_side}): "
+                f"closed perimeter at {self.takeoff_alt:.1f} m "
                 f"— {len(self._survey_path)} setpoints, four sides, back where "
                 f"it started. Building the map the belly camera will project "
                 f"into; the forward camera reports no pads in this mode.")
@@ -1763,9 +1833,9 @@ class Phase1MissionNode(Node):
                     "spacing would be invented. Landing on what the perimeter "
                     "already found.")
                 return False
-            self._survey_path = coverage.camera_lawnmower(
-                self.plan_bounds, swath_m=swath, z=self.takeoff_alt,
-                overlap=self.sweep_overlap, margin_m=self.survey_inset_m)
+            self._survey_path = self._sided(coverage.camera_lawnmower(
+                self._sweep_bounds(), swath_m=swath, z=self.takeoff_alt,
+                overlap=self.sweep_overlap, margin_m=self.survey_inset_m))
             lanes = len(self._survey_path) // 2
             self.get_logger().info(
                 f"MAP SWEEP 2/2: {lanes} lane(s) at {self.takeoff_alt:.1f} m — "
@@ -1807,10 +1877,10 @@ class Phase1MissionNode(Node):
             return self._begin_map_sweep_level()
 
         if self._level == 1:
-            self._survey_path = coverage.u_sweep(
-                self.plan_bounds, inset_m=self.survey_inset_m,
+            self._survey_path = self._sided(coverage.u_sweep(
+                self._sweep_bounds(), inset_m=self.survey_inset_m,
                 z=self.takeoff_alt, start_corner=self._nearest_corner(),
-                side_x_m=self.u_side_x_m, side_y_m=self.u_side_y_m)
+                side_x_m=self.u_side_x_m, side_y_m=self.u_side_y_m))
             self.get_logger().info(
                 f"SEARCH LEVEL 1: the U at {self.takeoff_alt:.1f} m — "
                 f"{len(self._survey_path)} setpoints, two corner turns, one "
@@ -1824,10 +1894,10 @@ class Phase1MissionNode(Node):
             # map: the belly camera has been projecting positions the whole
             # first pass, so the arena the second one flies over is better
             # known than the one the first saw.
-            self._survey_path = coverage.u_sweep(
-                self.plan_bounds, inset_m=self.survey_inset_m,
+            self._survey_path = self._sided(coverage.u_sweep(
+                self._sweep_bounds(), inset_m=self.survey_inset_m,
                 z=self.takeoff_alt, start_corner=self._nearest_corner(),
-                side_x_m=self.u_side_x_m, side_y_m=self.u_side_y_m)
+                side_x_m=self.u_side_x_m, side_y_m=self.u_side_y_m))
             self.get_logger().info(
                 f"SEARCH LEVEL 2: the same U at {self.takeoff_alt:.1f} m — a "
                 f"second pass over an arena the first one mapped.")
@@ -1851,17 +1921,48 @@ class Phase1MissionNode(Node):
         # what only a slow pass overhead used to.
         return False
 
+    def _sweep_frame(self):
+        """(heading the sweeps are oriented on, sweep_side)."""
+        if not hasattr(self, "sweep_side"):
+            # Built without __init__ (the unit tests): the original sweep.
+            return (coverage.DESIGN_HEADING, "right")
+        if getattr(self, "_sweep_yaw", None) is None:
+            # Read ONCE, at the first sweep build — airborne, after the EKF
+            # has had the takeoff to settle, and before the sweep turns the
+            # vehicle. Every level after reuses it so they stay aligned.
+            pose = getattr(self, "pose", None)
+            self._sweep_yaw = (yaw_of(pose) if pose is not None
+                               else getattr(self, "home_yaw",
+                                            coverage.DESIGN_HEADING))
+            self.get_logger().info(
+                f"sweep_side {self.sweep_side}: sweeps oriented on the "
+                f"heading at the first sweep, "
+                f"{math.degrees(self._sweep_yaw):.0f} deg.")
+        return (self._sweep_yaw, getattr(self, "sweep_side", "right"))
+
+    def _sweep_bounds(self):
+        """plan_bounds in the sweep's design frame, reflected for sweep_side
+        'left'. See coverage.sweep_frame_bounds; _sided undoes it."""
+        return coverage.sweep_frame_bounds(
+            self.plan_bounds, *self._sweep_frame())
+
+    def _sided(self, path):
+        """A path built on _sweep_bounds(), back in the map frame."""
+        return coverage.sweep_frame_path(path, *self._sweep_frame())
+
     def _nearest_corner(self) -> int:
         """Which inset corner the vehicle is closest to, so the sweep starts
-        where it already is instead of transiting first."""
-        (min_x, min_y, _), (max_x, max_y, _) = self.plan_bounds
+        where it already is instead of transiting first. Indexed in the frame
+        the sweep is BUILT in (mirrored for sweep_side 'left')."""
+        (min_x, min_y, _), (max_x, max_y, _) = self._sweep_bounds()
         i = self.survey_inset_m
         corners = [(min_x + i, min_y + i), (max_x - i, min_y + i),
                    (max_x - i, max_y - i), (min_x + i, max_y - i)]
         if self.pose is None:
             return 0
         here = (self.pose.pose.position.x, self.pose.pose.position.y)
-        return min(range(4), key=lambda k: math.dist(corners[k], here))
+        here = coverage.sweep_frame_xy(here, *self._sweep_frame())
+        return coverage.nearest_corner_index(corners, here)
 
     def _publish_plan(self, points, yaw):
         """The route, for RViz and for a human to check. Purely informational."""

@@ -51,8 +51,9 @@ Same tree as zed_mimic_node:
                                                  turned 180 about Z when the
                                                  images are rotated upright)
 
-The drone's ZED sits upside down and 15 deg nose down (camera_rpy_deg
-[180, 15, 0]). The SDK's image flip would hide that, but it turns IMU fusion
+The drone's ZED sits upside down and nose down (camera_rpy_deg [180, 15, 0]
+nominal; the roll and pitch actually used are measured by the ZED's IMU at
+start, see camera_tilt_from_imu). The SDK's image flip would hide that, but it turns IMU fusion
 off, so the flip is done here instead and the mount says the truth.
 
 `pad_detector_node` looks up base_link -> zed_left_camera_optical_frame and
@@ -77,7 +78,7 @@ from tf2_ros import StaticTransformBroadcaster, TransformBroadcaster
 from hydrone_bringup.camera_mount import (
     OPTICAL_QUAT, OPTICAL_QUAT_ROT180, base_from_camera_pose, is_upside_down,
     mount_matrix, quat_from_matrix, quat_from_rpy_deg,
-    rotate_intrinsics_180, transform)
+    rotate_intrinsics_180, rpy_from_gravity, transform, wrap_deg)
 
 
 FRAME_ODOM = "odom"
@@ -127,6 +128,16 @@ class ZedSdkNode(Node):
         # cx/cy follow. The SDK's own flip is not used because it turns off
         # IMU fusion in tracking. No-op for an upright mount.
         self.declare_parameter("upright_images", True)
+        # Measure the mount's roll and pitch with the ZED's own IMU at start
+        # instead of trusting camera_rpy_deg for them. The support bends and
+        # gets re-seated: the t15 block measured 11.7 deg, not 15, on
+        # 2026-11-17. Yaw cannot be seen by gravity and always comes from
+        # camera_rpy_deg. The vehicle must be standing still and level when
+        # the node starts (it is, on the takeoff base). If the reading is not
+        # a clean 1 g, or lands more than camera_tilt_max_dev_deg from
+        # camera_rpy_deg, it is refused and camera_rpy_deg is used as is.
+        self.declare_parameter("camera_tilt_from_imu", True)
+        self.declare_parameter("camera_tilt_max_dev_deg", 10.0)
         self.declare_parameter("serial_number", 0)
 
         p = lambda n: self.get_parameter(n).value
@@ -180,10 +191,6 @@ class ZedSdkNode(Node):
         self.height = info.camera_configuration.resolution.height
         calib = info.camera_configuration.calibration_parameters.left_cam
         self.fx, self.fy = float(calib.fx), float(calib.fy)
-        self.cx, self.cy = float(calib.cx), float(calib.cy)
-        if self.rotate_180:
-            self.cx, self.cy = rotate_intrinsics_180(
-                self.cx, self.cy, self.width, self.height)
         # The SDK's images, cloud and pose all belong to the LEFT lens, half a
         # baseline to the camera's left (on the drone's right when inverted).
         self.half_baseline = float(
@@ -193,6 +200,15 @@ class ZedSdkNode(Node):
         # is the lens' start pose; base_from_camera_pose needs to know which.
         self.gravity_world = bool(
             info.sensors_configuration.accelerometer_parameters.is_available)
+        if bool(p("camera_tilt_from_imu")) and self.gravity_world:
+            self._measure_tilt(float(p("camera_tilt_max_dev_deg")))
+        self.rotate_180 = bool(p("upright_images")) and is_upside_down(
+            self.rpy_deg)
+        if self.rotate_180:
+            self.cx, self.cy = rotate_intrinsics_180(
+                float(calib.cx), float(calib.cy), self.width, self.height)
+        else:
+            self.cx, self.cy = float(calib.cx), float(calib.cy)
         self.T_base_left = mount_matrix(
             p("camera_offset_xyz"), self.rpy_deg) @ transform(
             (0.0, self.half_baseline, 0.0), (0.0, 0.0, 0.0, 1.0))
@@ -250,6 +266,48 @@ class ZedSdkNode(Node):
     # ────────────────────────────────────────────────────────────────────────
     # Static TF tree — the same chain zed_mimic_node publishes
     # ────────────────────────────────────────────────────────────────────────
+
+    def _measure_tilt(self, max_dev_deg):
+        """Replace the configured roll/pitch with what the IMU reads at rest.
+
+        Averages ~1 s of accelerometer at start. See camera_tilt_from_imu.
+        """
+        import time
+        sl = self.sl
+        sensors = sl.SensorsData()
+        acc = []
+        t_end = time.monotonic() + 1.0
+        while time.monotonic() < t_end:
+            if self.cam.get_sensors_data(
+                    sensors, sl.TIME_REFERENCE.CURRENT) == sl.ERROR_CODE.SUCCESS:
+                acc.append(sensors.get_imu_data().get_linear_acceleration())
+            time.sleep(0.01)
+        cfg = list(self.rpy_deg)
+        if len(acc) < 10:
+            self.get_logger().warn(
+                f"mount tilt: no IMU samples, keeping camera_rpy_deg {cfg}")
+            return
+        a = np.mean(np.asarray(acc, dtype=float), axis=0)
+        g = float(np.linalg.norm(a))
+        meas = rpy_from_gravity(a, yaw_deg=cfg[2], roll_hint_deg=cfg[0])
+        dev = max(abs(wrap_deg(meas[0] - cfg[0])), abs(meas[1] - cfg[1]))
+        if abs(g - 9.81) > 0.5:
+            self.get_logger().warn(
+                f"mount tilt: |acc| = {g:.2f} m/s^2, the vehicle is moving; "
+                f"keeping camera_rpy_deg {cfg}")
+            return
+        if dev > max_dev_deg:
+            self.get_logger().error(
+                f"mount tilt: IMU reads roll {meas[0]:.1f} pitch {meas[1]:.1f} "
+                f"deg, {dev:.1f} deg from camera_rpy_deg {cfg} (limit "
+                f"{max_dev_deg:.0f}). Vehicle not level, or the mount is not "
+                f"what camera_rpy_deg says — keeping camera_rpy_deg.")
+            return
+        self.rpy_deg = [round(meas[0], 2), round(meas[1], 2), cfg[2]]
+        self.get_logger().info(
+            f"mount tilt from the ZED IMU: roll {meas[0]:.1f} pitch "
+            f"{meas[1]:.1f} deg (camera_rpy_deg said {cfg[0]:.1f} / "
+            f"{cfg[1]:.1f}, off by {dev:.1f}); using {self.rpy_deg}")
 
     def _send_static_tfs(self):
         ox, oy, oz = self.get_parameter("camera_offset_xyz").value

@@ -146,6 +146,13 @@ def generate_launch_description():
                         "covers, and is the default — see this file's docstring. "
                         "phase1_zed_detect.launch.py sets 'u'."),
         DeclareLaunchArgument(
+            "sweep_side", default_value="right",
+            description="Which hand the mapping sets off on, seen from the "
+                        "takeoff heading: 'right' (as it always flew) or "
+                        "'left', the exact mirror image — same perimeter, "
+                        "lanes and U, reflected across the takeoff heading "
+                        "line. Choose to suit the arena layout."),
+        DeclareLaunchArgument(
             "forward_detector", default_value="false",
             description="Run the forward ZED pad detector. False leaves the "
                         "ZED doing odometry and mapping only, which is what "
@@ -204,6 +211,17 @@ def generate_launch_description():
                  "pad_seg_yolo11.pt"])),
         DeclareLaunchArgument(
             "forward_yolo_conf_threshold", default_value="0.5"),
+        DeclareLaunchArgument(
+            "plan_bounds", default_value="[-5.0, -5.0, 0.3, 5.0, 5.0, 2.5]",
+            description="Caixa do planejador e das varreduras [min_x, min_y, "
+                        "min_z, max_x, max_y, max_z] no frame do FCU. O "
+                        "quadrado de mapeamento fica nela, recuado "
+                        "survey_inset_m de cada lado; desloque-a para a base "
+                        "de decolagem ser um canto."),
+        DeclareLaunchArgument(
+            "yolo_device", default_value="cpu",
+            description="Device do YOLO nos dois detectores: cpu ou cuda:0 "
+                        "(Orin com torch CUDA)."),
         DeclareLaunchArgument(
             "map_down_detections", default_value=DOWN_DETECTIONS,
             description="Belly-camera topic pad_map should FUSE, as opposed to "
@@ -685,6 +703,7 @@ def generate_launch_description():
             "yolo_conf_threshold": ParameterValue(
                 LaunchConfiguration("forward_yolo_conf_threshold"),
                 value_type=float),
+            "yolo_device": LaunchConfiguration("yolo_device"),
         }],
     )
 
@@ -783,6 +802,7 @@ def generate_launch_description():
             "yolo_conf_threshold": ParameterValue(
                 LaunchConfiguration("down_yolo_conf_threshold"),
                 value_type=float),
+            "yolo_device": LaunchConfiguration("yolo_device"),
         }],
     )
 
@@ -1039,6 +1059,8 @@ def generate_launch_description():
             "takeoff_alt": ParameterValue(takeoff_alt, value_type=float),
             "target_bases": ParameterValue(
                 LaunchConfiguration("target_bases"), value_type=int),
+            "plan_bounds": ParameterValue(
+                LaunchConfiguration("plan_bounds"), value_type=List[float]),
             "settle_s": ParameterValue(
                 LaunchConfiguration("settle_s"), value_type=float),
             "dwell_s": ParameterValue(
@@ -1051,6 +1073,7 @@ def generate_launch_description():
             "survey_inset_m": ParameterValue(
                 LaunchConfiguration("survey_inset_m"), value_type=float),
             "search_mode": LaunchConfiguration("search_mode"),
+            "sweep_side": LaunchConfiguration("sweep_side"),
             "sweep_overlap": ParameterValue(
                 LaunchConfiguration("sweep_overlap"), value_type=float),
             "sweep_max_surface_m": ParameterValue(
