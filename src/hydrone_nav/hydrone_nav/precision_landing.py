@@ -12,9 +12,13 @@ switched by a launch argument of the phase that uses it:
   trust_map_observations land on the MAP position when the belly cannot
                          confirm but the map has this many looks (glare on
                          tall bases). <= 0 is OFF.
-  belly_offset_xy        where the belly camera sits from the vehicle centre.
+  belly_offset_xy        where the belly camera sits from the vehicle centre,
+                         [x forward, y RIGHT] — NOT ROS FLU. target_uv
+                         shifts u by -oy, so +oy means the camera is to
+                         the right (image +u is body right).
 
-Frames: image +u right, +v down. Body is ROS FLU (x forward, y LEFT).
+Frames: image +u right, +v down. Body steps (body_to_world) are ROS FLU
+(x forward, y LEFT); belly_offset_xy alone is y RIGHT, see above.
 """
 
 import math

@@ -111,6 +111,13 @@ def generate_launch_description():
             # THE CAMERA, which the hardware wrapper knows and the shared
             # autonomy file cannot.
             "field_mode": "dark_blue",
+            # A fact about THIS AIRFRAME, like field_mode is about the pad: the
+            # belly camera (C270) is bolted 6.5 cm forward and 7.1 cm to the
+            # LEFT of the motor centre (measured 2026-11-18). belly_offset_xy is
+            # [x forward, y RIGHT] (precision_landing.target_uv), hence -0.071.
+            # Must agree with sources_real's down_cam_mount_xyz [0.065, 0.071]
+            # (ROS FLU, y LEFT) — test_launch_arguments checks both.
+            "belly_offset_xy": "[0.065, -0.071]",
             # The whole point of this file.
             "dry_run": "true",
         }.items(),

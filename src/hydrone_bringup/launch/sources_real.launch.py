@@ -193,9 +193,12 @@ def generate_launch_description():
                         "toward the frame edges, recapture with wider "
                         "coverage before blaming the mount."),
         DeclareLaunchArgument(
-            "down_cam_mount_xyz", default_value="[0.0, 0.0, -0.12]",
-            description="Belly camera position in base_link, metres. THE "
-                        "SIMULATED MOUNT is the default — measure your own."),
+            "down_cam_mount_xyz", default_value="[0.065, 0.071, -0.12]",
+            description="Belly camera position in base_link (ROS FLU: x "
+                        "forward, y LEFT), metres. x/y MEASURED on the big "
+                        "drone 2026-11-18 (6.5 cm forward, 7.1 cm left); z is "
+                        "still the simulated -0.12. phase1_real's "
+                        "belly_offset_xy must mirror x/y (it is y RIGHT)."),
         DeclareLaunchArgument(
             "down_cam_mount_rpy_deg", default_value="[0.0, 90.0, 0.0]",
             description="Belly camera orientation in base_link, degrees. "

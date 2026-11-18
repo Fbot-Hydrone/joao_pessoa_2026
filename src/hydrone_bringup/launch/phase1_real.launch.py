@@ -64,6 +64,12 @@ from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 
 
+# Belly camera offset from the motor centre, [x forward, y RIGHT], metres.
+# Measured on the big drone 2026-11-18. Mirrors down_cam_mount_xyz in
+# sources_real.launch.py (which is ROS FLU, y LEFT).
+BELLY_OFFSET_XY = "[0.065, -0.071]"
+
+
 def generate_launch_description():
     launch_dir = os.path.join(
         get_package_share_directory("hydrone_bringup"), "launch")
@@ -98,7 +104,16 @@ def generate_launch_description():
     autonomy = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(launch_dir, "phase1.launch.py")),
-        launch_arguments={"field_mode": "dark_blue"}.items(),
+        launch_arguments={
+            "field_mode": "dark_blue",
+            # A fact about THIS AIRFRAME, like field_mode is about the pad: the
+            # belly camera (C270) is bolted 6.5 cm forward and 7.1 cm to the
+            # LEFT of the motor centre (measured 2026-11-18). belly_offset_xy is
+            # [x forward, y RIGHT] (precision_landing.target_uv), hence -0.071.
+            # Must agree with sources_real's down_cam_mount_xyz [0.065, 0.071]
+            # (ROS FLU, y LEFT) — test_launch_arguments checks both.
+            "belly_offset_xy": BELLY_OFFSET_XY,
+        }.items(),
     )
 
     return LaunchDescription([sources, autonomy])

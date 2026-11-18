@@ -89,7 +89,10 @@ FORWARDING_EXEMPT = {
     # A fact about the PAD IN FRONT OF THE CAMERA — exactly what a hardware
     # wrapper knows and the shared autonomy file cannot. Forwarded without
     # being declared, so a command-line value still wins.
-    ("phase1_real.launch.py", "phase1.launch.py"): {"field_mode"},
+    # belly_offset_xy: a fact about THIS AIRFRAME (where the belly camera is
+    # bolted), which the shared autonomy file cannot know. Same idiom.
+    ("phase1_real.launch.py", "phase1.launch.py"):
+        {"field_mode", "belly_offset_xy"},
     # Same exemption, same reason, one camera over: a fact about the pad in
     # front of whichever camera is doing the detecting in THIS mission.
     ("phase1_zed_detect_real.launch.py", "phase1_zed_detect.launch.py"):
@@ -98,7 +101,7 @@ FORWARDING_EXEMPT = {
     # somebody would edit elsewhere and expect to win, and dry_run is asserted
     # to actually arrive by test_the_dry_launch_really_is_dry.
     ("phase1_dry.launch.py", "phase1.launch.py"):
-        {"field_mode", "dry_run"},
+        {"field_mode", "dry_run", "belly_offset_xy"},
     ("phase1_dry.launch.py", "sources_real.launch.py"):
         {"zed_point_cloud"},
 }
