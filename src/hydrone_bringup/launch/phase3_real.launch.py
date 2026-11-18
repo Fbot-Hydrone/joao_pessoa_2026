@@ -42,6 +42,7 @@ def generate_launch_description():
         launch_arguments={
             "mission": "none",     # the maze node would fight for the vehicle
             "map_name": "phase3",
+            "lio_voxel": "coarse",  # open arena: the maze's 0.1 m voxels buy nothing here
         }.items(),
     )
 

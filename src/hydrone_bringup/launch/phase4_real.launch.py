@@ -13,7 +13,12 @@ sources is the same node with the same parameters; what differs:
 
   livox_ros_driver2   the Mid-360 itself (config/livox/mid360.json) replaces
                       livox_mimic + ardubridge -> /livox/lidar, /livox/imu
-  fast_lio            fast_lio_mid360_real.yaml: the real IMU sits off the
+  lio:=superlio       (default) Super-LIO, superlio_mid360_real_<lio_voxel>.yaml,
+                      and superlio_bridge, which republishes it as FAST-LIO's
+                      /Odometry + /cloud_registered in camera_init. The sim
+                      runs FAST-LIO; on the Jetson Nano FAST-LIO only keeps
+                      up at 0.4 m voxels, Super-LIO at 0.1 m (bench, 2026-11-18)
+  lio:=fastlio        fast_lio_mid360_real.yaml: the real IMU sits off the
                       lidar origin, the mimic's does not
   mavros              fcu_url to the Pixhawk instead of SITL; no timeouts.yaml
                       (real time runs at real time)
@@ -76,11 +81,25 @@ def _launch_setup(context, *args, **kwargs):
         }],
     )
 
-    fast_lio = Node(
-        package='fast_lio', executable='fastlio_mapping', name='fast_lio',
-        output='screen',
-        parameters=[os.path.join(lio_pkg, 'config', 'fast_lio_mid360_real.yaml')],
-    )
+    # The LIO backend. Both end up as /Odometry + /cloud_registered in
+    # camera_init, so the adapter and everything after it don't know which ran.
+    backend, voxel = lc('lio'), lc('lio_voxel')
+    if backend == 'fastlio':
+        lio = [Node(
+            package='fast_lio', executable='fastlio_mapping', name='fast_lio',
+            output='screen',
+            parameters=[os.path.join(lio_pkg, 'config', 'fast_lio_mid360_real.yaml')],
+        )]
+    elif backend == 'superlio' and voxel in ('fine', 'coarse'):
+        lio = [
+            Node(package='super_lio', executable='super_lio_node', name='super_lio',
+                 output='screen',
+                 parameters=[os.path.join(lio_pkg, 'config', f'superlio_mid360_real_{voxel}.yaml')]),
+            Node(package='hydrone_lio', executable='superlio_bridge', output='screen'),
+        ]
+    else:
+        raise RuntimeError(f"lio:={backend} lio_voxel:={voxel}: lio is superlio or fastlio, "
+                           "lio_voxel fine or coarse")
 
     adapter = Node(
         package='hydrone_lio', executable='lio_odom_adapter', output='screen',
@@ -169,7 +188,7 @@ def _launch_setup(context, *args, **kwargs):
                               'auto_start': auto}]),
         ]
 
-    return [livox, fast_lio, adapter, prior, mavros, streams, lio_nav, lio_map, maze] + known
+    return [livox] + lio + [adapter, prior, mavros, streams, lio_nav, lio_map, maze] + known
 
 
 def generate_launch_description():
@@ -183,6 +202,14 @@ def generate_launch_description():
             'lidar_mount', default_value='[0.0, 0.0, 0.1]',
             description='Mid-360 origin over base_link, m. The sim mount — measure it.'),
         DeclareLaunchArgument('lidar_rpy_deg', default_value='[0.0, 0.0, 0.0]'),
+        DeclareLaunchArgument(
+            'lio', default_value='superlio',
+            description="LIO backend: superlio (Super-LIO + superlio_bridge) or fastlio. "
+                        'On the Jetson Nano FAST-LIO keeps up only at 0.4 m voxels.'),
+        DeclareLaunchArgument(
+            'lio_voxel', default_value='fine',
+            description='Super-LIO voxels: fine (0.1 m, the maze) or coarse (0.4/0.5 m, '
+                        'phase 3). FAST-LIO always runs fast_lio_mid360_real.yaml.'),
         DeclareLaunchArgument(
             'gate', default_value='false',
             description='Motion-prior gate: needs ESC RPM telemetry on '

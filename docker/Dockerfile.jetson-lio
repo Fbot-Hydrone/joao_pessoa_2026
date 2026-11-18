@@ -9,6 +9,7 @@
 # What is added is what docker/Dockerfile.pi adds for the Kopis X8:
 #   Livox-SDK2 + livox_ros_driver2 1.2.6   the real Mid-360 (an underlay)
 #   fast_lio, hydrone_lio                   the LIO odometry
+#   super_lio (+ basic), glog               the LIO the real drone runs (lio:=superlio)
 #   hydrone_confined                        the phase 4 known-maze stack
 #   mediapipe                               gesture_camera (phase 3)
 # Build time on the Tegra X1 (4 GB + 6.9 GB swap), what makes it bearable:
@@ -61,6 +62,16 @@ COPY src/fast_lio src/fast_lio
 RUN . /opt/ros/humble/setup.sh && . /opt/livox_ws/install/setup.sh \
     && MAKEFLAGS=-j2 colcon build --symlink-install \
          --cmake-args -DCMAKE_BUILD_TYPE=Release --packages-select fast_lio
+
+# Super-LIO (lio:=superlio, the real drone's default; src/super_lio/VENDORED.md).
+# glog is the one dependency the image lacks. Its own layers after FAST-LIO so
+# a change here keeps the slow ones cached; ~7 min at -j2 (it links with LTO).
+RUN apt-get update && apt-get install -y --no-install-recommends libgoogle-glog-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY src/super_lio src/super_lio
+RUN . /opt/ros/humble/setup.sh && . /opt/livox_ws/install/setup.sh && . /ws/install/setup.sh \
+    && MAKEFLAGS=-j2 colcon build --symlink-install \
+         --cmake-args -DCMAKE_BUILD_TYPE=Release --packages-select basic super_lio
 
 # The project packages, as Dockerfile.jetson does it but with the new ones.
 # hydrone_localization / hydrone_map from the phase-1 image are left alone.

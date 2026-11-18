@@ -1,0 +1,52 @@
+# Super-LIO on the real Kopis Mid-360, FINE: phase 4 (in the maze), lio_voxel:=fine.
+# 0.1 m scan downsample and map voxels. Bench, room bag, Super-LIO alone on the
+# Jetson Nano (2026-11-18): 51% of one core, 76 MB, kept up, 4 cm loop error.
+# FAST-LIO at the same voxels could not keep up there (dropped 40%, diverged).
+#   blind 0.25 m (upstream 2.0 would throw away most of a maze), 1 point in 3,
+#   extrinsic and IMU noise as fast_lio_mid360_real.yaml. Map saving off.
+#   output.map + dense: the full undistorted scan on /lio/cloud_world, which
+#   superlio_bridge turns into /cloud_registered (FAST-LIO's dense_publish_en).
+#   output.robot false: Super-LIO can publish /mavros/vision_pose/pose by
+#   itself, which would bypass lio_odom_adapter's gate and lio_nav.
+/**:
+  ros__parameters:
+    lio.map.save_map: false
+    lio.map.if_filter: true
+    lio.map.save_map_dir: "/tmp/superlio_map"
+    lio.map.map_name: "map.pcd"
+    lio.map.ds_size: 0.25
+    lio.map.save_interval: -1
+    lio.ros.lidar_topic: "/livox/lidar"
+    lio.ros.imu_topic: "/livox/imu"
+    lio.sensor.lidar_type: 1
+    lio.sensor.blind: 0.25
+    lio.sensor.maxrange: 60.0
+    lio.sensor.filter_rate: 3
+    lio.sensor.enable_downsample: true
+    lio.sensor.voxel_fliter_size: 0.1
+    lio.sensor.gravity_norm: 9.7946
+    lio.sensor.imu_type: 1
+    lio.sensor.imu_na: 0.1
+    lio.sensor.imu_ng: 0.1
+    lio.sensor.imu_nba: 0.0001
+    lio.sensor.imu_nbg: 0.0001
+    lio.extrinsic.lidar_imu: [-0.011, -0.02329, 0.04412,
+                              1.0, 0.0, 0.0,
+                              0.0, 1.0, 0.0,
+                              0.0, 0.0, 1.0]
+    lio.extrinsic.odom_robo: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    lio.hash_map.hash_capacity: 2000000
+    lio.hash_map.vox_resolution: 0.1
+    lio.kf.kf_type: 0
+    lio.kf.kf_max_iterations: 4
+    lio.kf.kf_align_gravity: true
+    lio.kf.kf_quit_eps: 0.001
+    lio.output.robot: false      # never: it would publish /mavros/vision_pose/pose itself
+    lio.output.plan_env_world: false
+    lio.output.plan_env_body: false
+    lio.output.ml_map: false
+    lio.output.planner: false
+    lio.output.map: true
+    lio.output.dense: true
+    lio.output.pub_step: 1
+    lio.eva.timer: false

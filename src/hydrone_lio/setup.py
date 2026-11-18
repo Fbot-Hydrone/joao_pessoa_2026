@@ -25,6 +25,7 @@ setup(
             'lio_odom_adapter = hydrone_lio.lio_odom_adapter:main',
             'motion_prior_node = hydrone_lio.motion_prior_node:main',
             'lio_map_node = hydrone_lio.lio_map_node:main',
+            'superlio_bridge = hydrone_lio.superlio_bridge:main',
         ],
     },
 )
