@@ -7,7 +7,7 @@ import numpy as np
 from sensor_msgs.msg import PointCloud2, PointField
 
 from hydrone_lio.geometry import inv_tf, make_tf, rpy_to_matrix
-from hydrone_lio.superlio_bridge import transform_cloud
+from hydrone_lio.superlio_bridge import Watchdog, transform_cloud
 
 
 def _cloud(points):
@@ -45,3 +45,27 @@ def test_start_pose_becomes_identity_and_motion_is_kept():
     p_w = np.array([5.0, 1.0, -0.5, 1.0])
     out = _xyz(transform_cloud(_cloud([list(p_w[:3]) + [0]]), inv_tf(t0)))
     assert np.allclose(out[0, :3], (inv_tf(t0) @ p_w)[:3], atol=1e-5)
+
+
+def _walk(w, poses):
+    return [w.check(t, np.array(xyz, dtype=float)) for t, xyz in poses]
+
+
+def test_watchdog_passes_normal_motion():
+    w = Watchdog(max_gap=0.5, max_speed=5.0)
+    # 10 Hz at 1 m/s, then a 0.3 s hiccup: all fine
+    poses = [(0.1 * i, (0.1 * i, 0, 0)) for i in range(20)] + [(2.2, (2.2, 0, 0))]
+    assert _walk(w, poses) == [None] * len(poses)
+
+
+def test_watchdog_latches_on_gap_and_stays_lost():
+    w = Watchdog(max_gap=0.5, max_speed=5.0)
+    r = _walk(w, [(0.0, (0, 0, 0)), (0.1, (0, 0, 0)), (80.1, (0, 0, 0)), (80.2, (0, 0, 0))])
+    assert r[:2] == [None, None]
+    assert 'without a pose' in r[2] and r[3] == r[2]
+
+
+def test_watchdog_latches_on_jump():
+    w = Watchdog(max_gap=0.5, max_speed=5.0)
+    r = _walk(w, [(0.0, (0, 0, 0)), (0.1, (0.3, 0, 0)), (0.2, (2000, 3000, -3000))])
+    assert r[:2] == [None, None] and 'jump' in r[2]

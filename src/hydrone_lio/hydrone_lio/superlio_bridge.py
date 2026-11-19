@@ -20,6 +20,14 @@ Out:  /Odometry          camera_init -> body, as FAST-LIO publishes it
 
 T0 comes from the first pose, so start with the drone still, as FAST-LIO needs
 anyway. A restarted Super-LIO starts a new world: restart this node with it.
+
+Watchdog: if the poses stop for more than max_gap s (stamps) or one jumps
+faster than max_speed m/s, the bridge latches "LIO lost" and publishes nothing
+more until it is restarted. After a Livox link drop Super-LIO resumes without
+the motion in between and diverges (2026-11-18 bench: kilometres), and the
+Cube re-initialised its EKF on that. Silence instead makes the EKF stop aiding
+and fall to its own failsafe. Never resumes on its own: a re-initialised LIO
+has a new origin that no longer matches the Cube's.
 """
 
 import numpy as np
@@ -35,6 +43,27 @@ from tf2_ros import TransformBroadcaster
 from hydrone_lio.geometry import inv_tf, make_tf, matrix_to_quat, quat_to_matrix
 
 
+class Watchdog:
+    """Latches on the first pose gap > max_gap s or jump > max_speed m/s."""
+
+    def __init__(self, max_gap, max_speed):
+        self.max_gap, self.max_speed = max_gap, max_speed
+        self.last = None
+        self.lost = None          # reason, once latched
+
+    def check(self, t, xyz):
+        """Feed one pose (stamp in s, position); returns the reason if lost."""
+        if self.lost is None and self.last is not None:
+            dt = t - self.last[0]
+            dist = float(np.linalg.norm(xyz - self.last[1]))
+            if dt > self.max_gap:
+                self.lost = f'{dt:.2f} s without a pose (max_gap {self.max_gap})'
+            elif dt > 0 and dist / dt > self.max_speed:
+                self.lost = f'jump {dist:.2f} m in {dt:.3f} s (max_speed {self.max_speed})'
+        self.last = (t, xyz)
+        return self.lost
+
+
 class SuperLioBridge(Node):
 
     def __init__(self):
@@ -47,9 +76,12 @@ class SuperLioBridge(Node):
         dp('frame', 'camera_init')
         dp('child_frame', 'body')
         dp('publish_tf', True)
+        dp('max_gap', 0.5)
+        dp('max_speed', 5.0)
         p = lambda n: self.get_parameter(n).value  # noqa: E731
         self.frame, self.child = p('frame'), p('child_frame')
         self.t0_inv = None
+        self.watchdog = Watchdog(float(p('max_gap')), float(p('max_speed')))
         self.pub_odom = self.create_publisher(Odometry, p('out_odom'), 20)
         self.pub_cloud = self.create_publisher(PointCloud2, p('out_cloud'), 20)
         self.tf = TransformBroadcaster(self) if p('publish_tf') else None
@@ -60,6 +92,14 @@ class SuperLioBridge(Node):
 
     def _cb_odom(self, msg: Odometry):
         q, pp = msg.pose.pose.orientation, msg.pose.pose.position
+        was_lost = self.watchdog.lost
+        stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        lost = self.watchdog.check(stamp, np.array([pp.x, pp.y, pp.z]))
+        if lost:
+            if not was_lost:
+                self.get_logger().error(f'LIO LOST, publishing nothing more: {lost}. '
+                                        'Restart Super-LIO and this bridge.')
+            return
         t_w_imu = make_tf(quat_to_matrix(q.x, q.y, q.z, q.w), np.array([pp.x, pp.y, pp.z]))
         if self.t0_inv is None:
             self.t0_inv = inv_tf(t_w_imu)
@@ -93,7 +133,7 @@ class SuperLioBridge(Node):
             self.tf.sendTransform(tf)
 
     def _cb_cloud(self, msg: PointCloud2):
-        if self.t0_inv is None:
+        if self.t0_inv is None or self.watchdog.lost:
             return
         transform_cloud(msg, self.t0_inv)
         msg.header.frame_id = self.frame
