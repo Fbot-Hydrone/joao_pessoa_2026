@@ -42,6 +42,7 @@ from geometry_msgs.msg import PoseStamped
 
 from hydrone_msgs.msg import Pad, PadDetection, PadMap
 from sensor_msgs.msg import CameraInfo
+from std_msgs.msg import String
 from hydrone_nav import servo as servo_module
 from hydrone_mission.phase1_mission_node import (
     Phase1MissionNode, wrap_pi, yaw_of)
@@ -1353,3 +1354,95 @@ def test_a_dry_run_lands_on_stillness_with_no_vehicle(node):
         node._do_land()
     assert node.landed_count == 1
     assert node.state == node.DWELL
+
+
+# ── 2026-11-18: floor-referenced height on the real drone ───────────────────
+
+class RecordingVehicle(FakeVehicle):
+    def takeoff(self, *a, **k):
+        self.takeoff_args = (a, k)
+        return self._job("takeoff")
+
+
+def test_a_takeoff_from_a_base_climbs_to_takeoff_alt_not_by_it(flying):
+    """Standing on the 0.5 m base (z = 0.5 above the floor), takeoff_alt 2.0
+    climbs 1.5 m, not 2.0 on top of the base (every 2026-11-17 take-off)."""
+    flying.vehicle = RecordingVehicle()
+    flying.takeoff_alt = 2.0
+    set_pose(flying, 0.0, 0.0, z=0.5)
+    enter(flying, flying.TAKEOFF)
+    flying._do_takeoff()
+    (climb,), k = flying.vehicle.takeoff_args
+    assert climb == pytest.approx(1.5)
+    assert k["hold_z"] == pytest.approx(2.0)
+
+
+def test_a_takeoff_from_above_takeoff_alt_still_clears_the_base(flying):
+    flying.vehicle = RecordingVehicle()
+    flying.takeoff_alt = 1.0
+    set_pose(flying, 0.0, 0.0, z=1.5)            # on the 1.5 m house
+    enter(flying, flying.TAKEOFF)
+    flying._do_takeoff()
+    (climb,), k = flying.vehicle.takeoff_args
+    assert climb == pytest.approx(flying.takeoff_min_climb)
+    assert k["hold_z"] == pytest.approx(1.5 + flying.takeoff_min_climb)
+
+
+def test_a_tip_over_on_takeoff_aborts_without_rearming(flying):
+    set_pose(flying, 0.0, 0.0, z=0.5)
+    flying.vehicle.next = FakeJob(ok=False,
+                                  message="tip-over at 60 deg, motors cut")
+    enter(flying, flying.TAKEOFF)
+    flying._do_takeoff()
+    flying._do_takeoff()
+    assert flying.state == flying.ABORTED
+
+
+def test_an_unexpected_disarm_in_flight_aborts(flying):
+    """2026-11-17 22:59: the pilot cut the motors and the mission searched
+    on for 3.5 minutes, streaming setpoints at a vehicle on the floor."""
+    flying.mav_state.armed = True
+    flying._cb_state(flying.mav_state)
+    enter(flying, flying.TRAVEL)
+    flying.mav_state.armed = False
+    assert flying._disarmed_in_flight()
+    assert flying.state == flying.ABORTED
+
+
+def test_a_disarm_on_the_base_during_takeoff_is_left_to_the_retry(flying):
+    set_pose(flying, 0.0, 0.0, z=0.5)
+    flying.mav_state.armed = True
+    flying._cb_state(flying.mav_state)
+    enter(flying, flying.TAKEOFF)
+    flying.mav_state.armed = False
+    assert not flying._disarmed_in_flight()
+    set_pose(flying, 0.0, 0.0, z=1.2)            # it HAD left the base
+    assert flying._disarmed_in_flight()
+
+
+def test_a_disarm_while_landing_is_not_an_abort(flying):
+    flying.mav_state.armed = True
+    flying._cb_state(flying.mav_state)
+    enter(flying, flying.LAND)
+    flying.mav_state.armed = False
+    assert not flying._disarmed_in_flight()
+
+
+def test_no_arming_with_a_cruise_below_the_house(node):
+    node.ground_z = 0.0                          # floor-referenced z
+    node.sweep_max_surface = 1.6
+    node.takeoff_alt = 1.4                       # the old "above the base"
+    assert not node._height_ready()
+    node.takeoff_alt = 2.1
+    assert node._height_ready()
+
+
+def test_no_arming_until_the_height_datum_is_confirmed(node):
+    node.ground_z, node.sweep_max_surface, node.takeoff_alt = 0.0, 1.6, 2.1
+    node._cb_surface(String(data='{"fcu_ok": true, "datum_ok": false}'))
+    assert not node._height_ready()
+    node._cb_surface(String(data='{"fcu_ok": true, "datum_ok": true}'))
+    assert node._height_ready()
+    node._cb_surface(String(data='{"fcu_ok": true, "datum_ok": true, '
+                                 '"datum_off": "gave up"}'))
+    assert not node._height_ready()

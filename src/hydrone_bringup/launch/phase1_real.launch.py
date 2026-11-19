@@ -62,12 +62,30 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration, PythonExpression
 
 
 # Belly camera offset from the motor centre, [x forward, y RIGHT], metres.
 # Measured on the big drone 2026-11-18. Mirrors down_cam_mount_xyz in
 # sources_real.launch.py (which is ROS FLU, y LEFT).
 BELLY_OFFSET_XY = "[0.065, -0.071]"
+
+
+def ground_z():
+    """Where the arena FLOOR is in the FCU's z — a fact about how this airframe
+    measures height, which phase1.launch.py cannot know.
+
+    surface_offset:=true (default): the Orin feeds the EKF a floor-referenced
+    rangefinder and pins its datum (hydrone_localization.surface_offset_node),
+    so z is the landing gear's height above the FLOOR and the floor is 0.
+    surface_offset:=false: z is the old rangefinder height, ~0 on the takeoff
+    base, so the floor is one base height below it.
+    """
+    # A one-element list: launch_arguments takes substitution SEQUENCES.
+    return [PythonExpression([
+        "0.0 if '", LaunchConfiguration("surface_offset", default="true"),
+        "'.lower() in ('true', '1') else -float('",
+        LaunchConfiguration("takeoff_base_height_m", default="0.5"), "')"])]
 
 
 def generate_launch_description():
@@ -113,6 +131,9 @@ def generate_launch_description():
             # Must agree with sources_real's down_cam_mount_xyz [0.065, 0.071]
             # (ROS FLU, y LEFT) — test_launch_arguments checks both.
             "belly_offset_xy": BELLY_OFFSET_XY,
+            # The floor's z in the FCU frame: 0 with surface_offset (see
+            # ground_z()). The sim default (-0.7) is a fact about the SIM.
+            "ground_z": ground_z(),
         }.items(),
     )
 

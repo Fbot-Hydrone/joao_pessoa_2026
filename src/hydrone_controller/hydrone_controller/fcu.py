@@ -12,7 +12,15 @@ from rclpy.qos import qos_profile_sensor_data
 
 from geometry_msgs.msg import PoseStamped
 from mavros_msgs.msg import State, StatusText
-from mavros_msgs.srv import CommandBool, CommandTOL, SetMode
+from mavros_msgs.srv import CommandBool, CommandLong, CommandTOL, SetMode
+
+
+def tilt_deg_of(pose: PoseStamped) -> float:
+    """Angle between the body z axis and the vertical, degrees."""
+    q = pose.pose.orientation
+    # body-z . world-z = 1 - 2(x^2 + y^2)
+    c = 1.0 - 2.0 * (q.x * q.x + q.y * q.y)
+    return math.degrees(math.acos(max(-1.0, min(1.0, c))))
 
 
 def yaw_of(pose: PoseStamped) -> float:
@@ -82,6 +90,9 @@ class FcuLink:
         self.cli_arm = node.create_client(CommandBool, "/mavros/cmd/arming",
                                           callback_group=self.cbg)
         self.cli_takeoff = node.create_client(CommandTOL, "/mavros/cmd/takeoff",
+                                              callback_group=self.cbg)
+        self.cli_command = node.create_client(CommandLong,
+                                              "/mavros/cmd/command",
                                               callback_group=self.cbg)
 
         # The stream. Silent whenever the FCU owns the vehicle (LAND): a
@@ -157,6 +168,15 @@ class FcuLink:
     def arm(self, value: bool = True):
         return self._call("arm" if value else "disarm", self.cli_arm,
                           CommandBool.Request(value=value))
+
+    def force_disarm(self):
+        """MAV_CMD_COMPONENT_ARM_DISARM with the 21196 magic: cuts the motors
+        even in the air. ONLY for a vehicle that is already going over."""
+        req = CommandLong.Request()
+        req.command = 400
+        req.param1 = 0.0
+        req.param2 = 21196.0
+        return self._call("force-disarm", self.cli_command, req)
 
     def takeoff(self, altitude: float):
         req = CommandTOL.Request()

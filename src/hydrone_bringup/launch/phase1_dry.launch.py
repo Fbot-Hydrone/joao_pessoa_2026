@@ -86,6 +86,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription, LogInfo
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration, PythonExpression
 
 
 def generate_launch_description():
@@ -118,6 +119,14 @@ def generate_launch_description():
             # Must agree with sources_real's down_cam_mount_xyz [0.065, 0.071]
             # (ROS FLU, y LEFT) — test_launch_arguments checks both.
             "belly_offset_xy": "[0.065, -0.071]",
+            # Same as phase1_real.ground_z(): the floor is z = 0 when the
+            # Orin feeds the EKF a floor-referenced rangefinder.
+            "ground_z": [PythonExpression([
+                "0.0 if '",
+                LaunchConfiguration("surface_offset", default="true"),
+                "'.lower() in ('true', '1') else -float('",
+                LaunchConfiguration("takeoff_base_height_m", default="0.5"),
+                "')"])],
             # The whole point of this file.
             "dry_run": "true",
         }.items(),

@@ -40,7 +40,7 @@ from std_srvs.srv import SetBool, Trigger
 
 from hydrone_msgs.action import Arm, GoTo, Land, Takeoff
 
-from hydrone_controller.fcu import FcuLink, yaw_of
+from hydrone_controller.fcu import FcuLink, tilt_deg_of, yaw_of
 from hydrone_controller.touchdown import TouchdownDetector
 
 POLL_S = 0.05
@@ -60,6 +60,13 @@ class ControllerNode(Node):
         self.arm_timeout = p("arm_timeout_s", 45.0)
         self.takeoff_timeout = p("takeoff_timeout_s", 45.0)
         self.takeoff_margin = p("takeoff_margin_m", 0.15)
+        # Tip-over guard. 2026-11-17 23:15: lifting off a base with the two
+        # front motors stalled, the vehicle pitched 5 -> 90 deg in 0.7 s while
+        # still within 5 cm of the base. Level take-offs stay under 6 deg
+        # (logs 45-47). Past this tilt below guard_height the vehicle is going
+        # over, and cutting the motors at once is the least damage.
+        self.takeoff_tilt_abort = p("takeoff_tilt_abort_deg", 25.0)
+        self.takeoff_guard_height = p("takeoff_guard_height_m", 0.4)
         self.goto_tol = p("goto_tolerance_m", 0.25)
         self.land_timeout = p("land_timeout_s", 60.0)
         # Ceiling on the wait for the FCU to confirm the disarm. Above
@@ -229,6 +236,15 @@ class ControllerNode(Node):
             climbed = z - start_z
             if feedback:
                 feedback(climbed)
+            tilt = (tilt_deg_of(self.fcu.pose)
+                    if self.fcu.pose is not None else 0.0)
+            if (self.fcu.armed and climbed < self.takeoff_guard_height
+                    and tilt > self.takeoff_tilt_abort):
+                self.get_logger().error(
+                    f"TIP-OVER on take-off: tilt {tilt:.0f} deg at "
+                    f"{climbed:.2f} m up — FORCE DISARM.")
+                self._wait_call(self.fcu.force_disarm(), owner)
+                return (False, f"tip-over at {tilt:.0f} deg, motors cut", z)
             if climbed >= altitude - self.takeoff_margin:
                 self.fcu.go(x, y, z if math.isnan(hold_z) else hold_z,
                             self.fcu.yaw())

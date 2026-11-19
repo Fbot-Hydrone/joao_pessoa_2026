@@ -74,7 +74,7 @@ from typing import List
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.conditions import IfCondition
+from launch.conditions import IfCondition, UnlessCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -279,23 +279,66 @@ def generate_launch_description():
     #     which is what the autonomy layer reads in both worlds.
     #   timeouts.yaml — widens MAVROS's steady-clock command timeouts because
     #     BiguaSim runs below real time. Real time runs at real time.
-    mavros = Node(
-        package="mavros",
-        executable="mavros_node",
+    def _mavros(distance_yaml, condition):
+        return Node(
+            package="mavros",
+            executable="mavros_node",
+            output="screen",
+            condition=condition,
+            parameters=[
+                os.path.join(mavros_share, "launch", "apm_pluginlists.yaml"),
+                os.path.join(mavros_share, "launch", "apm_config.yaml"),
+                os.path.join(bringup_pkg, "config", distance_yaml),
+                {
+                    "fcu_url": LaunchConfiguration("fcu_url"),
+                    "gcs_url": LaunchConfiguration("gcs_url"),
+                    "tgt_system": 1,
+                    "tgt_component": 1,
+                    "fcu_protocol": "v2.0",
+                },
+            ],
+        )
+
+    # surface_offset:=true (default since 2026-11-18): the EKF's height comes
+    # from the Orin (RNGFND1, MAVLink) with the bases' steps removed, and the
+    # real sensor is RNGFND2. The FCU must match: scripts/fcu_surface_offset.py.
+    mavros = _mavros("mavros_distance_sensor_real_floor.yaml",
+                     IfCondition(LaunchConfiguration("surface_offset")))
+    mavros_plain = _mavros("mavros_distance_sensor_real.yaml",
+                           UnlessCondition(
+                               LaunchConfiguration("surface_offset")))
+
+    # ── The floor-height bridge (hydrone_localization.surface_offset_node) ──
+    surface = Node(
+        package="hydrone_localization",
+        executable="surface_offset_node",
+        name="surface_offset",
         output="screen",
-        parameters=[
-            os.path.join(mavros_share, "launch", "apm_pluginlists.yaml"),
-            os.path.join(mavros_share, "launch", "apm_config.yaml"),
-            os.path.join(bringup_pkg, "config",
-                         "mavros_distance_sensor_real.yaml"),
-            {
-                "fcu_url": LaunchConfiguration("fcu_url"),
-                "gcs_url": LaunchConfiguration("gcs_url"),
-                "tgt_system": 1,
-                "tgt_component": 1,
-                "fcu_protocol": "v2.0",
-            },
-        ],
+        condition=IfCondition(LaunchConfiguration("surface_offset")),
+        parameters=[{
+            "start_surface_m": ParameterValue(
+                LaunchConfiguration("takeoff_base_height_m"),
+                value_type=float),
+            "rangefinder_xy": ParameterValue(
+                LaunchConfiguration("rangefinder_xy"),
+                value_type=List[float]),
+            "camera_xy": ParameterValue(
+                LaunchConfiguration("surface_camera_xy"),
+                value_type=List[float]),
+            "arena_size_m": ParameterValue(
+                LaunchConfiguration("arena_size_m"), value_type=List[float]),
+            "takeoff_base_arena": ParameterValue(
+                LaunchConfiguration("takeoff_base_arena"),
+                value_type=List[float]),
+            "zone_edges_x_m": ParameterValue(
+                LaunchConfiguration("zone_edges_x_m"),
+                value_type=List[float]),
+            "zone_raised": ParameterValue(
+                LaunchConfiguration("zone_raised"), value_type=List[bool]),
+            "confirm_timeout_s": ParameterValue(
+                LaunchConfiguration("surface_confirm_timeout_s"),
+                value_type=float),
+        }],
     )
 
     # ── AGNOSTIC plumbing — the same node the simulator runs ────────────────
@@ -335,7 +378,50 @@ def generate_launch_description():
         }],
     )
 
-    return LaunchDescription(args + [
+    surface_args = [
+        DeclareLaunchArgument(
+            "surface_offset", default_value="true",
+            description="Feed the EKF a rangefinder with the bases' steps "
+                        "removed (z = height above the arena FLOOR). Needs "
+                        "the FCU set by scripts/fcu_surface_offset.py apply; "
+                        "false needs it reverted."),
+        DeclareLaunchArgument(
+            "takeoff_base_height_m", default_value="0.5",
+            description="Height of the takeoff base the drone is set on. The "
+                        "floor height starts at this."),
+        DeclareLaunchArgument(
+            "rangefinder_xy", default_value="[0.14, 0.10]",
+            description="Rangefinder position in base_link (FLU), m. Same as "
+                        "RNGFND_POS_X/Y on the FCU."),
+        DeclareLaunchArgument(
+            "surface_camera_xy", default_value="[0.065, 0.071]",
+            description="Belly camera x/y in base_link (FLU), m — keep equal "
+                        "to down_cam_mount_xyz."),
+        DeclareLaunchArgument(
+            "arena_size_m", default_value="[0.0, 0.0]",
+            description="Arena [Lx, Ly], m; origin at a corner, x along the "
+                        "side the zones split. 0 = not given."),
+        DeclareLaunchArgument(
+            "takeoff_base_arena", default_value="[0.0, 0.0, 0.0]",
+            description="Takeoff base centre [x, y] in the arena and the "
+                        "heading [deg] the drone is set down with."),
+        DeclareLaunchArgument(
+            "zone_edges_x_m", default_value="[0.0]",
+            description="Zone strip edges along arena x, from 0 to Lx, e.g. "
+                        "[0.0, 2.0, 8.0]. Fewer than two = no zones: then "
+                        "every raised step is held (never released)."),
+        DeclareLaunchArgument(
+            "zone_raised", default_value="[false]",
+            description="Per zone: may it hold a base or the house? A step in "
+                        "a raised zone is believed; elsewhere only the belly "
+                        "camera can vouch for it, e.g. [true, true]."),
+        DeclareLaunchArgument(
+            "surface_confirm_timeout_s", default_value="1.5",
+            description="How long a raised step waits for a zone or the "
+                        "camera before it is released (vehicle climbs)."),
+    ]
+
+    return LaunchDescription(args + surface_args + [
         DeclareLaunchArgument("gripper", default_value="false",
                               description="Start the AX-12A gripper (Phase 2)."),
         DeclareLaunchArgument(
@@ -343,4 +429,4 @@ def generate_launch_description():
             default_value="/dev/serial/by-id/"
                           "usb-FTDI_FT232R_USB_UART_AK06RLGW-if00-port0",
             description="The ArbotiX-M's FTDI cable, by serial number."),
-        zed, down_cam, mavros, vision_odom, gripper])
+        zed, down_cam, mavros, mavros_plain, surface, vision_odom, gripper])

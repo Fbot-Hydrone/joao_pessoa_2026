@@ -116,6 +116,7 @@ takeoff base, that opens pad_map_node's gate, and the map, its markers and the
 feature map build from there exactly as they would in flight.
 """
 
+import json
 import math
 
 import rclpy
@@ -229,7 +230,22 @@ class Phase1MissionNode(Node):
         # crash; at that height the 320x240 / 90 deg belly camera covers a ~2 m
         # square of floor, so a 1 m base is in frame whenever the position error
         # is under about half a metre.
+        #
+        # REAL DRONE with surface_offset (2026-11-18): the FCU's z is height
+        # above the arena FLOOR everywhere (the Orin removes the bases' steps
+        # from the rangefinder), so this is "metres above the floor" — over a
+        # 0.5 m base a takeoff_alt of 2.0 puts the vehicle 1.5 m above it, and
+        # a take-off FROM a base climbs only the difference (_do_takeoff).
         self.declare_parameter("takeoff_alt", 1.0)
+        # The least a take-off climbs, whatever takeoff_alt says: clears the
+        # base it stands on even when takeoff_alt is below its top.
+        self.declare_parameter("takeoff_min_climb_m", 0.4)
+        # The least the cruise (takeoff_alt) may clear the tallest surface
+        # (sweep_max_surface_m, the 1.5 m house) by. Checked before arming:
+        # takeoff_alt changed meaning on the real drone on 2026-11-18 (it was
+        # "above the takeoff base", ~1.4 in use; it is now "above the floor"),
+        # and an old command line would cruise below the house roof.
+        self.declare_parameter("min_cruise_clearance_m", 0.4)
         # How many landing sites to visit before going home. The takeoff base is
         # NOT one of them.
         #
@@ -694,6 +710,10 @@ class Phase1MissionNode(Node):
 
         p = lambda n: self.get_parameter(n).value
         self.takeoff_alt = float(p("takeoff_alt"))
+        self.takeoff_min_climb = float(p("takeoff_min_climb_m"))
+        self.min_cruise_clearance = float(p("min_cruise_clearance_m"))
+        self.surface_state = None       # /hydrone/surface/state, real only
+        self._seen_armed = False
         self.target_bases = int(p("target_bases"))
         self.settle_still_speed = float(p("settle_still_speed"))
         self.settle_still_yaw_rate = math.radians(
@@ -879,6 +899,10 @@ class Phase1MissionNode(Node):
             String, "/hydrone/mission/status", 10)
 
         self.create_subscription(State, "/mavros/state", self._cb_state, 10)
+        # Real drone only (hydrone_localization.surface_offset_node); in sim
+        # nothing publishes it and _height_ready skips the datum gate.
+        self.create_subscription(String, "/hydrone/surface/state",
+                                 self._cb_surface, 10)
         self.create_subscription(PoseStamped, "/mavros/local_position/pose",
                                  self._cb_pose, sensor_qos)
         if self.settle_still_speed > 0.0:
@@ -975,8 +999,16 @@ class Phase1MissionNode(Node):
     # Inputs
     # ────────────────────────────────────────────────────────────────────────
 
+    def _cb_surface(self, msg: String):
+        try:
+            self.surface_state = json.loads(msg.data)
+        except ValueError:
+            pass
+
     def _cb_state(self, msg: State):
         self.mav_state = msg
+        if msg.armed:
+            self._seen_armed = True
 
     def _cb_vel(self, msg: TwistStamped):
         self._vel = msg
@@ -1190,6 +1222,8 @@ class Phase1MissionNode(Node):
         if self.state in (self.DONE, self.ABORTED):
             return
         self._check_budget()
+        if self._disarmed_in_flight():
+            return
         handler = {
             self.WAIT_FCU: self._do_wait_fcu,
             self.ARMING: self._do_arming,
@@ -1203,6 +1237,31 @@ class Phase1MissionNode(Node):
             self.DWELL: self._do_dwell,
         }[self.state]
         handler()
+
+    # States in which the vehicle is meant to be flying under our control.
+    # LAND and DWELL are excluded: a disarm there is the plan.
+    _FLYING = ("TAKEOFF", "SELECT", "SETTLE", "TRAVEL", "CONFIRM")
+
+    def _disarmed_in_flight(self) -> bool:
+        """2026-11-17 22:59: the safety pilot cut the motors at 1.5 m and the
+        mission went on "searching" for 3.5 min, streaming setpoints at a
+        vehicle lying on the floor. A disarm we did not ask for ends the run.
+        """
+        if (self.dry_run or self.state not in self._FLYING
+                or not self._seen_armed or self.mav_state.armed):
+            return False
+        if self.state == self.TAKEOFF and (
+                self.pose is None or self.pose.pose.position.z
+                - self._takeoff_start_z < 0.3):
+            # Still on the base: a refused or timed-out take-off disarms
+            # here, and _do_takeoff's retry handles that.
+            return False
+        self.get_logger().error(
+            f"FCU DISARMED in {self.state} without being told to — safety "
+            "pilot, failsafe or crash. ABORTING the mission.")
+        self.stream_setpoint = False
+        self._enter(self.ABORTED)
+        return True
 
     # ── WAIT_FCU ─────────────────────────────────────────────────────────────
 
@@ -1218,6 +1277,8 @@ class Phase1MissionNode(Node):
             return
         if not self._fcu_heading_settled():
             return
+        if not self._height_ready():
+            return
 
         self.home = (self.pose.pose.position.x, self.pose.pose.position.y)
         self.home_yaw = yaw_of(self.pose)
@@ -1225,6 +1286,35 @@ class Phase1MissionNode(Node):
             f"home = ({self.home[0]:.2f}, {self.home[1]:.2f}), heading "
             f"{math.degrees(yaw_of(self.pose)):.0f} deg.")
         self._enter(self.ARMING)
+
+    def _height_ready(self) -> bool:
+        """Before arming: is the cruise above every surface, and (real drone)
+        is the FCU's z really height above the floor?"""
+        clear = (self.takeoff_alt - self.ground_z
+                 - getattr(self, "sweep_max_surface", 0.0))
+        need = getattr(self, "min_cruise_clearance", 0.0)
+        if clear < need:
+            self._throttle(
+                f"NOT ARMING: cruise takeoff_alt={self.takeoff_alt:.2f} m is "
+                f"only {clear:.2f} m over the tallest surface "
+                f"({self.sweep_max_surface:.1f} m above the floor at z="
+                f"{self.ground_z:.2f}); need {need:.1f}. On the real drone "
+                "takeoff_alt is metres above the FLOOR since 2026-11-18.")
+            return False
+        st = getattr(self, "surface_state", None)
+        if st is not None:
+            if st.get("datum_off"):
+                self._throttle(f"NOT ARMING: height datum calibration gave "
+                               f"up ({st['datum_off']}).")
+                return False
+            if not st.get("fcu_ok", False) or not st.get("datum_ok", False):
+                self._throttle(
+                    "waiting for surface_offset: FCU rangefinder parameters "
+                    f"{'ok' if st.get('fcu_ok') else 'NOT confirmed'}, height "
+                    f"datum {'ok' if st.get('datum_ok') else 'settling'} (z "
+                    f"{st.get('fcu_z')}, keep the drone still).")
+                return False
+        return True
 
     def _fcu_heading_settled(self) -> bool:
         """True once the FCU's yaw has held still for fcu_settle_s. See the
@@ -1375,13 +1465,28 @@ class Phase1MissionNode(Node):
             return
 
         if self._job is None:
-            self._job = self.vehicle.takeoff(self.takeoff_alt,
-                                             hold_z=self.takeoff_alt)
+            # Climb TO takeoff_alt, not BY it: from a base the vehicle already
+            # stands its height above the floor (2026-11-17 logs: every
+            # take-off from a base climbed the full 1.36 m on top of it).
+            z0 = self.pose.pose.position.z if self.pose is not None else 0.0
+            climb = max(self.takeoff_min_climb, self.takeoff_alt - z0)
+            hold = max(self.takeoff_alt, z0 + self.takeoff_min_climb)
+            self.get_logger().info(
+                f"take-off from z={z0:.2f}: climbing {climb:.2f} m to hold "
+                f"{hold:.2f} m.")
+            self._job = self.vehicle.takeoff(climb, hold_z=hold)
             return
         if not self._job.done:
             return
         if self._job.ok:
             self._airborne(self.pose.pose.position.z - self._takeoff_start_z)
+            return
+        if "tip-over" in self._job.message:
+            self.get_logger().error(
+                f"ABORT: {self._job.message}. Not re-arming a vehicle that "
+                "went over.")
+            self.stream_setpoint = False
+            self._enter(self.ABORTED)
             return
         self._takeoff_tries += 1
         if self._takeoff_tries > 3:
@@ -2722,6 +2827,10 @@ class Phase1MissionNode(Node):
     def _enter(self, state: str):
         if state != self.state:
             self.get_logger().info(f"[{self.state} -> {state}]")
+        if state == self.ARMING:
+            # Re-armed for the next take-off: only a disarm AFTER this arming
+            # counts as one in flight.
+            self._seen_armed = bool(self.mav_state.armed)
         if state == self.TAKEOFF:
             # The altitude this climb starts from. takeoff_alt is a height ABOVE
             # WHATEVER WE ARE STANDING ON, and pose.z is absolute in the FCU's

@@ -1,0 +1,48 @@
+# Real drone WITH surface_offset (sources_real surface_offset:=true, default).
+#
+# The FCU has TWO downward rangefinders (scripts/fcu_surface_offset.py):
+#   RNGFND1  TYPE=10 MAVLink  — fed by the Orin's surface_offset_node; the
+#                               EKF's primary downward rangefinder, so its z is
+#                               height above the arena FLOOR.
+#   RNGFND2  TYPE=24 DroneCAN — the real sensor (range half of the optical-flow
+#                               module), ORIENT=24 (labelled UP so EKF3, which
+#                               fuses every downward rangefinder, ignores it).
+#                               ArduPilot forwards it as DISTANCE_SENSOR id 1.
+#
+# This file therefore:
+#   * PUBLISHES id 1 (the real sensor) on /mavros/distance_sensor/rangefinder,
+#     the topic every consumer on the Orin already reads — they keep getting the
+#     RAW distance to whatever is under the vehicle (pad tops, visual descent);
+#   * SUBSCRIBES ~/rangefinder_floor and sends it to the FCU as
+#     DISTANCE_SENSOR id 10, PITCH_270, which RNGFND1 (MAVLink) consumes — its
+#     backend matches on ORIENTATION, not id;
+#   * PUBLISHES id 0 on ~/rangefinder_fcu: ArduPilot reports every instance
+#     back, so this is what RNGFND1 actually holds (bench check). Sending AS id
+#     0 is impossible: MAVROS refuses data from the FCU for a subscriber id
+#     ("is subscriber, but i got sensor data for that id"), at 5 Hz, forever.
+#
+# Keys are PRIVATE (~/) for the reason given in mavros_distance_sensor_real.yaml.
+# Without surface_offset the old file applies, and the FCU must be reverted
+# with `scripts/fcu_surface_offset.py revert`.
+/**/distance_sensor:
+  ros__parameters:
+    config: |
+      ~/rangefinder_fcu:
+        id: 0
+        frame_id: "rangefinder_link"
+        field_of_view: 0.1
+        send_tf: false
+        sensor_position: {x: 0.0, y: 0.0, z: -0.05}
+      ~/rangefinder:
+        id: 1
+        frame_id: "rangefinder_link"
+        field_of_view: 0.1
+        send_tf: false
+        sensor_position: {x: 0.0, y: 0.0, z: -0.05}
+      ~/rangefinder_floor:
+        subscriber: true
+        id: 10
+        orientation: PITCH_270
+        field_of_view: 0.1
+        send_tf: false
+        sensor_position: {x: 0.0, y: 0.0, z: -0.05}

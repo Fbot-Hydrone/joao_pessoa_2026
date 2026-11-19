@@ -91,8 +91,13 @@ FORWARDING_EXEMPT = {
     # being declared, so a command-line value still wins.
     # belly_offset_xy: a fact about THIS AIRFRAME (where the belly camera is
     # bolted), which the shared autonomy file cannot know. Same idiom.
+    # ground_z: where the FLOOR is in the FCU's z — a fact about how THIS
+    # airframe measures height (0 with surface_offset, which pins the EKF to
+    # the floor; minus the base height without it). Derived from
+    # sources_real's surface_offset / takeoff_base_height_m, so it cannot
+    # disagree with them.
     ("phase1_real.launch.py", "phase1.launch.py"):
-        {"field_mode", "belly_offset_xy"},
+        {"field_mode", "belly_offset_xy", "ground_z"},
     # Same exemption, same reason, one camera over: a fact about the pad in
     # front of whichever camera is doing the detecting in THIS mission.
     ("phase1_zed_detect_real.launch.py", "phase1_zed_detect.launch.py"):
@@ -101,7 +106,7 @@ FORWARDING_EXEMPT = {
     # somebody would edit elsewhere and expect to win, and dry_run is asserted
     # to actually arrive by test_the_dry_launch_really_is_dry.
     ("phase1_dry.launch.py", "phase1.launch.py"):
-        {"field_mode", "dry_run", "belly_offset_xy"},
+        {"field_mode", "dry_run", "belly_offset_xy", "ground_z"},
     ("phase1_dry.launch.py", "sources_real.launch.py"):
         {"zed_point_cloud"},
 }
@@ -419,3 +424,19 @@ def test_dry_run_reaches_the_mission_node():
         "phase1.launch.py declares dry_run but does not pass it to "
         "phase1_mission_node, so phase1_dry.launch.py forwards a value that "
         "goes nowhere and the mission flies.")
+
+
+def test_the_real_floor_is_at_z_zero_with_surface_offset():
+    """phase1_real/_dry tell the mission where the floor is in the FCU's z: 0
+    with surface_offset (default), minus the takeoff base without it."""
+    for wrapper in ("phase1_real.launch.py", "phase1_dry.launch.py"):
+        seen = {}
+        for inner, entity in included_sources(load(wrapper)):
+            for name, value in entity.launch_arguments:
+                seen[(inner, argument_text(name))] = value
+        value = list(seen[("phase1.launch.py", "ground_z")])
+        ctx = LaunchContext()
+        assert float(perform_substitutions(ctx, value)) == 0.0
+        ctx.launch_configurations["surface_offset"] = "false"
+        ctx.launch_configurations["takeoff_base_height_m"] = "0.5"
+        assert float(perform_substitutions(ctx, value)) == -0.5

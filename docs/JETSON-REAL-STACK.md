@@ -436,3 +436,73 @@ Ordered by how much damage each does.
 5. **None of this has been flown.** The image builds and the nodes publish; that
    is all that has been demonstrated. Bench first: cameras only, then the map,
    then MAVROS connected but disarmed.
+
+---
+
+## 10. Height above the FLOOR (surface_offset, 2026-11-18)
+
+The EKF takes its height from the downward rangefinder (`EK3_SRC1_POSZ=2`).
+Raw, that height jumps by a base's height every time the vehicle crosses one
+(log 46, 2026-11-17: 1.62 → 1.12 m in 50 ms; the position controller then
+climbed to 2.3 m). Since 2026-11-18 the Orin sits between the sensor and the
+EKF:
+
+```
+DroneCAN rangefinder = RNGFND2 (ORIENT 24, "up": a label, see below)
+   └─ DISTANCE_SENSOR id 1 → /mavros/distance_sensor/rangefinder   (RAW: pad_map,
+                                                                    visual descent)
+        └─ surface_offset_node (hydrone_localization)
+             ├─ steps ≥ 10 cm not explained by vz → surface offset s
+             │    held with evidence (arena zone marked raised, or a belly
+             │    detection covering the sensor's spot), released after 1.5 s
+             │    without (s back → the vehicle CLIMBS: the safe side)
+             └─ datum bias b (while DISARMED and still, frozen at arming)
+   /mavros/distance_sensor/rangefinder_floor → DISTANCE_SENSOR id 10, PITCH_270
+        └─ RNGFND1 (TYPE 10 MAVLink) → EKF  ⇒  z = landing-gear height above
+                                                the FLOOR (0.5 standing on the
+                                                0.5 m takeoff base)
+   /mavros/distance_sensor/rangefinder_fcu (id 0) = what RNGFND1 holds (check)
+```
+
+**The FCU must be in SURFACE_OFFSET mode** — `python3
+scripts/fcu_surface_offset.py status|apply|revert` (MAVROS stopped, disarmed;
+`apply` backs up to `~/logs/fcu_rngfnd_backup_*.json` and reboots twice). It
+was applied on 2026-11-18. `sources_real surface_offset:=false` needs `revert`
+first, and vice versa — mixed, the Orin's consumers get no raw range.
+
+Three things the bench found, none obvious:
+
+* **EKF3 fuses EVERY downward rangefinder** (up to two). With both at
+  PITCH_270 it averaged 0.68 and 0.18 (z wandered 0.17–0.32). Hence
+  RNGFND2_ORIENT=24: nothing reads an upward rangefinder with PRX*_TYPE=0 and
+  SURFTRAK_MODE=1, and ArduPilot still reports it as id 1.
+* **MAVROS refuses to SEND on an id the FCU also reports**, so the feed goes out
+  as id 10 (ArduPilot's MAVLink backend matches orientation, not id).
+* **The EKF's height datum is set by what it did before the feed arrived.** The
+  FCU boots a minute before the Orin; meanwhile the EKF runs on the barometer
+  and its drift lands in a terrain state it then holds (z = −0.46 standing on
+  the base, after one reboot). `datum.py` biases the feed until z matches the
+  floor height while disarmed and still; it waits 10 s of continuous feed and
+  for z to stop moving. The mission will not arm until
+  `/hydrone/surface/state` says `fcu_ok` and `datum_ok` — **keep the drone
+  still on the base for ~30 s after launch.**
+
+What changed for the operator:
+
+* `takeoff_alt` is now metres above the **floor** (was: above the takeoff base).
+  Over the 1.5 m house it must clear `sweep_max_surface_m` (1.6) by
+  `min_cruise_clearance_m` (0.4): **takeoff_alt ≥ 2.0**, or the mission refuses
+  to arm. A take-off from any base climbs TO takeoff_alt, at least 0.4 m.
+* `ground_z` is 0 on the real drone (phase1_real/_dry derive it).
+* Arena zones (`arena_size_m`, `takeoff_base_arena`, `zone_edges_x_m`,
+  `zone_raised` on sources_real) are optional: with none, every raised step is
+  held — the safe default, since the house has no blue for the camera.
+* Take-off tip-over guard (controller): tilt > 25° within 0.4 m of the start →
+  force disarm, mission ABORTED. A disarm the mission did not ask for while
+  flying also ends the mission.
+
+**Not flown yet.** Validated on the bench (feed, FCU echo, datum through an FCU
+reboot) and by replaying logs 43–47 through the step detector (every 0.5 m
+base crossing found, none invented). The first flight must check, in the
+FCU log: RFND[0] (fed) − RFND[1] (raw) = s + b, constant except at base edges;
+and that XKF1.PD does not jump when crossing a base.
