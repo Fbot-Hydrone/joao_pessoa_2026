@@ -68,6 +68,7 @@ BEFORE THE FIRST FLIGHT
     by default).
 """
 
+import glob
 import os
 from typing import List
 
@@ -78,6 +79,18 @@ from launch.conditions import IfCondition, UnlessCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
+
+
+def gripper_port_default() -> str:
+    """The ArbotiX-M's FTDI cable, WHICHEVER one is plugged in.
+
+    It used to be pinned to one cable's serial number (AK06RLGW); swapping the
+    cable (now AK06RLVB, 2026-11-21) silently broke the gripper. The Orin has
+    no other FT232R (Pixhawk on Ethernet, ZED is not a tty), so take the first
+    one found, else /dev/ttyUSB0. gripper_port:=... still overrides.
+    """
+    found = sorted(glob.glob("/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_*"))
+    return found[0] if found else "/dev/ttyUSB0"
 
 
 def generate_launch_description():
@@ -359,7 +372,10 @@ def generate_launch_description():
     #
     # The servo is reached through an ArbotiX-M running the official ArbotiX
     # "ros" firmware: 115200 baud on the USB side, and it passes servo
-    # READ/WRITE packets through to the 1 Mbps Dynamixel bus. Positions were
+    # READ/WRITE packets through to the 1 Mbps Dynamixel bus. It does NOT
+    # answer PING (neither for itself, id 253, nor for servos) — scan with
+    # register reads. Board swapped and re-flashed with that firmware on
+    # 2026-11-21 (servo id 1, AX-12A, 12.1 V). Positions were
     # measured by hand on 2026-10-14 (joint mode, CW 0 / CCW 1023): closed 765,
     # open 254 (opening is clockwise = decreasing). The cam disc was remounted
     # so the whole travel sits inside the AX-12A's 0..300 deg sensing range;
@@ -425,8 +441,8 @@ def generate_launch_description():
         DeclareLaunchArgument("gripper", default_value="false",
                               description="Start the AX-12A gripper (Phase 2)."),
         DeclareLaunchArgument(
-            "gripper_port",
-            default_value="/dev/serial/by-id/"
-                          "usb-FTDI_FT232R_USB_UART_AK06RLGW-if00-port0",
-            description="The ArbotiX-M's FTDI cable, by serial number."),
+            "gripper_port", default_value=gripper_port_default(),
+            description="The ArbotiX-M's FTDI cable. Default: the first "
+                        "FT232R found under /dev/serial/by-id (any cable), "
+                        "else /dev/ttyUSB0."),
         zed, down_cam, mavros, mavros_plain, surface, vision_odom, gripper])
