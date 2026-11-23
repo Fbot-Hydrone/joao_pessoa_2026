@@ -92,6 +92,13 @@ exactly that and logs what it is waiting for.
 | `require_armed` | `true` | `pad_map` maps nothing until the vehicle first arms |
 | `ground_z` | `0.0` | height of the arena **floor** above the takeoff plane — see §7 |
 | `auto_start` | `true` | `false` holds until `/hydrone/mission/start` is called |
+| `arena_walls_m` | `[0.0]` (off) | where the arena is, see below. When set it **replaces** `plan_bounds` and `arena_bounds` |
+| `arena_start_yaw_deg` | `90.0` | FCU heading of the nose at arming. 90 on the real drone (forward = +y, right = +x, `coverage.DESIGN_HEADING`) |
+| `plan_bounds` | `[-5,-5,0.3, 5,5,2.5]` | planner + sweep box in the FCU frame, `[min_x,min_y,min_z,max_x,max_y,max_z]`. Sweeps fly `survey_inset_m` inside it, through `sweep_side`'s mirror |
+| `arena_bounds` | `[-4.5,-4.5, 4.5,4.5]` | `pad_map` drops any base mapped outside it (ghosts behind a wall) |
+| `takeoff_base_radius` | `1.5` | detections this close to the arming point are the takeoff base, never a target |
+| `max_pad_top_m` | `0.0` (off) | land only on bases whose top is at most this high **above the floor** (pad top − `ground_z`). Skipped bases leave the quota, so the drone goes home when the low ones are done. Last check with the rangefinder over the base. `0.75` splits the real arena's ~0 / ~1.5 m bases |
+| `tip_rearm_max_deg` | `12.0` | resting more tilted than this, the mission will not arm again (`ABORTED`): a takeoff from the lip flips it. 0 = off |
 | `debug_images`, `feature_map`, `map_odom_tf` | | as in `landing_sites.launch.py` |
 | `odom_source` | `vo` | sim only. `ground_truth` is a debugging aid, never a pass — LANDING-SITES §10. |
 
@@ -110,6 +117,36 @@ base**.
 
 Stop it early: `ros2 service call /hydrone/mission/abort std_srvs/srv/Trigger` —
 it lands where it is.
+
+### Where the arena is (real drone)
+
+In the sim the boxes are centred on the takeoff point and the arena fits around
+them. On the real drone the FCU origin is the takeoff base, and **that base is
+in a corner**: the `±5` box sends the perimeter about 3 m outside the net on two
+sides, and `pad_map` drops real bases more than 4.5 m away. `sweep_side` only
+mirrors the sweep inside the same box, it does not move the box.
+
+Two ways to fix it, plain numbers on the command line:
+
+- `arena_walls_m:=[front, back, left, right]`: distance from the drone on the
+  takeoff base to each wall, as it faces. Both boxes come from it
+  (`hydrone_nav/arena.py`): the plan box is the walls, the reject box the walls
+  + 0.5 m. The sweeps keep `survey_inset_m` (1.2 m) off them, which absorbs
+  about half a metre of error in the numbers.
+- `plan_bounds` / `arena_bounds` written out in the FCU frame (forward = +y,
+  right = +x), e.g. from a warmup bag.
+
+Rulebook corner, nose towards the far wall, low bases only:
+
+```bash
+ros2 launch hydrone_bringup phase1_real.launch.py \
+    arena_walls_m:="[7.25, 0.75, 1.0, 7.0]" max_pad_top_m:=0.75
+```
+
+The launch prints `phase1 boxes: plan_bounds=... arena_bounds=...` first:
+check it before arming. Check the axes once by carrying the drone forward:
+`/mavros/local_position/pose` y should grow. If x grows, pass
+`arena_start_yaw_deg:=0.0`.
 
 ---
 

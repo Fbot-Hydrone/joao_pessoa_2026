@@ -1446,3 +1446,81 @@ def test_no_arming_until_the_height_datum_is_confirmed(node):
     node._cb_surface(String(data='{"fcu_ok": true, "datum_ok": true, '
                                  '"datum_off": "gave up"}'))
     assert not node._height_ready()
+
+
+# ── Safe attempt: tall bases left alone (max_pad_top_m) ─────────────────────
+#
+# Heights are judged above the FLOOR (pad top - ground_z). With surface_offset
+# the FCU z is already floor-referenced (ground_z 0); without it the takeoff
+# base top is 0 and the floor one base height below.
+
+@pytest.mark.parametrize("ground_z", [0.0, -0.5])
+def test_tall_bases_are_not_skipped_by_default(node, ground_z):
+    node.ground_z = ground_z
+    node.home = (9.0, 9.0)
+    node._cb_map(PadMap(pads=[pad(1, 2.0, 0.0, height=1.5 + ground_z)]))
+    assert node.skipped_high == set()
+    assert node._quota() == 2
+
+
+@pytest.mark.parametrize("ground_z", [0.0, -0.5])
+def test_a_tall_base_is_skipped_and_leaves_the_quota(node, ground_z):
+    node.ground_z = ground_z
+    node.home = (9.0, 9.0)
+    node.max_pad_top = 0.75
+    node._cb_map(PadMap(pads=[pad(1, 2.0, 0.0, height=1.5 + ground_z),
+                              pad(2, 3.0, 0.0, height=0.05 + ground_z)]))
+    assert node.skipped_high == {1}
+    assert not node._is_candidate(node.pad_map.pads[0])
+    assert node._is_candidate(node.pad_map.pads[1])
+    assert node._quota() == 1
+
+
+def test_all_low_bases_done_sends_the_drone_home(node):
+    node.ground_z = 0.0
+    node.max_pad_top = 0.75
+    node._cb_map(PadMap(pads=[pad(0, -0.5, 0.2, takeoff_base=True),
+                              pad(1, 2.0, 0.0, height=1.5)]))
+    node.landed_count = 1
+    node._do_select()
+    assert node.landing_for == node.LAND_FINAL
+
+
+def test_the_rangefinder_vetoes_a_tall_base_the_map_thought_low(node):
+    """Over the base the rangefinder sees the real top: 2.5 m up, 1.0 m of
+    range -> a 1.5 m top, whatever the map said."""
+    node.ground_z = 0.0
+    node.max_pad_top = 0.75
+    set_map(node, pad(4, 2.0, 1.0, height=0.05))
+    node.target_id = 4
+    node.landing_for = node.LAND_PAD
+    set_pose(node, 2.0, 1.0, 2.5)
+    node._range_m = 1.0
+    enter(node, node.CONFIRM)
+    node._begin_landing()
+    assert node.state == node.SELECT
+    assert 4 in node.skipped_high and 4 in node.blacklist
+
+
+def test_a_low_base_still_lands_with_the_flag_on(node):
+    node.ground_z = 0.0
+    node.max_pad_top = 0.75
+    set_map(node, pad(4, 2.0, 1.0, height=0.05))
+    node.target_id = 4
+    node.landing_for = node.LAND_PAD
+    node.vehicle = FakeVehicle()
+    set_pose(node, 2.0, 1.0, 1.2)
+    node._range_m = 1.15
+    enter(node, node.CONFIRM)
+    node._begin_landing()
+    assert node.state == node.LAND
+
+
+def test_resting_tilted_is_never_re_armed(node):
+    enter(node, node.ARMING)
+    set_pose(node, 2.0, 1.0, 0.0)
+    r = math.radians(20.0) / 2.0
+    node.pose.pose.orientation.x = math.sin(r)
+    node.pose.pose.orientation.w = math.cos(r)
+    node._do_arming()
+    assert node.state == node.ABORTED

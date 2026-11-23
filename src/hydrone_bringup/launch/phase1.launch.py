@@ -77,8 +77,9 @@ BiguaSim and passes no overrides.
 
 from typing import List
 
-from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+import yaml
+from launch import LaunchDescription, Substitution
+from launch.actions import DeclareLaunchArgument, LogInfo
 from launch.conditions import IfCondition, UnlessCondition
 from launch.substitutions import (LaunchConfiguration, PathJoinSubstitution,
                                   TextSubstitution)
@@ -93,6 +94,34 @@ DOWN_DETECTIONS = "/hydrone/pads/down/detections"
 
 # The belly detector's annotated overlay — what rqt_image_view opens.
 DOWN_DEBUG_IMAGE = "/hydrone/pads/down/debug_image"
+
+
+class _ArenaBox(Substitution):
+    """plan_bounds or arena_bounds: from arena_walls_m when set, else as given.
+
+    Resolved at launch time so one flag (the walls) moves both boxes together;
+    see hydrone_nav/arena.py.
+    """
+
+    def __init__(self, kind):
+        super().__init__()
+        self.kind = kind          # "plan" or "arena"
+
+    def perform(self, context):
+        from hydrone_nav import arena
+
+        def cfg(name):
+            return yaml.safe_load(LaunchConfiguration(name).perform(context))
+
+        plan = [float(v) for v in cfg("plan_bounds")]
+        boxes = arena.arena_boxes(
+            cfg("arena_walls_m"), plan_z=(plan[2], plan[5]),
+            start_yaw_deg=float(cfg("arena_start_yaw_deg")))
+        if boxes is None:
+            box = plan if self.kind == "plan" else cfg("arena_bounds")
+        else:
+            box = boxes[0] if self.kind == "plan" else boxes[1]
+        return str([float(v) for v in box])
 
 
 def generate_launch_description():
@@ -217,7 +246,36 @@ def generate_launch_description():
                         "min_z, max_x, max_y, max_z] no frame do FCU. O "
                         "quadrado de mapeamento fica nela, recuado "
                         "survey_inset_m de cada lado; desloque-a para a base "
-                        "de decolagem ser um canto."),
+                        "de decolagem ser um canto. Com arena_walls_m so o z "
+                        "daqui vale."),
+        # The FCU origin is the takeoff base, which is in a CORNER of the real
+        # arena, so the sim's boxes centred on it put half the sweep outside
+        # the net. hydrone_nav/arena.py.
+        DeclareLaunchArgument(
+            "arena_walls_m", default_value="[0.0]",
+            description="Distancia de cada parede ao drone sentado na base de "
+                        "decolagem, como ele esta virado: [frente, tras, "
+                        "esquerda, direita] em m. Quando setado, gera "
+                        "plan_bounds e arena_bounds (ignora os dois). [0.0] = "
+                        "desligado (sim). Base no canto pelo livro, nariz para "
+                        "a parede longe: [7.25, 0.75, 1.0, 7.0]."),
+        DeclareLaunchArgument(
+            "arena_start_yaw_deg", default_value="90.0",
+            description="Rumo do nariz no frame do FCU ao armar. 90 no drone: "
+                        "o vision_odom_bridge gira a odometria +90 para ENU, "
+                        "entao frente = +y e direita = +x "
+                        "(coverage.DESIGN_HEADING; 91 medido em 2026-11-17)."),
+        DeclareLaunchArgument(
+            "arena_bounds", default_value="[-4.5, -4.5, 4.5, 4.5]",
+            description="pad_map rejeita base mapeada fora disto [min_x, "
+                        "min_y, max_x, max_y] (fantasma atras da parede). "
+                        "Ignorado com arena_walls_m."),
+        DeclareLaunchArgument(
+            "takeoff_base_radius", default_value="1.5",
+            description="Deteccao a menos disto (m) do ponto de arme e a "
+                        "propria base de decolagem, nunca um alvo. Livro: "
+                        "base 2x1.5 m. Baixe se uma base de pouso ficar colada "
+                        "nela."),
         DeclareLaunchArgument(
             "yolo_device", default_value="cpu",
             description="Device do YOLO nos dois detectores: cpu ou cuda:0 "
@@ -834,6 +892,9 @@ def generate_launch_description():
             # survive in the map until the drone has finished looking at the
             # other seven.
             "provisional_ttl_s": 120.0,
+            "arena_bounds": ParameterValue(_ArenaBox("arena")),
+            "takeoff_base_radius": ParameterValue(
+                LaunchConfiguration("takeoff_base_radius"), value_type=float),
         }],
     )
 
@@ -1059,8 +1120,7 @@ def generate_launch_description():
             "takeoff_alt": ParameterValue(takeoff_alt, value_type=float),
             "target_bases": ParameterValue(
                 LaunchConfiguration("target_bases"), value_type=int),
-            "plan_bounds": ParameterValue(
-                LaunchConfiguration("plan_bounds"), value_type=List[float]),
+            "plan_bounds": ParameterValue(_ArenaBox("plan")),
             "settle_s": ParameterValue(
                 LaunchConfiguration("settle_s"), value_type=float),
             "dwell_s": ParameterValue(
@@ -1117,7 +1177,11 @@ def generate_launch_description():
         }],
     )
 
+    arena_log = LogInfo(msg=["phase1 boxes: plan_bounds=", _ArenaBox("plan"),
+                             " arena_bounds=", _ArenaBox("arena")])
+
     return LaunchDescription(args + [
+        arena_log,
         forward_detector,
         down_detector,
         pad_map,

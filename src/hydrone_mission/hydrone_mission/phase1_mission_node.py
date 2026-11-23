@@ -625,6 +625,14 @@ class Phase1MissionNode(Node):
         # takeoff_alt above the pad, so a real landing covers far more than
         # this; a hover covers none of it.
         self.declare_parameter("min_descent_m", 0.30)
+        # Resting this tilted, never arm again: a takeoff from the lip of a
+        # base flips it. 0 = off.
+        self.declare_parameter("tip_rearm_max_deg", 12.0)
+        # Land only on bases whose top is at most this high above the arena
+        # FLOOR (pad top - ground_z, so it holds with or without
+        # surface_offset). For a safe attempt that skips the tall bases.
+        # 0 = off.
+        self.declare_parameter("max_pad_top_m", 0.0)
         self.declare_parameter("service_timeout_s", 30.0)
         # Do not take the home pose until the FCU's HEADING has stopped
         # moving: it must hold within fcu_settle_yaw_deg for fcu_settle_s.
@@ -789,6 +797,11 @@ class Phase1MissionNode(Node):
         self._survey_last_gain = None
         self._survey_path = None
         self.ground_z = float(p("ground_z"))
+        self.tip_rearm_max = float(p("tip_rearm_max_deg"))
+        self.max_pad_top = float(p("max_pad_top_m"))
+        # Tall bases left alone by max_pad_top_m. They also come off the
+        # quota, or the search would hunt for them until the clock ran out.
+        self.skipped_high: set[int] = set()
         # found during the sweep is remembered, not flown to.
         self.survey_done = False
         # True while working through leads the search could not confirm.
@@ -1061,6 +1074,32 @@ class Phase1MissionNode(Node):
 
     def _cb_map(self, msg: PadMap):
         self.pad_map = msg
+        if self.max_pad_top <= 0.0:
+            return
+        for pad in msg.pads:
+            if (not pad.is_takeoff_base and not pad.visited
+                    and int(pad.id) not in self.skipped_high
+                    and float(pad.height) - self.ground_z > self.max_pad_top):
+                self._skip_high(int(pad.id), float(pad.height))
+
+    def _skip_high(self, pad_id: int, top: float):
+        self.skipped_high.add(pad_id)
+        self.blacklist.add(pad_id)
+        self.get_logger().warn(
+            f"pad {pad_id}: top {top - self.ground_z:.2f} m above the floor, "
+            f"over max_pad_top_m {self.max_pad_top:.2f} — skipping it, quota "
+            f"now {self._quota()}.")
+
+    def _quota(self) -> int:
+        """Bases to land on before going home: the tall ones we skip don't
+        count. A duplicate id on a tall base sends us home one early, which is
+        the right side to err on in the safe attempt."""
+        return max(0, self.target_bases - len(self.skipped_high))
+
+    def _tilt_deg(self) -> float:
+        q = self.pose.pose.orientation
+        c = 1.0 - 2.0 * (q.x * q.x + q.y * q.y)
+        return math.degrees(math.acos(max(-1.0, min(1.0, c))))
 
     def _cb_detection(self, msg: PadDetection):
         """Keep the freshest belly-camera look.
@@ -1132,6 +1171,7 @@ class Phase1MissionNode(Node):
         self.landed_count = 0
         self._landed_xy = []
         self.blacklist.clear()
+        self.skipped_high.clear()
         self.target_id = None
         self.landing_for = self.LAND_PAD
         self._land_after_takeoff = False
@@ -1386,6 +1426,15 @@ class Phase1MissionNode(Node):
         # every refusal, and clearing it on the way through would stop the
         # three-strike abort from ever accumulating (MEASURED 2026-08-28). DWELL
         # zeroes it when a genuinely new landing cycle starts.
+        if (self._job is None and self.tip_rearm_max > 0.0
+                and self.pose is not None
+                and self._tilt_deg() > self.tip_rearm_max):
+            self.get_logger().error(
+                f"resting {self._tilt_deg():.0f} deg off level (limit "
+                f"{self.tip_rearm_max:.0f}) — on a lip, not a base. Will not "
+                "arm: a takeoff from here flips. Mission ABORTED.")
+            self._enter(self.ABORTED)
+            return
         if self._job is None:
             self._job = self.vehicle.arm()
         elif self._job.done:
@@ -1530,7 +1579,7 @@ class Phase1MissionNode(Node):
         if self.pose is None:
             return
 
-        if self.landed_count >= self.target_bases:
+        if self.landed_count >= self._quota():
             hx, hy = self._takeoff_base_xy()
             self.get_logger().info(
                 f"{self.landed_count} base(s) landed on — returning to the "
@@ -1710,7 +1759,7 @@ class Phase1MissionNode(Node):
             # on NOW. The level resumes afterwards: `_survey_path` is not
             # cleared, so the remaining points are still flown.
             if (self.land_during_survey and self._level >= 2
-                    and self.landed_count < self.target_bases
+                    and self.landed_count < self._quota()
                     and self._best_candidate() is not None):
                 self.get_logger().info(
                     f"a confirmed base is in the map and level {self._level} "
@@ -1728,7 +1777,7 @@ class Phase1MissionNode(Node):
 
             # This level is flown. Did it find enough?
             found = self._candidate_count()
-            if found + self.landed_count >= self.target_bases:
+            if found + self.landed_count >= self._quota():
                 self.survey_done = True
                 self.get_logger().info(
                     f"SEARCH LEVEL {self._level} found all "
@@ -1745,7 +1794,7 @@ class Phase1MissionNode(Node):
             # two would have completed the quota there and then, and instead
             # two more levels were flown and still came back 5 of 6.
             weak = self._uninvestigated()
-            if weak and found + self.landed_count < self.target_bases:
+            if weak and found + self.landed_count < self._quota():
                 self.investigating = True
                 self.survey_done = True
                 self.get_logger().info(
@@ -1775,7 +1824,7 @@ class Phase1MissionNode(Node):
             self._enter(self.SELECT)
             return
 
-        if (not self.investigating and self.landed_count < self.target_bases
+        if (not self.investigating and self.landed_count < self._quota()
                 and self._uninvestigated()):
             self.investigating = True
             if self._best_candidate() is not None:
@@ -1794,7 +1843,7 @@ class Phase1MissionNode(Node):
         # Level 3 (rotate + relief) has no path of its own, so it ends here:
         # out of candidates, out of viewpoints, quota unmet. That is the moment
         # to spend the expensive level rather than to give up.
-        if (self.landed_count < self.target_bases
+        if (self.landed_count < self._quota()
                 and self._level < self.max_search_level):
             self._level += 1
             self._survey_path = None
@@ -2644,6 +2693,8 @@ class Phase1MissionNode(Node):
         disarm in one goal (controller_node.run_land). A landing counts only
         "com hélices desligadas" — the props must be CONFIRMED stopped.
         """
+        if self.landing_for == self.LAND_PAD and self._too_high_below():
+            return
         self.stream_setpoint = False
         self._enter(self.LAND)
         if self.dry_run:
@@ -2653,6 +2704,28 @@ class Phase1MissionNode(Node):
                                       if self.pose is not None else None)
             return
         self._job = self.vehicle.land(disarm=True)
+
+    def _too_high_below(self) -> bool:
+        """Last check of max_pad_top_m, with what the hover now MEASURES.
+
+        The map's height may still be a projection; over the base the
+        rangefinder says what is really there. Either one saying tall is
+        enough: a skipped low base costs 20 points, a fall costs the drone.
+        """
+        if self.max_pad_top <= 0.0 or self.target_id is None:
+            return False
+        tops = []
+        pad = self._target_pad()
+        if pad is not None:
+            tops.append(float(pad.height))
+        if self._range_m is not None and self.pose is not None:
+            tops.append(self.pose.pose.position.z - self._range_m)
+        if not tops or max(tops) - self.ground_z <= self.max_pad_top:
+            return False
+        self._skip_high(int(self.target_id), max(tops))
+        self.target_id = None
+        self._enter(self.SELECT)
+        return True
 
     def _do_land(self):
         """Wait for the Land goal (or, in a dry run, for stillness)."""
