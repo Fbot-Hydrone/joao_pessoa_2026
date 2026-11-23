@@ -46,9 +46,9 @@ over.
 
 import os
 
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, LogInfo, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
@@ -188,7 +188,18 @@ def _launch_setup(context, *args, **kwargs):
                               'auto_start': auto}]),
         ]
 
-    return [livox] + lio + [adapter, prior, mavros, streams, lio_nav, lio_map, maze] + known
+    # camera light for the dark maze; colors and pins in hydrone_leds
+    leds = []
+    if lc('leds') != 'none':
+        try:
+            get_package_share_directory('hydrone_leds')
+            leds = [Node(package='hydrone_leds', executable='led_node', output='screen',
+                         parameters=[{'color': lc('leds')}])]
+        except PackageNotFoundError:  # image built before it: fly without, say so
+            leds = [LogInfo(msg='WARNING: no hydrone_leds in this image, LEDs stay off '
+                                '(jetson_up.sh --rebuild, or --build34)')]
+
+    return [livox] + lio + [adapter, prior, mavros, streams, lio_nav, lio_map, maze] + known + leds
 
 
 def generate_launch_description():
@@ -231,5 +242,9 @@ def generate_launch_description():
             'auto_start', default_value='false',
             description='false: the mission waits for /hydrone/phase4/start. true arms '
                         'by itself 5 s after odometry: sim habit, not for the drone.'),
+        DeclareLaunchArgument(
+            'leds', default_value='white',
+            description="LED strip color while running ('red blue', 'cyan', ...); "
+                        'none = no LED node. Off again when the launch stops.'),
         OpaqueFunction(function=_launch_setup),
     ])

@@ -37,6 +37,7 @@ sensing, no GPS, no ground truth in the loop.
 - [[Sensor Fallbacks]]: the fallback ladder down to RPM + physics dead reckoning
 - [[RGB Camera Enhancement]]: future roles for an RGB camera, once mounted
 - [[Phase 4 Maze Mission]]: the maze goal, a minimal approach, open questions
+- [[Camera Lights]]: the RGB strip on three Jetson GPIOs, wiring, `leds` CLI and node
 
 ### Sensors & calibration
 - [[Sensor Config]]: the authoritative sensor spec for Phases 1 & 2 — mounting, EKF3 sources, sim wiring

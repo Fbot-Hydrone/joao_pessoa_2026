@@ -83,10 +83,11 @@ COPY src/hydrone_confined   src/hydrone_confined
 COPY src/hydrone_mission    src/hydrone_mission
 COPY src/hydrone_controller src/hydrone_controller
 COPY src/hydrone_lio        src/hydrone_lio
+COPY src/hydrone_leds       src/hydrone_leds
 RUN . /opt/ros/humble/setup.sh && . /opt/livox_ws/install/setup.sh && . /ws/install/setup.sh \
     && MAKEFLAGS=-j4 colcon build --symlink-install \
         --packages-select hydrone_msgs hydrone_controller hydrone_bringup hydrone_vision \
-                          hydrone_nav hydrone_confined hydrone_mission hydrone_lio
+                          hydrone_nav hydrone_confined hydrone_mission hydrone_lio hydrone_leds
 
 ENV HYDRONE_MAPS=/ws/maps
 # the entrypoint sources /ws/install; the Livox underlay has to come first

@@ -306,7 +306,8 @@ if [ "$NO_DEV" = false ]; then
                hydrone_msgs hydrone_nav hydrone_vision; do
         run_args+=(-v "$PWD/src/$pkg:/ws/src/$pkg")
     done
-    [ "$LIO" = true ] && run_args+=(-v "$PWD/src/hydrone_lio:/ws/src/hydrone_lio")
+    [ "$LIO" = true ] && run_args+=(-v "$PWD/src/hydrone_lio:/ws/src/hydrone_lio"
+                                    -v "$PWD/src/hydrone_leds:/ws/src/hydrone_leds")
 fi
 # the LIO map is saved under $HYDRONE_MAPS; keep it on the host
 if [ "$LIO" = true ]; then
@@ -465,7 +466,7 @@ inner+='_relink() {
     [ -e "$ins/$n" ] || ln -s "$bld/$n" "$ins/$n"
   done
 }
-for _p in hydrone_bringup hydrone_controller hydrone_confined hydrone_mission hydrone_nav hydrone_vision hydrone_lio; do
+for _p in hydrone_bringup hydrone_controller hydrone_confined hydrone_mission hydrone_nav hydrone_vision hydrone_lio hydrone_leds; do
   _s=/ws/src/$_p; _b=/ws/build/$_p; _i=/ws/install/$_p/share/$_p
   [ -d "$_s/launch" ] && _relink "$_s/launch" "$_b/launch" "$_i/launch" "*.launch.py"
   [ -d "$_s/config" ] && _relink "$_s/config" "$_b/config" "$_i/config" "*.yaml"
@@ -483,7 +484,7 @@ if [ "$DO_REBUILD" = true ]; then
     inner+=". /opt/ros/humble/setup.sh && colcon build --symlink-install "
     inner+="--packages-select hydrone_msgs hydrone_controller hydrone_bringup "
     inner+="hydrone_vision hydrone_nav hydrone_confined hydrone_mission"
-    [ "$LIO" = true ] && inner+=" hydrone_lio"
+    [ "$LIO" = true ] && inner+=" hydrone_lio hydrone_leds"
     inner+=" && . /ws/install/setup.sh && "
 fi
 # `exec` so that ros2 launch becomes PID 1 in the container. Without it PID 1
