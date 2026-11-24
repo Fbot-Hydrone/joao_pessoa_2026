@@ -41,10 +41,21 @@ the pad's apparent saturation frame to frame, which is exactly the axis the HSV
 thresholds are tuned on. `exposure_auto` is exposed so it can be pinned once the
 arena's lighting is known; see docs/LANDING-SITES.md §3 for why saturation is
 the fragile part of the detector.
+
+Focus
+-----
+The C922 has autofocus and keeps no settings across a power cycle. Over a plain
+floor, or a pad filling the frame, the autofocus has nothing to lock on and
+hunts. `focus` >= 0 turns it off and holds the lens there, applied on every
+start after the first frame and read back. Find the value with
+scripts/v4l2_focus.py (docs/CALIBRATION.md §7), and calibrate at it.
 """
 
 import array
+import fcntl
 import math
+import os
+import struct
 
 import cv2
 import numpy as np
@@ -62,6 +73,24 @@ from tf2_ros import StaticTransformBroadcaster
 FRAME_BASE = "base_link"
 FRAME_DOWN_CAM = "down_cam_link"
 FRAME_DOWN_OPTICAL = "down_cam_optical_frame"
+
+# V4L2 controls by raw ioctl: no v4l2-ctl in the image, and cv2's focus
+# properties differ between OpenCV versions. Same as scripts/v4l2_focus.py.
+VIDIOC_G_CTRL = 0xC008561B
+VIDIOC_S_CTRL = 0xC008561C
+CID_FOCUS_ABSOLUTE = 0x009A090A
+CID_FOCUS_AUTO = 0x009A090C
+
+
+def _get_ctrl(fd, cid):
+    buf = bytearray(struct.pack("Ii", cid, 0))
+    fcntl.ioctl(fd, VIDIOC_G_CTRL, buf)
+    return struct.unpack("Ii", buf)[1]
+
+
+def _set_ctrl(fd, cid, value):
+    fcntl.ioctl(fd, VIDIOC_S_CTRL, bytearray(struct.pack("Ii", cid, value)))
+
 
 # Robot convention (X fwd, Y left, Z up) -> optical (Z fwd, X right, Y down).
 OPTICAL_QUAT = (-0.5, 0.5, -0.5, 0.5)   # (x, y, z, w)
@@ -100,6 +129,9 @@ class DownCamUsbNode(Node):
         # that size saturates the bus on some hubs. cv2 decodes either.
         self.declare_parameter("fourcc", "MJPG")
         self.declare_parameter("exposure_auto", True)
+        # focus_absolute to hold, autofocus off. -1 leaves the camera alone
+        # (the C270 is fixed focus and has no such control).
+        self.declare_parameter("focus", -1)
 
         # ── Calibration ─────────────────────────────────────────────────────
         self.declare_parameter("calibrated", False)
@@ -129,6 +161,9 @@ class DownCamUsbNode(Node):
 
         # ── Open the device ─────────────────────────────────────────────────
         device = str(p("device"))
+        self.device = device
+        self.focus = int(p("focus"))
+        self._focus_pending = self.focus >= 0
         self.cap = cv2.VideoCapture(device, cv2.CAP_V4L2)
         if not self.cap.isOpened():
             raise RuntimeError(f"could not open {device}")
@@ -240,6 +275,11 @@ class DownCamUsbNode(Node):
             self.get_logger().warn("frame grab failed",
                                    throttle_duration_sec=5.0)
             return
+        if self._focus_pending:
+            # after the first frame, since some firmware resets controls when
+            # the stream starts
+            self._focus_pending = False
+            self._lock_focus()
         stamp = self.get_clock().now().to_msg()
 
         msg = Image()
@@ -271,6 +311,30 @@ class DownCamUsbNode(Node):
                   0.0, self.fy, self.cy, 0.0,
                   0.0, 0.0, 1.0, 0.0]
         self.pub_info.publish(info)
+
+    def _lock_focus(self):
+        """Autofocus off first, or the camera ignores the absolute value."""
+        try:
+            fd = os.open(self.device, os.O_RDWR)
+            try:
+                _set_ctrl(fd, CID_FOCUS_AUTO, 0)
+                _set_ctrl(fd, CID_FOCUS_ABSOLUTE, self.focus)
+                auto = _get_ctrl(fd, CID_FOCUS_AUTO)
+                got = _get_ctrl(fd, CID_FOCUS_ABSOLUTE)
+            finally:
+                os.close(fd)
+        except OSError as e:
+            # keep streaming: an autofocus camera still sees the pad
+            self.get_logger().error(
+                f"could not lock focus at {self.focus} on {self.device} "
+                f"({e}); the camera stays on whatever it was doing")
+            return
+        if auto != 0 or got != self.focus:
+            self.get_logger().error(
+                f"focus NOT locked: asked {self.focus}, camera holds "
+                f"autofocus={auto} focus_absolute={got}")
+        else:
+            self.get_logger().info(f"focus locked at {got}, autofocus off")
 
     def destroy_node(self):
         try:

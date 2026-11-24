@@ -177,6 +177,11 @@ def generate_launch_description():
         DeclareLaunchArgument("down_cam_height", default_value="480"),
         DeclareLaunchArgument("down_cam_fps", default_value="15"),
         DeclareLaunchArgument(
+            "down_cam_focus", default_value="-1",
+            description="C922 focus_absolute to lock, autofocus off, re-applied "
+                        "every start (the camera forgets it at power-up). Find "
+                        "it with scripts/v4l2_focus.py. -1 = leave autofocus"),
+        DeclareLaunchArgument(
             "down_cam_calibrated", default_value="true",
             description="False publishes a NOMINAL pinhole camera_info from "
                         "nominal_hfov_deg. True uses the measured fx/fy/cx/cy "
@@ -260,6 +265,8 @@ def generate_launch_description():
                                      value_type=int),
             "fps": ParameterValue(LaunchConfiguration("down_cam_fps"),
                                   value_type=int),
+            "focus": ParameterValue(LaunchConfiguration("down_cam_focus"),
+                                    value_type=int),
             "calibrated": ParameterValue(
                 LaunchConfiguration("down_cam_calibrated"), value_type=bool),
             "nominal_hfov_deg": ParameterValue(
