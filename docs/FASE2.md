@@ -149,6 +149,12 @@ truth, com viewport):**
 |---|---|---|
 | 4 | kits girados (125°, 30°, 0° no frame da arena), todas as posições dadas | 3/3 entregues, casa em **197 s**. Kit 1 virou certo (eixo 51° → −84° na imagem). Kit 3 sem leitura (janela de 2 s de parede = 0,7 s de sim) e kit 2 leu errado com o drone ainda assentando: pegou na 2ª tentativa |
 | 5 | o mesmo + `pickup_2:=scan delivery_3:=scan`, com as correções do giro | varredura achou as duas a ~14 cm (coleta 2 com 103 vistas de kit, entrega 3 com 0, topo 1,08 m). Giros −85°/+35°/−69° e uma correção de 8° (2ª passada). **3/3, casa em 366 s**, dos quais 166 s de varredura |
+| 7b | o mesmo, com a parada antecipada da varredura | parou no setpoint 16 de 20 (**134 s**), mesmas posições. Giros +34°/−79°/−57° (+5° na 2ª passada). **3/3, casa em 341 s** |
+
+A varredura só para cedo com evidência clara: coleta = base com ≥ 3 vistas de
+kit; entrega = base vista ≥ 6 vezes, nenhum kit, e fora da altura do bloco (uma
+base na altura das coletas sem kit visto ainda pode ser coleta). Sem isso, vai
+até o fim e classifica com o que viu.
 
 Os tempos de giro e da leitura do eixo contam no relógio do VEÍCULO (`/clock`
 no sim, que roda a ~0,35×). Sem viewport o BiguaSim renderiza as câmeras quase
