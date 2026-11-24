@@ -127,6 +127,11 @@ def fill_missing(pick, deliv, pads, kits_xy, *, home, ground_z=0.0,
                 slots[i] = c["xy"]
                 cands.remove(c)
 
+    # strict: a base at the pickups' height with no kit seen may be a pickup
+    # whose kit the scan has not looked at yet (taken before `take` empties it)
+    kit_tops = sorted(c["top"] for c in cands if c["hits"] >= min_kit_hits)
+    block = kit_tops[len(kit_tops) // 2] if kit_tops else None
+
     with_kit = sorted((c for c in cands if c["hits"] >= min_kit_hits),
                       key=lambda c: (-c["hits"], -c["obs"]))
     take(pick, with_kit)
@@ -134,11 +139,6 @@ def fill_missing(pick, deliv, pads, kits_xy, *, home, ground_z=0.0,
         tall = sorted((c for c in cands if c["top"] >= pickup_min_top_m),
                       key=lambda c: (-c["hits"], -c["top"]))
         take(pick, tall)
-    # strict: a base at the pickups' height with no kit seen may be a pickup
-    # whose kit the scan has not looked at yet
-    kit_tops = [c["top"] for c in cands if c["hits"] >= min_kit_hits]
-    block = sorted(kit_tops)[len(kit_tops) // 2] if kit_tops else None
-
     def is_empty(c):
         if not strict:
             return c["hits"] < min_kit_hits

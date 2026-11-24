@@ -142,6 +142,22 @@ que a regra pede. A varredura conta no relógio.
 
 ## 6. O que foi medido, e o que falta
 
+**`cbr/phase2` no sim (máquina 2, 2026-11-23, seed 1, odometria = ground
+truth, com viewport):**
+
+| run | o que testa | resultado |
+|---|---|---|
+| 4 | kits girados (125°, 30°, 0° no frame da arena), todas as posições dadas | 3/3 entregues, casa em **197 s**. Kit 1 virou certo (eixo 51° → −84° na imagem). Kit 3 sem leitura (janela de 2 s de parede = 0,7 s de sim) e kit 2 leu errado com o drone ainda assentando: pegou na 2ª tentativa |
+| 5 | o mesmo + `pickup_2:=scan delivery_3:=scan`, com as correções do giro | varredura achou as duas a ~14 cm (coleta 2 com 103 vistas de kit, entrega 3 com 0, topo 1,08 m). Giros −85°/+35°/−69° e uma correção de 8° (2ª passada). **3/3, casa em 366 s**, dos quais 166 s de varredura |
+
+Os tempos de giro e da leitura do eixo contam no relógio do VEÍCULO (`/clock`
+no sim, que roda a ~0,35×). Sem viewport o BiguaSim renderiza as câmeras quase
+pretas: a missão não vê kit e pula os três (o que é o comportamento certo para
+uma câmera cega).
+
+O bag de um run morto (sem Ctrl-C) fica sem `metadata.yaml`: `ros2 bag
+reindex <pasta>` refaz. No drone, terminar o launch com Ctrl-C.
+
 **Funciona no sim — missão completa (seed 1, kits girados 90°, 2026-10-09):**
 
 | evento | relógio da missão |

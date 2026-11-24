@@ -216,3 +216,17 @@ def test_strict_fills_only_on_clear_evidence():
                                        home=HOME, strict=True)
     assert pick == [(2.2, 0.6), None]
     assert deliv == [(3.5, 6.2), None]
+
+
+def test_strict_stops_the_sim_run_5_scan_mid_way():
+    """Run 5's pad map at the 4th lane: pickup 2 on the block (top 1.53, kits
+    on it), delivery 3 on a 1.08 m stand. Both clear: the scan can stop."""
+    pick = [(-2.79, 0.82), None, (-2.79, -2.2)]
+    deliv = [(2.78, -0.45), (0.35, 2.54), None]
+    pads = [(-3.4, 3.0, -0.05, 1, True), (2.9, -0.5, -0.88, 29, False),
+            (-2.7, -2.3, 0.83, 14, False), (-2.7, -0.8, 0.83, 11, False),
+            (-2.7, 0.8, 0.83, 11, False), (0.4, -1.1, 0.38, 23, False)]
+    kits = [(-2.67, -0.77)] * 20
+    p, d, _ = core.fill_missing(pick, deliv, pads, kits, home=(-3.39, 3.0),
+                                ground_z=-0.7, strict=True)
+    assert p[1] == (-2.7, -0.8) and d[2] == (0.4, -1.1)
