@@ -49,6 +49,7 @@ from hydrone_controller.gripper import Gripper
 from hydrone_controller.vehicle import Job, Vehicle
 from hydrone_nav import route
 from hydrone_nav.arena import arena_to_map, load_layout
+from hydrone_nav import precision_landing as pl
 from hydrone_nav.precision_landing import body_to_world
 from hydrone_nav.visual_descent import LOST, READY, VisualDescent
 
@@ -107,9 +108,14 @@ class Phase2MissionNode(Node):
         self.verify_max_px = p("verify_max_radius_px", 45.0)
         self.verify_centre_px = p("verify_centre_px", 160.0)
         self.pick_retries = p("pick_retries", 1)
+        # Pickup, kit lost on the way down: climb back to cruise over the known
+        # position and look again this many times before going in blind.
+        self.takeoff_ok_range = p("takeoff_ok_range_m", 0.7)
+        self.reacquire_max = p("reacquire_max", 2)
+        self._reacquires = 0
         # How a grab is confirmed:
         #   "gripper" — the Gripper result's `holding` (the AX-12A measures it
-        #               by load; the sim reports the command). Default.
+        #               by load; the sim reads the engine log). Default.
         #   "vision"  — hover over the pickup and check the kit left the base.
         #               Needs a kit detector that does not fire on the base's
         #               reflections: the current 'lipo' model does (2026-10-09
@@ -124,11 +130,27 @@ class Phase2MissionNode(Node):
         self.pickup_touch = p("pickup_touch", True)
         self.touch_range = p("touch_range_m", 0.22)
         self.touch_timeout = p("touch_timeout_s", 20.0)
+        # Keep correcting the touch point by camera on the way down. The fix
+        # taken at 1.2 m comes from ONE frame and missed the kit by 25-54 cm
+        # (2026-10-16/27: a reflection picked, or the vehicle drifting below).
+        # Between these heights the reflections are gone and the kit is still
+        # whole in the frame (MEASURED 2026-10-16: one detection below ~0.9 m,
+        # the kit overflows the image under ~0.35 m).
+        self.touch_track_max_h = p("touch_track_max_m", 0.9)
+        self.touch_track_min_h = p("touch_track_min_m", 0.35)
+        self.touch_track_gate = p("touch_track_gate_m", 0.35)
+        self.touch_track_gain = p("touch_track_gain", 0.5)
         self.descend = VisualDescent(
             descend_to_m=p("visual_descend_to_m", 1.2),
             fine_px=p("visual_fine_px", 40.0),
             gain=p("visual_gain", 0.6),
             axes=tuple(p("visual_axes", [-1.0, -1.0])))
+        self._centre_uv = self.descend.target_uv
+        # Belly camera position from the vehicle centre, m, body [x forward,
+        # y right] — same convention as phase 1's belly_offset_xy. The real
+        # drone moves the webcam off the gripper's axis so the carried kit
+        # does not cover the base (2026-10-16); the sim camera is on the axis.
+        self.belly_offset = tuple(p("belly_offset_xy", [0.0, 0.0]))
 
         self.vehicle = Vehicle(self)
         self.gripper = Gripper(self)
@@ -137,6 +159,16 @@ class Phase2MissionNode(Node):
                             p("base_confidence", 0.30))
         self.kits = Frames(self, p("kit_topic", "/hydrone/kits/detections"),
                            p("kit_confidence", 0.50))
+        # Delivery only: the yellow ring fitted around the kit hanging under
+        # the lens, which hides the base from the YOLO (ring_detector.py).
+        self.rings = Frames(self, p("ring_topic", "/hydrone/pads/down/ring"),
+                            p("ring_confidence", 0.50))
+        # Delivery, base not in sight: how close over the layout position the
+        # vehicle must hold before it lands blind. The old blind path landed
+        # on NavigateTo's 0.25 m arrival — MEASURED 2026-10-09, seed 6: that
+        # arrival fired at once and the vehicle landed on the floor ~1.3 m
+        # from base A.
+        self.blind_xy_tol = p("blind_xy_tol_m", 0.10)
 
         self.pose, self.range_m, self.fx, self.sim_clock = None, None, None, None
         self.create_subscription(PoseStamped, "/mavros/local_position/pose",
@@ -164,6 +196,7 @@ class Phase2MissionNode(Node):
         self.delivered = 0
         self._used_stamp = None
         self._blind = False
+        self._give_up_visual = False
         self._touch_xy = None
         self.create_timer(0.1, self._tick)
         self.get_logger().info(
@@ -270,7 +303,13 @@ class Phase2MissionNode(Node):
             return
         if not self._job.done:
             return
-        if self._job.ok:
+        # ArduPilot climbs to `climb` over the surface under the rangefinder, so
+        # from a base it can stop short of the climb the controller counts and
+        # the job fails with the vehicle hovering fine. MEASURED 2026-10-30,
+        # seed 1: z 0.71 -> 1.50, range 1.00, level; four "failures", no return.
+        airborne = (self.range_m is not None
+                    and self.range_m >= self.takeoff_ok_range)
+        if self._job.ok or airborne:
             if self.t0 is None:
                 self.t0 = self.mission_now()
                 self.get_logger().info(
@@ -281,6 +320,13 @@ class Phase2MissionNode(Node):
             self.after_takeoff()
             return
         self.takeoff_tries += 1
+        q = self.pose.pose.orientation
+        roll = math.atan2(2 * (q.w * q.x + q.y * q.z), 1 - 2 * (q.x ** 2 + q.y ** 2))
+        pitch = math.asin(max(-1.0, min(1.0, 2 * (q.w * q.y - q.z * q.x))))
+        self.get_logger().warn(
+            f"takeoff failed ({self._job.message}): roll "
+            f"{math.degrees(roll):.0f} pitch {math.degrees(pitch):.0f} deg, "
+            f"z {self.pose.pose.position.z:.2f}, range {self.range_m}")
         if self.takeoff_tries > 3:
             self.get_logger().error(f"takeoff refused 3x: {self._job.message}")
             self._enter(self.ABORTED)
@@ -319,17 +365,31 @@ class Phase2MissionNode(Node):
             self._job = None
             return
         self.descend.reset()
+        self._give_up_visual = False
         blind, self._blind = self._blind, False
         self._enter(self.LAND if kind == "home" or blind else self.DESCEND)
 
     def _do_descend(self):
         """Centre on the KIT (pickup) or the BASE (delivery) while descending."""
         kind, tx, ty = self.target
-        frames = self.kits if kind == "pickup" else self.bases
-        dets = [(u, v) for u, v, _ in frames.fresh(self.fresh_s)]
         h = self.range_m if self.range_m is not None else self.cruise
+        if kind == "pickup":
+            dets = [(u, v) for u, v, _ in self.kits.fresh(self.fresh_s)]
+        else:
+            dets = [(u, v) for u, v, _ in self.bases.fresh(self.fresh_s)
+                    + self.rings.fresh(self.fresh_s)]
+        self.descend.target_uv = pl.target_uv(self._centre_uv, self.belly_offset,
+                                              self.fx or 0.0, h)
+        if kind == "delivery" and (not dets or self._give_up_visual):
+            # The kit covers the middle of the image: from cruise the ring is
+            # smaller than the kit and stays hidden until ~1.6 m (MEASURED
+            # 2026-10-16). Come down on the KNOWN position and keep looking.
+            self.descend.reset()
+            self._descend_blind(tx, ty, h)
+            return
         step = self.descend.update(dets, h, self.fx, self.now())
         if step.phase == READY:
+            self._reacquires = 0
             self.get_logger().info(
                 f"{kind}: centred at {h:.2f} m ({step.err_px:.0f} px) — "
                 + ("touching down on it" if kind == "pickup"
@@ -339,6 +399,18 @@ class Phase2MissionNode(Node):
                 self._enter(self.TOUCH)
             else:
                 self._enter(self.LAND)
+            return
+        if kind == "delivery" and self._elapsed() > self.descent_timeout:
+            self.get_logger().warn("delivery: camera timed out — finishing "
+                                   "on the known position.")
+            self._give_up_visual = True
+            return
+        if (kind == "pickup" and self._reacquires < self.reacquire_max
+                and (step.phase == LOST or self._elapsed() > self.descent_timeout)):
+            self._reacquires += 1
+            self._task(f"pickup: kit lost at {h:.2f} m — climbing to look again "
+                       f"({self._reacquires}/{self.reacquire_max})")
+            self._enter(self.GOTO)
             return
         if step.phase == LOST or self._elapsed() > self.descent_timeout:
             # Positions are KNOWN (rules): land on the layout position rather
@@ -350,14 +422,32 @@ class Phase2MissionNode(Node):
             # Fly back over it at cruise (the nudges may have moved us) and
             # land on arrival, blind.
             self._blind = True
+            self._reacquires = 0
             self._enter(self.GOTO)
             return
-        if frames.stamp != self._used_stamp and step.picked is not None:
-            self._used_stamp = frames.stamp
+        stamp = (self.kits.stamp if kind == "pickup"
+                 else (self.bases.stamp, self.rings.stamp))
+        if stamp != self._used_stamp and step.picked is not None:
+            self._used_stamp = stamp
             wx, wy = body_to_world((step.dx, step.dy), yaw_of(self.pose))
             p = self.pose.pose.position
             self.vehicle.setpoint(p.x + wx, p.y + wy, p.z + step.dz,
                                   self.home_yaw)
+
+    def _descend_blind(self, tx, ty, h):
+        """Delivery without the base in sight: down to visual_descend_to_m
+        over the layout position, then land once held within blind_xy_tol."""
+        p = self.pose.pose.position
+        if h > self.descend.descend_to + 0.05:
+            self.vehicle.setpoint(tx, ty, p.z - min(0.3, h - self.descend.descend_to),
+                                  self.home_yaw)
+            return
+        self.vehicle.setpoint(tx, ty, p.z, self.home_yaw)
+        if math.hypot(p.x - tx, p.y - ty) <= self.blind_xy_tol:
+            self.get_logger().warn(
+                f"delivery: base not seen down to {h:.2f} m — landing on the "
+                f"known position ({tx:.2f}, {ty:.2f}).")
+            self._enter(self.LAND)
 
     def _kit_world_xy(self, uv, h):
         """Where the kit IS, from its last pixel and the height over it.
@@ -373,8 +463,34 @@ class Phase2MissionNode(Node):
         p = self.pose.pose.position
         return p.x + wx, p.y + wy
 
+    def _track_kit(self):
+        """Pull the touch point towards the kit seen in the newest frame."""
+        h = self.range_m
+        if (h is None or not self.touch_track_min_h <= h <= self.touch_track_max_h
+                or self.kits.stamp == self._used_stamp):
+            return
+        self._used_stamp = self.kits.stamp
+        self.descend.target_uv = pl.target_uv(self._centre_uv, self.belly_offset,
+                                              self.fx or 0.0, h)
+        kx, ky = self._touch_xy
+        seen = [self._kit_world_xy((u, v), h)
+                for u, v, _ in self.kits.fresh(self.fresh_s)]
+        seen = [w for w in seen
+                if math.hypot(w[0] - kx, w[1] - ky) <= self.touch_track_gate]
+        if not seen:
+            return
+        wx, wy = min(seen, key=lambda w: math.hypot(w[0] - kx, w[1] - ky))
+        g = self.touch_track_gain
+        self._touch_xy = (kx + g * (wx - kx), ky + g * (wy - ky))
+        self.get_logger().info(
+            f"pickup: kit at {h:.2f} m is {math.hypot(wx - kx, wy - ky) * 100:.0f}"
+            " cm from the touch point — correcting",
+            throttle_duration_sec=0.5)
+
     def _do_touch(self):
         """Descend on the kit's XY under position control; grab near contact."""
+        if self._job is None:
+            self._track_kit()
         kx, ky = self._touch_xy
         p = self.pose.pose.position
         touched = (self.range_m is not None
@@ -408,6 +524,15 @@ class Phase2MissionNode(Node):
             self._task(f"home — {self.delivered} kit(s) delivered; landed at "
                        f"z={z:.2f}")
             self._enter(self.DONE)
+            return
+        if kind == "delivery" and not self._job.ok:
+            # The FCU never agreed it was down (seed 6: on the floor beside
+            # the base). Releasing there drops the kit off the base (-5).
+            # Keep it, climb, and come down on the base again.
+            self._task(f"delivery: landing NOT confirmed ({self._job.message})"
+                       " — keeping the kit, trying again")
+            self.after_takeoff = self._next_target
+            self._enter(self.ARMING)
             return
         self._enter(self.ACT)
 

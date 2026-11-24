@@ -181,8 +181,12 @@ class BiguaSimInterface():
         path = os.environ.get('PHASE2_LAYOUT') or os.path.join(
             get_package_share_directory('hydrone_bringup'),
             'config', 'phase2_bases.yaml')
+        from hydrone_nav.arena import load_layout
         with open(path) as f:
-            lay = yaml.safe_load(f)
+            raw = yaml.safe_load(f)
+        # Pela mesma funcao da missao: as entradas podem vir em grid.
+        layout = load_layout(path)
+        lay = dict(raw, pickup=layout.pickup, delivery=layout.delivery)
         seed = self._seed(cfg)
         rng = random.Random(seed)
         z_lo, z_hi = lay.get('delivery_z_range', [0.0, 1.5])
@@ -214,7 +218,8 @@ class BiguaSimInterface():
                 f"fase 2 spawnada (seed {seed}): coletas+kits {fmt(pickups)} | "
                 f"entregas {fmt(deliveries)}")
 
-    def gripper(self, close: bool, agent_name: str, reach_cm=None):
+    def gripper(self, close: bool, agent_name: str, reach_cm=None,
+                extent_cm=None):
         """Abre/fecha a garra do agente. CHAMAR SÓ DA THREAD DO SIMULADOR.
 
         Mesmo canal do SpawnMesh (CustomCommand), sem comando novo na engine.
@@ -227,6 +232,9 @@ class BiguaSimInterface():
             # KIT ENTRE AS PERNAS, e o volume padrão fica acima dele: o POC
             # mediu -12 cm (5 da origem do componente + ~7 da altura do kit).
             nums += [float(v) for v in reach_cm]
+            if extent_cm is not None:
+                # Meio-tamanho da caixa de pega, cm (engine >= 2026-10-27).
+                nums += [float(v) for v in extent_cm]
         self.env.send_world_command(
             "CustomCommand", string_params=["Gripper", agent_name + "-id0"],
             num_params=nums)

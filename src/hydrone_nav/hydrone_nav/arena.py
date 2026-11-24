@@ -29,13 +29,37 @@ class Layout:
     delivery_z_range: tuple = (0.0, 1.5)
 
 
+def _point(e, grid):
+    """A layout entry -> (x, y[, z[, yaw]]) in metres.
+
+    Either metres, [x, y, ...], or a grid index, {grid: [col, row], z, yaw}:
+    the organisers may give a base as a square of the floor grid rather than
+    as X, Y. Index 0 is the arena corner by the takeoff; `centre: node` puts
+    the base on the crossing of lines `col` and `row` (where Figure 7 draws
+    them), `centre: cell` on the middle of square [col, row].
+    """
+    if not isinstance(e, dict):
+        return tuple(e)
+    step = float(grid.get("step_m", 0.5))
+    ox, oy = grid.get("origin_m", (0.0, 0.0))
+    half = 0.5 if grid.get("centre", "node") == "cell" else 0.0
+    col, row = e["grid"]
+    p = (ox + (col + half) * step, oy + (row + half) * step)
+    if "z" in e:
+        p += (float(e["z"]),)
+        if "yaw" in e:
+            p += (float(e["yaw"]),)
+    return p
+
+
 def load_layout(path) -> Layout:
     with open(path) as f:
         d = yaml.safe_load(f)
+    grid = d.get("grid") or {}
     return Layout(
-        takeoff=tuple(d["takeoff"]),
-        pickup=[tuple(p) for p in d.get("pickup", [])],
-        delivery=[tuple(p) for p in d.get("delivery", [])],
+        takeoff=_point(d["takeoff"], grid),
+        pickup=[_point(p, grid) for p in d.get("pickup", [])],
+        delivery=[_point(p, grid) for p in d.get("delivery", [])],
         delivery_z_range=tuple(d.get("delivery_z_range", (0.0, 1.5))))
 
 
