@@ -191,3 +191,20 @@ def test_grab_failed_reopens_gripper_before_retry_and_skip():
         assert node.state == node.GOTO
     finally:
         node.destroy_node()
+
+
+def test_a_delivery_comes_down_under_position_control_and_never_closes():
+    """LAND from 1.2 m slid to a base edge in the sim; deliveries now TOUCH
+    down like pickups, and the gripper is left alone until ACT opens it."""
+    node = make_mission()
+    try:
+        node.close_in_touch = True          # even the sim's in-air close
+        node.target = ("delivery", 1.0, 3.0)
+        node._touch_xy = (1.0, 3.0)
+        node.range_m = 0.20
+        node.state = node.TOUCH
+        node._do_touch()
+        assert node.state == node.LAND
+        assert node.gripper.calls == []
+    finally:
+        node.destroy_node()

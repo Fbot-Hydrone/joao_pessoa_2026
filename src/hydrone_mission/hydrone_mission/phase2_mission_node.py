@@ -783,6 +783,12 @@ class Phase2MissionNode(Node):
                     return
                 if self._set_touch(self._kit_world_xy(step.picked, h)):
                     self._enter(self.TOUCH)
+            elif kind == "delivery" and self.pickup_touch and step.picked:
+                # Same controlled descent onto the BASE centre: LAND from 1.2 m
+                # slid to a base edge and tipped at the next spin-up (sim,
+                # 2026-11-24, 33 deg, the tilt guard caught it).
+                self._touch_xy = self._kit_world_xy(step.picked, h)
+                self._enter(self.TOUCH)
             else:
                 self._enter(self.LAND)
             return
@@ -915,7 +921,11 @@ class Phase2MissionNode(Node):
             self.get_logger().warn(
                 f"delivery: base not seen down to {h:.2f} m — landing on the "
                 f"known position ({tx:.2f}, {ty:.2f}).")
-            self._enter(self.LAND)
+            if self.pickup_touch:
+                self._touch_xy = (tx, ty)
+                self._enter(self.TOUCH)
+            else:
+                self._enter(self.LAND)
 
     def _kit_world_xy(self, uv, h):
         """Where the kit IS, from its last pixel and the height over it.
@@ -958,9 +968,10 @@ class Phase2MissionNode(Node):
             throttle_duration_sec=0.5)
 
     def _do_touch(self):
-        """Descend on the kit's XY under position control to just above
-        contact, then LAND (the gripper closes on the ground, in ACT)."""
-        if self._job is None:
+        """Descend on the kit's (pickup) or the base's (delivery) XY under
+        position control to just above contact, then LAND."""
+        pickup = self.target[0] == "pickup"
+        if self._job is None and pickup:
             self._track_kit()
         kx, ky = self._touch_xy
         p = self.pose.pose.position
@@ -970,9 +981,9 @@ class Phase2MissionNode(Node):
                                   or self._elapsed() > self.touch_timeout):
             self.vehicle.setpoint(kx, ky, p.z, self.hold_yaw)   # hold here
             h = self.range_m if self.range_m is not None else -1
-            if not self.close_in_touch:
-                self.get_logger().info(f"pickup: at {h:.2f} m over the kit — "
-                                       "landing on it")
+            if not (pickup and self.close_in_touch):
+                self.get_logger().info(f"{self.target[0]}: at {h:.2f} m — "
+                                       "landing")
                 self._enter(self.LAND)
                 return
             self._job = self.gripper.close()
