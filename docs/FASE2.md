@@ -1,7 +1,7 @@
 # Fase 2 — transporte de pacotes
 
-Escrito em 2026-10-09. Como a Fase 2 funciona neste stack, peça por peça, e o
-que ainda falta. A estrutura geral (o que vai em cada pacote) está em
+Escrito em 2026-10-09, revisto em 2026-11-23 (branch `cbr/phase2`). Como a
+Fase 2 funciona neste stack, peça por peça, e o que ainda falta. A estrutura geral (o que vai em cada pacote) está em
 [`ARQUITETURA.md`](ARQUITETURA.md); as regras, em `REGRAS-CBR-2026.pdf` (p. 10-11).
 
 ## 1. A prova em uma frase
@@ -22,16 +22,43 @@ BASES_SEED=3 ./scripts/docker_up.sh --phase2 --debug    # outra arena + janelas
 
 `--phase2` sobe `phase2_sim.launch.py` (sources do sim + `phase2.launch.py`) e
 exporta `ARENA_PHASE=2`, que faz o ardubridge spawnar o layout da Fase 2.
+`PHASE2_LAYOUT=<yaml>` spawna de outro arquivo (ex.: kits girados).
+
+No drone (Orin):
+
+```bash
+ros2 launch hydrone_bringup phase2_real.launch.py \
+    arena_walls_m:="[frente, tras, esquerda, direita]" \
+    pickup_1:="[x, y]" pickup_2:="[x, y]" pickup_3:="[x, y]" \
+    delivery_1:="[x, y]" delivery_2:="[x, y]" delivery_3:="[x, y]"
+```
+
+`phase2_real` = `sources_real` (com `gripper:=true`) + `phase2.launch.py`. As
+posições são medidas **a partir da base de decolagem**, x para a direita e y
+para onde o nariz aponta ao armar (`config/phase2_bases_real.yaml`,
+`arena_yaw_deg 0`). Uma base sem posição (ou `:=scan`) faz o drone varrer a
+arena antes dos kits (§4). Também aceita `{grid: [col, lin]}`. Os argumentos
+de `sources_real` (`surface_offset`, `takeoff_base_height_m`, ...) são os
+mesmos da Fase 1.
+
+Cada execução grava `log_dir/phase2_<data>/` (padrão `~/hydrone_logs`, no sim
+`/ws/logs` = `./logs`): `tasks.log` (o log de tarefas da regra) e `bag/`
+(`record:=false` desliga, `record_images:=true` inclui a câmera de barriga,
+~8 GB em 10 min).
 
 ## 3. As peças
 
 ```
- phase2_bases.yaml ──► arena.py ──► route.plan_deliveries ──► ordem dos 3 kits
+ pickup_N / delivery_N ─┐
+ phase2_bases.yaml ─────┴─► arena.py ─┬─► route.plan_deliveries ──► ordem dos kits
+ (alguma desconhecida) ─► varredura ──┘ (pad_map + kits vistos → phase2_core.fill_missing)
                                                                    │
  phase2_mission_node (estratégia) ─────────────────────────────────┘
    ├─ Vehicle  ─────► controller_node ─► MAVROS        (armar, decolar, pousar)
    ├─ NavigateTo ───► nav_node (A* no octomap)         (pernas entre bases)
    ├─ VisualDescent ◄─ kit_detector / pad_detector_down (descer centralizado)
+   ├─ KitAxis ◄────── kit_axis_node                    (para onde o kit aponta)
+   ├─ /mavros/state                                    (o piloto mexeu? acaba)
    └─ Gripper ──────► /hydrone/gripper/command
                         ├─ sim:  ardubridge_node  → world command "Gripper"
                         └─ real: gripper_dynamixel_node → AX-12A
@@ -39,10 +66,13 @@ exporta `ARENA_PHASE=2`, que faz o ardubridge spawnar o layout da Fase 2.
 
 | Arquivo | O que faz |
 |---|---|
-| `hydrone_bringup/config/phase2_bases.yaml` | **Onde estão as bases**, no frame da ARENA (Figura 7 das regras, grid 0,5 m). É o que se edita na prova, com as posições que a organização der. `kit_yaw_deg` gira o kit no sim |
+| `hydrone_bringup/config/phase2_bases.yaml` | Layout do SIM, no frame da ARENA (Figura 7 das regras, grid 0,5 m). `kit_yaw_deg` gira o kit no sim. No drone: `phase2_bases_real.yaml` (vazio) + os argumentos por base |
 | `hydrone_nav/arena.py` | Lê o layout e converte arena → `map`, ancorado na base de decolagem: `map = home + Rz(arena_yaw)·(p − takeoff)`. No sim `arena_yaw = −90°`; no real, medir no dia |
 | `hydrone_nav/route.py` → `plan_deliveries` | Ordem coleta→entrega mais curta, testando as 3!×3! = 36 combinações |
 | `hydrone_mission/phase2_mission_node.py` | A máquina de estados (abaixo) |
+| `hydrone_mission/phase2_core.py` | As decisões sem ROS, testadas (`test_phase2_core.py`): posições por parâmetro, a varredura, quem é coleta/entrega, o limite do toque, o giro para o kit, a trava do piloto |
+| `hydrone_vision/kit_axis.py` + `kit_axis_node.py` | Eixo longo do kit na imagem (`/hydrone/kits/axis`, `KitAxis.msg`). Roda com qualquer câmera + detector que publique `PadDetection` |
+| `hydrone_bringup/launch/phase2_real.launch.py` | O drone: `sources_real` + `phase2.launch.py`, só com fatos do drone (offset da câmera, `ground_z`, frame) |
 | `hydrone_msgs/action/Gripper.action` | A interface da garra, igual no sim e no real |
 | `hydrone_controller/gripper.py` | Cliente `Gripper.close()/open()` → Job, como o `Vehicle` |
 | `biguasim_main` (ardubridge + interface.py) | Sim: spawna bases e kits (`ARENA_PHASE=2`) e serve a ação da garra |
@@ -52,40 +82,57 @@ exporta `ARENA_PHASE=2`, que faz o ardubridge spawnar o layout da Fase 2.
 ## 4. A máquina de estados
 
 ```
-WAIT → ARMING → TAKEOFF ─┐
-   ┌─────────────────────┘
+WAIT → ARMING → TAKEOFF ─┬─ (base desconhecida) SCAN ─┐
+   ┌─────────────────────┴────────────────────────────┘
    ▼
- GOTO coleta ─► DESCEND (no KIT) ─► TOUCH ─► LAND ─► ACT (fecha a garra)
-   ─► ARMING/TAKEOFF ─► [pegou? senão tenta de novo / pula o kit]
-   ─► GOTO entrega ─► DESCEND (na BASE) ─► LAND ─► ACT (abre a garra)
-   ─► ARMING/TAKEOFF ─► próximo kit
+ GOTO coleta ─► DESCEND (no KIT) ─► ALIGN ─► TURN ─► DESCEND ─► TOUCH ─► LAND
+   ─► ACT (fecha a garra) ─► ARMING/TAKEOFF ─► [pegou? senão tenta de novo / pula]
+   ─► TURN (volta ao heading do arme) ─► GOTO entrega ─► DESCEND (na BASE)
+   ─► LAND ─► ACT (abre a garra) ─► ARMING/TAKEOFF ─► próximo kit
  depois do último: GOTO casa ─► LAND ─► DONE
+ a qualquer hora: arme/desarme/modo que a missão não pediu ─► ABORTED (não rearma)
 ```
 
 | Estado | O que faz | Por quê |
 |---|---|---|
-| `GOTO` | `NavigateTo` até a base na altura de cruzeiro (2,5 m) | o A* desvia do bloco da Fase 4 |
+| `SCAN` | só se alguma base não foi dada: o `map_sweep` da Fase 1 (perímetro fechado + faixas espaçadas pela pegada da câmera de barriga), com o `pad_map` juntando as bases e a câmera de barriga contando kits. No fim, base com kit (≥ 3 vistas) = coleta, sem kit = entrega; faltando kit, as bases altas (≥ 1 m) completam as coletas | as regras só garantem as posições das entregas. As faixas não giram 180° no fim como na Fase 1: a câmera de barriga vê a mesma faixa |
+| `GOTO` | `NavigateTo` até a base na altura de cruzeiro (`cruise_alt` acima do CHÃO: 3,2 m no sim, 3,0 no real) | o A* desvia do bloco da Fase 4 |
 | `DESCEND` | `visual_descent`: centraliza na detecção mais próxima do centro e desce até 1,2 m acima | o mesmo pouso da Fase 1 (36/36). Na coleta segue o KIT, na entrega a BASE |
-| `TOUCH` | só na coleta: guarda onde o kit está, desce em **controle de posição** segurando esse x,y até o rangefinder marcar 0,22 m, fecha a garra | o LAND do ArduPilot desce sem correção e escorregava 15-20 cm: o drone tocava AO LADO do kit (medido 2026-10-09). É como o POC da garra faz |
+| `ALIGN` / `TURN` | parado sobre o kit, lê o eixo do kit (`kit_axis`, 3 leituras em até 2 s) e gira até o kit ficar frente-trás (`gripper_axis_deg 0`: os dedos fecham pelos lados). Sem leitura coerente, desce no heading atual. Depois de pegar, gira de volta ao heading do arme ANTES de andar | a regra deixa o kit em qualquer orientação, e a garra só pega pelo lado de 8 cm (antiga ~±8°, cremalheira ~±30°). Girar e andar nunca juntos |
+| `TOUCH` | só na coleta: guarda onde o kit está, desce em **controle de posição** segurando esse x,y até o rangefinder marcar 0,22 m, fecha a garra. O ponto fica a no máximo `touch_max_off_m` (0,22) do centro da base, visto pela YOLO da base na descida (senão a posição conhecida); se teria que puxar mais de 5 cm, **pula o kit** | o LAND do ArduPilot desce sem correção e escorregava 15-20 cm (medido 2026-10-09). E o trem inteiro tem que ficar na base de 1 m: o pé mais longe está a 0,22 m do centro (CAD v3), 0,5 − 0,22 − 0,06 de margem = 0,22 |
 | `LAND` | `vehicle.land()` até as hélices pararem | regra: trem de pouso dentro da base |
 | `ACT` | fecha (coleta) ou abre (entrega) a garra | |
 | confirmação | `pick_check:=gripper` (padrão): o `holding` da garra. `vision`: olha de cima se o kit saiu da base | ver §6 |
+| kit perdido | na coleta, sobe e olha de novo 2 vezes; depois **pula o kit** | pousar às cegas no centro pode pôr um pé no kit, a 1,5 m do chão (decisão do Ivo, 2026-11-23) |
 
-**Sem giros**: o heading do arme é mantido o voo inteiro — é girando que a
-odometria visual se perde. Quando a YOLO souber a orientação do kit, alinhar
-com um kit virado vira uma opção.
+**Um heading só**: o do arme, menos sobre o kit, onde o drone gira parado e
+volta antes da próxima perna. Translação e rotação nunca juntas.
+
+**O piloto**: o RC só desliga o drone, e na Fase 2 um humano pode mandá-lo para
+casa. Por isso qualquer desarme em voo, modo ≠ GUIDED em voo, ou arme/troca de
+modo com o drone parado numa base que a missão não pediu vira `ABORTED`, e a
+missão nunca mais arma. Também aborta: parado > 12° inclinado numa base (um pé
+no kit ou na borda; decolar dali vira o drone) e FCU recusando rearmar por 30 s
+(kill switch ativo: soltá-lo não pode decolar o drone na mão de alguém).
 
 **Relógio**: o orçamento de 600 s conta o tempo do drone (`/clock` no sim) e
 volta para casa com `return_reserve_s` de folga. O log `TASK:` registra cada
-pega/entrega com o relógio — é o log da tarefa que a regra pede.
+pega/entrega com o relógio, no terminal e em `tasks.log` — é o log da tarefa
+que a regra pede. A varredura conta no relógio.
 
 ## 5. Opções (argumentos de `phase2.launch.py` / parâmetros do nó)
 
 | Opção | Padrão | Faz |
 |---|---|---|
-| `layout_file` | `config/phase2_bases.yaml` | onde estão as bases |
-| `arena_yaw_deg` | `-90` | rotação arena → map (sim). Medir no drone real |
-| `cruise_alt` | `2.5` | altura das pernas |
+| `layout_file` | `config/phase2_bases.yaml` | onde estão as bases (real: `phase2_bases_real.yaml`) |
+| `pickup_1..3`, `delivery_1..3` | `""` | uma base: `""` = a do layout, `scan` = desconhecida, `"[x, y]"` ou `"{grid: [c, l]}"` |
+| `arena_yaw_deg` | `-90` | rotação arena → map (sim). Real: `0` |
+| `ground_z` | `-0.7` | o chão no z da FCU (real: o `ground_z()` da Fase 1) |
+| `cruise_alt` | `3.2` | altura das pernas, m acima do CHÃO (real: `3.0`) |
+| `arena_walls_m` | `[0.0]` | `[frente, trás, esq, dir]` como na Fase 1: caixa do A* e da varredura no real |
+| `align_kit` / `gripper_axis_deg` | `true` / `0` | girar o kit para a garra / em que direção do corpo ele tem que ficar |
+| `touch_max_off_m` | `0.22` | máx. do centro do drone ao centro da base de coleta |
+| `record` / `record_images` / `log_dir` | `true` / `false` / `~/hydrone_logs` | rosbag + log de tarefas |
 | `pickup_touch` | `true` | descer até encostar no kit em controle de posição |
 | `touch_range_m` | `0.22` | altura (rangefinder) em que a garra fecha |
 | `pick_check` | `gripper` | como confirmar a pega (`gripper` / `vision`) |
@@ -124,9 +171,18 @@ conhecidas, mas depende do layout medido com precisão.
   (linhas `Gripper:` e `picked up`).
 - **AX-12A sem calibrar**: posições aberta/fechada, torque e limite de carga
   do `gripper_dynamixel_node` são provisórios.
-- **`arena_yaw_deg` e o layout no real**: medir no dia.
-- **Orientação do kit**: o drone não gira para alinhar; depende da YOLO com
-  orientação.
+- **Posições no real**: perguntar à organização em que frame vêm. O
+  `phase2_bases_real.yaml` mede a partir da base de decolagem; se vierem no
+  frame da arena, pôr a base de decolagem em `takeoff` e o `arena_yaw_deg`.
+  Os parâmetros travam depois da 1ª tentativa.
+- **Kit perdido em voo** (cai da garra): o log ainda diz DELIVERED; o drone
+  não sabe.
+- **Base de coleta girada**: o limite do toque é um círculo (vale em qualquer
+  giro). Se as bases forem quadradas e alinhadas ao drone, dá para soltar
+  `touch_max_off_m` até ~0,3.
+- **`kit_axis` no real**: testado em 66 fotos reais da C922 (base do lab com
+  linhas amarelas claras): 60 coerentes e certas no olho, as 6 restantes
+  borradas (= não gira). Nunca em voo.
 
 ## 7. Engine (BiguaSim)
 
