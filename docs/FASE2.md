@@ -142,7 +142,7 @@ que a regra pede. A varredura conta no relógio.
 | `touch_max_off_m` | `0.22` | máx. do centro do drone ao centro da base de coleta |
 | `record` / `record_images` / `log_dir` | `true` / `false` / `~/hydrone_logs` | rosbag + log de tarefas |
 | `auto_start` | `true` | `false`: espera `/hydrone/mission/start` (a contagem da arena) |
-| `close_in_touch` | `false` | fechar no ar no TOUCH e reaproveitar no ACT (versão da Orin de 24/11) |
+| `close_in_touch` | `false` (sim: `true`) | fechar no ar no TOUCH e reaproveitar no ACT (versão da Orin de 24/11). O volume de pega do sim só pega ANTES do pouso (fechar no chão deu "nothing in reach"); os dedos reais, o contrário |
 | `yolo_device` | `cpu` | `0` = CUDA (o `run_phase2.sh` usa `0`) |
 | `pickup_touch` | `true` | descer até encostar no kit em controle de posição |
 | `touch_range_m` | `0.22` | altura (rangefinder) em que a garra fecha |

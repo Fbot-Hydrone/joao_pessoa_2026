@@ -8,8 +8,9 @@ hydrone_bringup/launch/phase2_sim.launch.py — Fase 2 no simulador, um comando:
     serves /hydrone/gripper/command)
   + phase2.launch.py      (the autonomy, world-agnostic)
 
-A pure wrapper, like phase1_sim.launch.py: the only override is where the
-task log and the bag go (log_dir, the mounted /ws/logs).
+A pure wrapper, like phase1_sim.launch.py: the only overrides are where the
+task log and the bag go (log_dir, the mounted /ws/logs) and close_in_touch
+(the sim gripper only grabs in the air).
 """
 import os
 
@@ -38,9 +39,15 @@ def generate_launch_description():
                 "odom_source", "odom_error", "odom_error_print",
                 "odom_error_dir", "vo_stereo")}.items())
     # The container keeps only /ws/logs (./logs on the host) after `down`.
+    # The sim's grab volume catches the kit only BEFORE landing (a ground close
+    # came back "nothing in reach", 2026-11-24); the real fingers are the other
+    # way round, so closing in TOUCH is a fact about the sim.
     autonomy = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(launch_dir, "phase2.launch.py")),
-        launch_arguments={"log_dir": LaunchConfiguration(
-            "log_dir", default="/ws/logs")}.items())
+        launch_arguments={
+            "log_dir": LaunchConfiguration("log_dir", default="/ws/logs"),
+            "close_in_touch": LaunchConfiguration("close_in_touch",
+                                                  default="true"),
+        }.items())
     return LaunchDescription(args + [sources, autonomy])

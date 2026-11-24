@@ -112,8 +112,9 @@ FORWARDING_EXEMPT = {
         {"field_mode", "dry_run", "belly_offset_xy", "ground_z"},
     ("phase1_dry.launch.py", "sources_real.launch.py"):
         {"zed_point_cloud"},
-    # Phase 2: where the container keeps files after `down`.
-    ("phase2_sim.launch.py", "phase2.launch.py"): {"log_dir"},
+    # Phase 2: where the container keeps files after `down`, and the sim
+    # gripper's grab volume (only catches the kit before landing).
+    ("phase2_sim.launch.py", "phase2.launch.py"): {"log_dir", "close_in_touch"},
     # Facts about this airframe and the real map frame (see the file's
     # docstring), each a LaunchConfiguration with a default so the CLI wins.
     ("phase2_real.launch.py", "phase2.launch.py"):
