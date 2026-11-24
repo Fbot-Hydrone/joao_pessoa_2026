@@ -41,6 +41,13 @@ arena antes dos kits (§4). Também aceita `{grid: [col, lin]}`. Os argumentos
 de `sources_real` (`surface_offset`, `takeoff_base_height_m`, ...) são os
 mesmos da Fase 1.
 
+Na arena o drone NÃO roda `phase2_real` à mão: `orin_flight/run_phase2.sh`
+(como o da Fase 1) sobe `sources_real gripper:=true`, mede onde está o chão no
+z da FCU (`floor_z.py`), sobe `phase2.launch.py` com `ground_z` e a caixa
+deslocados por ele, `auto_start:=false`, e faz a contagem e o
+`/hydrone/mission/start`. O código vai para a Orin numa worktree separada
+(`deploy_phase2.sh`). Run sheet: `orin_flight/PHASE2.md`.
+
 Cada execução grava `log_dir/phase2_<data>/` (padrão `~/hydrone_logs`, no sim
 `/ws/logs` = `./logs`): `tasks.log` (o log de tarefas da regra) e `bag/`
 (`record:=false` desliga, `record_images:=true` inclui a câmera de barriga,
@@ -76,7 +83,7 @@ Cada execução grava `log_dir/phase2_<data>/` (padrão `~/hydrone_logs`, no sim
 | `hydrone_msgs/action/Gripper.action` | A interface da garra, igual no sim e no real |
 | `hydrone_controller/gripper.py` | Cliente `Gripper.close()/open()` → Job, como o `Vehicle` |
 | `biguasim_main` (ardubridge + interface.py) | Sim: spawna bases e kits (`ARENA_PHASE=2`) e serve a ação da garra |
-| `hydrone_bringup/gripper_dynamixel_node.py` | Real: AX-12A (Protocol 1.0, U2D2). `sources_real.launch.py gripper:=true` |
+| `hydrone_bringup/gripper_dynamixel_node.py` | Real: AX-12A pela ArbotiX-M. Faz homing por torque no boot (garra VAZIA), fecha com rampa de torque e só diz HOLDING quando a garra para e a carga sobe, segura com torque limitado. `config/gripper.yaml`, `sources_real.launch.py gripper:=true`. Detalhes: [`GRIPPER.md`](GRIPPER.md) |
 | `hydrone_vision/models/lipo_mix_yolo11s.pt` | YOLO do kit (detecção, classe `lipo`): yolo11s treinado com o sim + 128 fotos reais da C270 (2026-10-27). Dataset em `~/Documents/kit_dataset_mix` |
 
 ## 4. A máquina de estados
@@ -101,7 +108,8 @@ WAIT → ARMING → TAKEOFF ─┬─ (base desconhecida) SCAN ─┐
 | `ALIGN` / `TURN` | parado sobre o kit, lê o eixo do kit (`kit_axis`, 3 leituras em até 2 s) e gira até o kit ficar frente-trás (`gripper_axis_deg 0`: os dedos fecham pelos lados). Sem leitura coerente, desce no heading atual. Depois de pegar, gira de volta ao heading do arme ANTES de andar | a regra deixa o kit em qualquer orientação, e a garra só pega pelo lado de 8 cm (antiga ~±8°, cremalheira ~±30°). Girar e andar nunca juntos |
 | `TOUCH` | só na coleta: guarda onde o kit está, desce em **controle de posição** segurando esse x,y até o rangefinder marcar 0,22 m, fecha a garra. O ponto fica a no máximo `touch_max_off_m` (0,22) do centro da base, visto pela YOLO da base na descida (senão a posição conhecida); se teria que puxar mais de 5 cm, **pula o kit** | o LAND do ArduPilot desce sem correção e escorregava 15-20 cm (medido 2026-10-09). E o trem inteiro tem que ficar na base de 1 m: o pé mais longe está a 0,22 m do centro (CAD v3), 0,5 − 0,22 − 0,06 de margem = 0,22 |
 | `LAND` | `vehicle.land()` até as hélices pararem | regra: trem de pouso dentro da base |
-| `ACT` | fecha (coleta) ou abre (entrega) a garra | |
+| `ACT` | fecha (coleta) ou abre (entrega) a garra. Fecha UMA vez, no chão (`close_in_touch:=false`) | no ar, a 0,22 m, os dedos reais ficam 1-2,5 cm acima do kit |
+| `OPENING` | abre a garra e ESPERA: antes de armar, e pairando antes de tentar de novo ou pular um kit | garra fechada não pode descer de novo sobre o kit |
 | confirmação | `pick_check:=gripper` (padrão): o `holding` da garra. `vision`: olha de cima se o kit saiu da base | ver §6 |
 | kit perdido | na coleta, sobe e olha de novo 2 vezes; depois **pula o kit** | pousar às cegas no centro pode pôr um pé no kit, a 1,5 m do chão (decisão do Ivo, 2026-11-23) |
 
@@ -133,6 +141,9 @@ que a regra pede. A varredura conta no relógio.
 | `align_kit` / `gripper_axis_deg` | `true` / `0` | girar o kit para a garra / em que direção do corpo ele tem que ficar |
 | `touch_max_off_m` | `0.22` | máx. do centro do drone ao centro da base de coleta |
 | `record` / `record_images` / `log_dir` | `true` / `false` / `~/hydrone_logs` | rosbag + log de tarefas |
+| `auto_start` | `true` | `false`: espera `/hydrone/mission/start` (a contagem da arena) |
+| `close_in_touch` | `false` | fechar no ar no TOUCH e reaproveitar no ACT (versão da Orin de 24/11) |
+| `yolo_device` | `cpu` | `0` = CUDA (o `run_phase2.sh` usa `0`) |
 | `pickup_touch` | `true` | descer até encostar no kit em controle de posição |
 | `touch_range_m` | `0.22` | altura (rangefinder) em que a garra fecha |
 | `pick_check` | `gripper` | como confirmar a pega (`gripper` / `vision`) |
@@ -191,8 +202,8 @@ conhecidas, mas depende do layout medido com precisão.
   verdade se pegou, olhe o log da engine:
   `~/.local/share/biguasim/1.0.0/worlds/Competition/Linux/Biguasim/Saved/Logs/HolodeckLog.txt`
   (linhas `Gripper:` e `picked up`).
-- **AX-12A sem calibrar**: posições aberta/fechada, torque e limite de carga
-  do `gripper_dynamixel_node` são provisórios.
+- **Garra**: o homing acha as posições sozinho no boot; os torques de
+  `gripper.yaml` vieram da bancada da Orin, nunca de um voo.
 - **Posições no real**: perguntar à organização em que frame vêm. O
   `phase2_bases_real.yaml` mede a partir da base de decolagem; se vierem no
   frame da arena, pôr a base de decolagem em `takeoff` e o `arena_yaw_deg`.

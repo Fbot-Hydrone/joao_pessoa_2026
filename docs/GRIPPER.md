@@ -1,6 +1,6 @@
 # AX-12A Payload Gripper — Architecture, Logic & Usage Guide
 
-Documentation for the real-hardware 3D-printed payload gripper (20 cm travel) on the Jetson (`ivo@192.168.55.1`), integrated into `/home/ivo/Documents/joao_pessoa_2026`.
+Documentation for the real-hardware 3D-printed payload gripper (20 cm travel) on the Orin. Written on the Orin (uncommitted there, 2026-11-24), brought into `cbr/phase2`.
 
 ---
 
@@ -91,9 +91,11 @@ Used by both `/hydrone/gripper/grab` and `/hydrone/gripper/command` (`close=True
    - An empty close relaxes `Goal Position` off the closed stop so idle load drops to ~0.
    - Opening monitors `open_torque_threshold (350)` and backs off `open_backoff = 10` ticks if it hits a shifted open stop early.
 
-### C. Mission Integration (`phase2_mission_node.py`)
-- **`OPENING` state**: Waits for `gripper.open()` to finish before arming at startup, and automatically re-opens the gripper while hovering before retrying or skipping a failed pickup (`_grab_failed` and `_do_verify`).
-- **No double-close**: Saves the completed `TOUCH` grab result (`_touch_grab`) and reuses it in `ACT` instead of firing a redundant second `close()` on the ground.
+### C. Mission Integration (`phase2_mission_node.py`, branch `cbr/phase2`)
+- **`OPENING` state**: waits for `gripper.open()` to finish before arming at startup, and re-opens the gripper while hovering before retrying or skipping a failed pickup (`_grab_failed`, `_do_verify`), so closed jaws never come down on the kit again.
+- **One close, on the ground by default** (`close_in_touch:=false`): TOUCH descends on the kit to `touch_range_m` and lands; ACT closes once with the kit between the legs. Closing in the air at `touch_range_m` (0.22, 0.17 landed) leaves the finger tips 1-2.5 cm above the 7 cm kit.
+- `close_in_touch:=true` is the Orin version of 2026-11-24: close in TOUCH, keep the result (`_touch_grab`) and reuse it in ACT instead of a second close on the ground.
+- On the drone the whole run is `orin_flight/run_phase2.sh` (see `orin_flight/PHASE2.md`): `sources_real ... gripper:=true` homes the gripper at boot, so the jaws must be empty when it starts.
 
 ---
 
