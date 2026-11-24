@@ -58,8 +58,8 @@ Two things zed_wrapper gets wrong for this stack if it is ever used here:
 
 BEFORE THE FIRST FLIGHT
 -----------------------
-  * DONE 2026-08-22: the belly camera is calibrated and the numbers are the
-    defaults below. Re-do it if the camera is swapped or the capture
+  * DONE 2026-11-23 for the C922 (the C270 was 2026-08-22): the belly camera
+    is calibrated, at focus 5, and the numbers are the defaults below. Re-do it if the camera is swapped or the capture
     resolution changes -- fx/fy/cx/cy are in PIXELS and do not survive either.
   * Measure down_cam_mount_xyz / down_cam_mount_rpy_deg on the airframe. The
     defaults are the SIMULATED mount, which is a starting point and not your
@@ -177,7 +177,9 @@ def generate_launch_description():
         DeclareLaunchArgument("down_cam_height", default_value="480"),
         DeclareLaunchArgument("down_cam_fps", default_value="15"),
         DeclareLaunchArgument(
-            "down_cam_focus", default_value="-1",
+            # swept 2026-11-23 at 1.2 m: flat 0-10, soft from 20; 5 is the
+            # middle. The calibration below was made at this value.
+            "down_cam_focus", default_value="5",
             description="C922 focus_absolute to lock, autofocus off, re-applied "
                         "every start (the camera forgets it at power-up). Find "
                         "it with scripts/v4l2_focus.py. -1 = leave autofocus"),
@@ -188,30 +190,23 @@ def generate_launch_description():
                         "and distortion below."),
         DeclareLaunchArgument("down_cam_hfov_deg", default_value="60.0"),
 
-        # Measured 2026-08-22 with the C270 on a desktop, ChArUco 9x11,
-        # 22 mm squares, 16 mm markers, DICT_4X4_250; 18 views, reprojection
-        # error 0.4283 px. See docs/CALIBRATION.md.
-        #
-        # The sanity check these passed matters as much as the error: fx 814.6
-        # implies a 52 deg DIAGONAL field of view, which is what a C270 has.
-        # Earlier attempts on thin coverage returned fx from 1085 to 1599 --
-        # a 40 deg lens and narrower -- at reprojection errors as low as
-        # 0.4866 px. Low error does not mean correct; see CALIBRATION.md 4.
-        DeclareLaunchArgument("down_cam_fx", default_value="814.643"),
-        DeclareLaunchArgument("down_cam_fy", default_value="818.604"),
-        DeclareLaunchArgument("down_cam_cx", default_value="299.707"),
-        DeclareLaunchArgument("down_cam_cy", default_value="249.397"),
+        # C922, measured 2026-11-23 at focus 5: ChArUco 9x11 shown on a
+        # screen, 37 views, 0.13 px, 52 deg horizontal. 20 random halves of
+        # the views gave fx 644-657 and cx 311-321, so it is stable even
+        # without close views. Low error alone does not mean correct; see
+        # CALIBRATION.md 4. (The C270 was fx 814.6, cx 299.7, cy 249.4.)
+        DeclareLaunchArgument("down_cam_fx", default_value="651.801"),
+        DeclareLaunchArgument("down_cam_fy", default_value="654.484"),
+        DeclareLaunchArgument("down_cam_cx", default_value="316.031"),
+        DeclareLaunchArgument("down_cam_cy", default_value="229.937"),
         DeclareLaunchArgument(
             "down_cam_distortion",
-            default_value="[0.015598, -0.369012, 0.007169, -0.006748, "
-                          "1.862586]",
+            default_value="[0.062683, -0.217481, -0.001277, -0.000350, "
+                          "0.128486]",
             description="OpenCV plumb-bob [k1, k2, p1, p2, k3]. The node had "
                         "this parameter from the start but the launch never "
                         "passed it, so a distortion argument silently did "
-                        "nothing. k3 = 1.86 is large and was fitted from only "
-                        "18 views; if pad positions look systematically off "
-                        "toward the frame edges, recapture with wider "
-                        "coverage before blaming the mount."),
+                        "nothing."),
         DeclareLaunchArgument(
             "down_cam_mount_xyz", default_value="[0.065, 0.071, -0.12]",
             description="Belly camera position in base_link (ROS FLU: x "
