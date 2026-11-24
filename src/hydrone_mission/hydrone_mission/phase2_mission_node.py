@@ -53,6 +53,7 @@ from mavros_msgs.msg import State
 from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import CameraInfo, Range
 from std_msgs.msg import String
+from std_srvs.srv import Trigger
 
 from hydrone_msgs.action import NavigateTo
 from hydrone_msgs.msg import KitAxis, PadDetection, PadMap
@@ -101,10 +102,11 @@ class Frames:
 
 
 class Phase2MissionNode(Node):
-    WAIT, ARMING, TAKEOFF, SCAN, TURN, GOTO, DESCEND, ALIGN, TOUCH, LAND, \
-        ACT, VERIFY, DONE, ABORTED = (
-            "WAIT", "ARMING", "TAKEOFF", "SCAN", "TURN", "GOTO", "DESCEND",
-            "ALIGN", "TOUCH", "LAND", "ACT", "VERIFY", "DONE", "ABORTED")
+    WAIT, OPENING, ARMING, TAKEOFF, SCAN, TURN, GOTO, DESCEND, ALIGN, TOUCH, \
+        LAND, ACT, VERIFY, DONE, ABORTED = (
+            "WAIT", "OPENING", "ARMING", "TAKEOFF", "SCAN", "TURN", "GOTO",
+            "DESCEND", "ALIGN", "TOUCH", "LAND", "ACT", "VERIFY", "DONE",
+            "ABORTED")
 
     def __init__(self, **kwargs):
         super().__init__("phase2_mission", **kwargs)
@@ -159,6 +161,14 @@ class Phase2MissionNode(Node):
         # control, descend to just above contact, close, THEN land.
         self.pickup_touch = p("pickup_touch", True)
         self.touch_range = p("touch_range_m", 0.22)
+        # Close the gripper ONCE, on the ground (ACT), by default. Closing in
+        # TOUCH, at touch_range over the kit, puts the real finger tips ~8 cm
+        # over the base (rangefinder ~0.17 landed, tips 3 cm over the skids)
+        # with a 7 cm kit: above it. The sim's grab volume hid that.
+        # True = close in TOUCH and reuse that result in ACT (no 2nd close).
+        self.close_in_touch = p("close_in_touch", False)
+        # False: wait for /hydrone/mission/start (the arena countdown).
+        self.auto_start = p("auto_start", True)
         self.touch_timeout = p("touch_timeout_s", 20.0)
         # Keep correcting the touch point by camera on the way down. The fix
         # taken at 1.2 m comes from ONE frame and missed the kit by 25-54 cm
@@ -270,6 +280,7 @@ class Phase2MissionNode(Node):
         self.cli_register = self.create_client(
             RegisterTakeoffBase, "/hydrone/pads/register_takeoff_base")
         self.pub_status = self.create_publisher(String, "/hydrone/mission/status", 10)
+        self.create_service(Trigger, "/hydrone/mission/start", self._svc_start)
 
         self.state, self._since, self._job = self.WAIT, self.now(), None
         self.home = self.home_yaw = self.hold_yaw = None
@@ -286,6 +297,8 @@ class Phase2MissionNode(Node):
         self._blind = False
         self._give_up_visual = False
         self._touch_xy = None
+        self._touch_grab = None              # (ok, holding, message) of a TOUCH close
+        self._open_after, self._open_hold = None, False
         self._ours = False                   # armed by us, not landed yet
         self._settled = True                 # seen disarmed since our landing
         self._takeoff_z0 = 0.0
@@ -299,7 +312,9 @@ class Phase2MissionNode(Node):
         self.get_logger().info(
             f"phase2_mission ready — cruise {self.cruise_alt} m above the "
             f"floor (z {self.cruise:.2f}), kit alignment "
-            f"{'on' if self.align_kit else 'off'}.")
+            f"{'on' if self.align_kit else 'off'}, gripper closes "
+            f"{'in TOUCH' if self.close_in_touch else 'on the ground'}. "
+            f"{'Auto-starting.' if self.auto_start else 'Call /hydrone/mission/start.'}")
 
     # ── plumbing ────────────────────────────────────────────────────────────
     def now(self):
@@ -362,6 +377,31 @@ class Phase2MissionNode(Node):
         p = self.pose.pose.position
         self.vehicle.setpoint(p.x, p.y, p.z, self.hold_yaw)
 
+    def _svc_start(self, _req, res):
+        self.auto_start = True
+        res.success = self.state == self.WAIT
+        res.message = ("starting" if res.success
+                       else f"already running ({self.state})")
+        return res
+
+    def _open_then(self, after, hold=False):
+        """Open the gripper, WAIT for it, then `after()`. hold: airborne."""
+        self._open_after, self._open_hold = after, hold
+        self._enter(self.OPENING)
+
+    def _do_opening(self):
+        if self._open_hold and self.pose is not None:
+            self._hold()
+        if self._job is None:
+            self._job = self.gripper.open()
+            return
+        if not self._job.done:
+            return
+        if not self._job.ok:
+            self.get_logger().warn(f"gripper open failed: {self._job.message}")
+        after, self._open_after = self._open_after, None
+        after()
+
     def _abort(self, why):
         self._task(f"ABORTED: {why}. The mission will not arm again.")
         self._enter(self.ABORTED)
@@ -397,7 +437,7 @@ class Phase2MissionNode(Node):
     def _check_budget(self):
         if self.t0 is None or self.target and self.target[0] == "home":
             return
-        if self.state in (self.LAND, self.ACT):
+        if self.state in (self.LAND, self.ACT, self.OPENING):
             return
         if self.mission_now() - self.t0 < self.budget - self.reserve:
             return
@@ -415,6 +455,11 @@ class Phase2MissionNode(Node):
             self.get_logger().info(
                 "waiting for pose, controller, gripper and nav...",
                 throttle_duration_sec=5.0)
+            return
+        if not self.auto_start:
+            self.get_logger().info("phase2_mission ready, waiting. Call "
+                                   "/hydrone/mission/start.",
+                                   throttle_duration_sec=10.0)
             return
         p = self.pose.pose.position
         self.home, self.home_yaw = (p.x, p.y), yaw_of(self.pose)
@@ -435,8 +480,9 @@ class Phase2MissionNode(Node):
         else:
             self._plan_tour()
             self.after_takeoff = self._next_target
-        self._job = self.gripper.open()      # start with an open gripper
-        self._enter(self.ARMING)
+        # Arm only once the gripper is confirmed open (the AX-12A homes itself
+        # at boot and may sit anywhere).
+        self._open_then(lambda: self._enter(self.ARMING))
 
     def _plan_tour(self):
         pi = [i for i, q in enumerate(self.pick_xy) if q is not None]
@@ -639,6 +685,7 @@ class Phase2MissionNode(Node):
 
     def _new_pickup(self):
         self._aligned, self._align_pass, self._base_fix = False, 0, []
+        self._touch_grab = None
 
     def _go_home(self):
         self._leg_to(("home", *self.home))
@@ -911,7 +958,8 @@ class Phase2MissionNode(Node):
             throttle_duration_sec=0.5)
 
     def _do_touch(self):
-        """Descend on the kit's XY under position control; grab near contact."""
+        """Descend on the kit's XY under position control to just above
+        contact, then LAND (the gripper closes on the ground, in ACT)."""
         if self._job is None:
             self._track_kit()
         kx, ky = self._touch_xy
@@ -921,10 +969,15 @@ class Phase2MissionNode(Node):
         if self._job is None and (touched
                                   or self._elapsed() > self.touch_timeout):
             self.vehicle.setpoint(kx, ky, p.z, self.hold_yaw)   # hold here
+            h = self.range_m if self.range_m is not None else -1
+            if not self.close_in_touch:
+                self.get_logger().info(f"pickup: at {h:.2f} m over the kit — "
+                                       "landing on it")
+                self._enter(self.LAND)
+                return
             self._job = self.gripper.close()
-            self.get_logger().info(
-                f"pickup: at {self.range_m if self.range_m is not None else -1:.2f}"
-                f" m over the kit — closing the gripper, then landing")
+            self.get_logger().info(f"pickup: at {h:.2f} m over the kit — "
+                                   "closing the gripper, then landing")
             return
         if self._job is None:
             # The controller limits the speed; asking 0.3 m below keeps it
@@ -932,6 +985,10 @@ class Phase2MissionNode(Node):
             self.vehicle.setpoint(kx, ky, p.z - 0.3, self.hold_yaw)
             return
         if self._job.done:
+            r = self._job.result
+            self._touch_grab = (self._job.ok,
+                                bool(r.holding) if r is not None else False,
+                                self._job.message)
             self._enter(self.LAND)
 
     def _do_land(self):
@@ -963,16 +1020,25 @@ class Phase2MissionNode(Node):
     def _do_act(self):
         kind = self.target[0]
         pi, di = self.tour[self.leg]
-        if self._job is None:
+        grab = None
+        if kind == "pickup" and self._touch_grab and self._touch_grab[0]:
+            # Closed in TOUCH already: a 2nd close on the ground would drop
+            # the AX-12A's hold torque for a moment.
+            grab, self._touch_grab = self._touch_grab, None
+        elif self._job is None:
             self._job = (self.gripper.close() if kind == "pickup"
                          else self.gripper.open())
             return
-        if not self._job.done:
+        elif not self._job.done:
             return
         if kind == "pickup":
-            held = self._job.ok and self._job.result.holding
+            if grab is None:
+                r = self._job.result
+                grab = (self._job.ok, bool(r.holding) if r is not None
+                        else False, self._job.message)
+            held = grab[0] and grab[1]
             self._task(f"kit {pi + 1}: gripper closed on pickup {pi + 1} "
-                       f"({self._job.message}); verifying from the air")
+                       f"({grab[2]}); verifying from the air")
             self.carrying = bool(held)
             if self.pick_check == "vision":
                 self.after_takeoff = self._start_verify
@@ -997,16 +1063,18 @@ class Phase2MissionNode(Node):
         self.carrying = False
         if self.retries < self.pick_retries:
             self.retries += 1
-            self._task(f"kit {pi + 1}: gripper EMPTY — retry "
+            self._task(f"kit {pi + 1}: gripper EMPTY — opening, retry "
                        f"{self.retries}/{self.pick_retries}")
             self._new_pickup()
-            self._leg_to(("pickup", *self.pick_xy[pi]))
+            # closed jaws must not come down on the kit again
+            self._open_then(lambda: self._leg_to(("pickup", *self.pick_xy[pi])),
+                            hold=True)
         else:
             self._task(f"kit {pi + 1}: gripper empty {self.retries + 1}x — "
-                       "skipping this kit")
+                       "opening, skipping this kit")
             self.leg += 1
             self.retries = 0
-            self._next_target()
+            self._open_then(self._next_target, hold=True)
 
     def _start_verify(self):
         self._hits = 0
@@ -1032,17 +1100,17 @@ class Phase2MissionNode(Node):
                 self.retries += 1
                 self.carrying = False
                 self._task(f"kit {pi + 1}: still on the base — grab FAILED, "
-                           f"retry {self.retries}/{self.pick_retries}")
+                           f"opening, retry {self.retries}/{self.pick_retries}")
                 self.descend.reset()
                 self._new_pickup()
-                self._enter(self.DESCEND)
+                self._open_then(lambda: self._enter(self.DESCEND), hold=True)
             else:
                 self._task(f"kit {pi + 1}: grab failed {self.retries + 1}x — "
-                           "skipping this kit")
+                           "opening, skipping this kit")
                 self.leg += 1
                 self.retries = 0
                 self.carrying = False
-                self._next_target()
+                self._open_then(self._next_target, hold=True)
             return
         if self._elapsed() >= self.verify_s:
             pi, _ = self.tour[self.leg]

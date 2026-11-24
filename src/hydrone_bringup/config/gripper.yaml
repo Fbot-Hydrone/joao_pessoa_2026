@@ -1,0 +1,63 @@
+# AX-12A 3D-printed payload gripper parameters.
+# Loaded automatically by `sources_real.launch.py` and usable standalone via:
+#   ros2 run hydrone_bringup gripper_dynamixel_node --ros-args \
+#     --params-file ~/Documents/joao_pessoa_2026/src/hydrone_bringup/config/gripper.yaml
+#
+# Launch arguments `gripper_port:=...` and `gripper_auto_calibrate:=...` override
+# the matching keys below.
+/**:
+  ros__parameters:
+    # ── Serial / ArbotiX-M bridge ───────────────────────────────────────────
+    baudrate: 115200
+    id: 1
+    boot_wait_s: 7.5            # silent wait after FTDI open (DTR resets ArbotiX-M)
+    poll_interval_s: 0.18       # 11-byte atomic telemetry poll period (s)
+
+    # ── Fallback / initial position limits (0..1023 ticks; CW/decreasing = open)
+    open_position: 264
+    closed_position: 755
+    reach_tolerance: 20         # ticks
+
+    # ── General motion (open / return) ──────────────────────────────────────
+    torque_limit: 550           # general moving torque (0..1023)
+    moving_speed: 200           # normal speed (0..1023)
+    timeout_s: 5.0
+
+    # ── Dynamic torque ramp & movement/stiffness verification (closing) ─────
+    close_start_torque: 350     # gentle initial closing torque
+    torque_ramp_step: 80        # dynamic torque step when resistance is detected
+    close_max_torque: 720       # 3D-print-safe closing ceiling
+    close_torque_threshold: 260 # initial contact load threshold (paired with slow_delta)
+    hard_torque_threshold: 560  # upper load backstop during close
+    holding_load: 180           # minimum load to consider an object present
+    slow_delta: 8               # ticks/poll; above = still moving freely
+    stall_delta: 3              # ticks/poll; at or below = stalled
+    torque_samples: 2
+    stall_samples: 2
+    inrush_ignore_s: 0.30       # ignore startup acceleration current spike
+    firm_move_tol: 8            # max ticks moved during ramp step to confirm firm stop
+    min_torque_rise: 40         # min load increase during ramp step to confirm solid object
+    ramp_step_s: 0.30           # probe window per torque increment
+    max_ramp_cycles: 8
+
+    # ── Holding torque & active Overload relief (3D-print-safe) ─────────────
+    hold_torque_limit: 780      # max holding torque (0..1023) — firmer grip, safe for 3D print
+    hold_torque_margin: 110     # extra torque margin above confirmed grasp torque
+    max_hold_load: 730          # active relief threshold while holding
+    hold_squeeze: 24            # compliance-slope ticks past contact while holding
+    relief_step: 8              # ticks eased toward open if hold load > max_hold_load
+
+    # ── Opening torque guard ────────────────────────────────────────────────
+    open_torque_threshold: 350
+    open_backoff: 10            # ticks backed off if open hits mechanical stop early
+
+    # ── Dynamic startup homing (/hydrone/gripper/calibrate) ─────────────────
+    auto_calibrate: true
+    calib_torque_limit: 400     # enough for 20 cm linkage friction, gentle on stops
+    calib_speed: 150
+    calib_load_threshold: 280   # paired with slow_delta to avoid mid-travel false stops
+    calib_stall_samples: 3
+    calib_inrush_s: 0.40
+    calib_timeout_s: 6.0
+    limit_margin: 10            # safety ticks inside each mechanical stop
+    min_calib_travel: 100       # reject calibration if jaws appear obstructed

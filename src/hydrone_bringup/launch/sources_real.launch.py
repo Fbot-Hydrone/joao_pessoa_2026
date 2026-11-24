@@ -392,12 +392,15 @@ def generate_launch_description():
         executable="gripper_dynamixel_node",
         output="screen",
         condition=IfCondition(LaunchConfiguration("gripper")),
-        parameters=[{
-            "port": LaunchConfiguration("gripper_port"),
-            "baudrate": 115200,
-            "open_position": 264,
-            "closed_position": 755,
-        }],
+        parameters=[
+            os.path.join(bringup_pkg, "config", "gripper.yaml"),
+            {
+                "port": LaunchConfiguration("gripper_port"),
+                "auto_calibrate": ParameterValue(
+                    LaunchConfiguration("gripper_auto_calibrate"),
+                    value_type=bool),
+            },
+        ],
     )
 
     surface_args = [
@@ -459,4 +462,8 @@ def generate_launch_description():
             description="The ArbotiX-M's FTDI cable. Default: the first "
                         "FT232R found under /dev/serial/by-id (any cable), "
                         "else /dev/ttyUSB0."),
+        DeclareLaunchArgument(
+            "gripper_auto_calibrate", default_value="true",
+            description="Run gentle torque-limited homing at startup to "
+                        "dynamically measure open/closed limits."),
         zed, down_cam, mavros, mavros_plain, surface, vision_odom, gripper])

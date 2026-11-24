@@ -212,7 +212,7 @@ def turn_to_axis(axis_img, axes, gripper_axis=0.0):
 # ── the pilot ───────────────────────────────────────────────────────────────
 
 FLYING = ("TAKEOFF", "SCAN", "TURN", "GOTO", "DESCEND", "ALIGN", "TOUCH",
-          "VERIFY")
+          "VERIFY", "OPENING")   # OPENING counts only when ours (airborne)
 ON_BASE = ("WAIT", "ACT")
 
 

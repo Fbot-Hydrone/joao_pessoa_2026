@@ -117,6 +117,8 @@ def _planned(context):
         "align_kit": bool(_f(context, "align_kit")),
         "gripper_axis_deg": float(_f(context, "gripper_axis_deg")),
         "touch_max_off_m": float(_f(context, "touch_max_off_m")),
+        "close_in_touch": bool(_f(context, "close_in_touch")),
+        "auto_start": bool(_f(context, "auto_start")),
         "task_log": os.path.join(run, "tasks.log"),
     }
     for b in BASES:
@@ -176,6 +178,16 @@ def generate_launch_description():
             "touch_max_off_m", default_value="0.22",
             description="Centro do drone ate o centro da base de coleta: "
                         "0,5 - 0,22 (pe mais longe) - 0,06."),
+        DeclareLaunchArgument(
+            "close_in_touch", default_value="false",
+            description="Fecha a garra no TOUCH (no ar, a touch_range_m) em vez "
+                        "de no chao. No real os dedos ficam acima do kit ali."),
+        DeclareLaunchArgument(
+            "auto_start", default_value="true",
+            description="false: espera /hydrone/mission/start (contagem na arena)."),
+        DeclareLaunchArgument(
+            "yolo_device", default_value="cpu",
+            description="cpu ou 0 (CUDA). A Orin tem CUDA (torch 2.8)."),
         DeclareLaunchArgument("range_topic",
                               default_value="/mavros/distance_sensor/rangefinder"),
         DeclareLaunchArgument("record", default_value="true",
@@ -232,6 +244,7 @@ def generate_launch_description():
                 "yolo_target_classes": classes,
                 "yolo_imgsz": imgsz,
                 "yolo_conf_threshold": conf,
+                "yolo_device": LaunchConfiguration("yolo_device"),
             }])
 
     bases = detector("pad_detector_down", "down", "pad_seg_yolo11.pt",
