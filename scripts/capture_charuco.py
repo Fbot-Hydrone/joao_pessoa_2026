@@ -63,6 +63,19 @@ def _device_source(args):
     try:
         while True:
             ok, frame = cap.read()
+            if ok and args.focus >= 0:
+                # after the first frame: some firmware resets controls when
+                # the stream starts. Calibrate at the focus the drone flies.
+                from v4l2_focus import lock_focus
+                try:
+                    auto, got = lock_focus(args.device, args.focus)
+                except OSError as e:
+                    sys.exit(f"cannot set focus on {args.device}: {e}")
+                if auto != 0 or got != args.focus:
+                    sys.exit(f"focus not locked: autofocus={auto} "
+                             f"focus_absolute={got}")
+                print(f"focus locked at {got}")
+                args.focus = -1
             yield frame if ok else None
     finally:
         cap.release()
@@ -275,6 +288,10 @@ def main():
                          "Being able to see what the camera sees is most of "
                          "what the ROS calibration GUI was giving you; this "
                          "adds the tilt angle, which that GUI does not show.")
+    ap.add_argument("--focus", type=int, default=-1,
+                    help="lock the lens at this focus_absolute (autofocus "
+                         "off) -- the value the drone flies with, see "
+                         "v4l2_focus.py. -1 leaves the camera alone")
     ap.add_argument("--from-topic", default="",
                     help="subscribe to a ROS image topic instead of opening "
                          "the V4L2 device, e.g. /down_cam/image_raw. V4L2 "

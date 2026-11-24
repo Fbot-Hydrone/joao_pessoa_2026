@@ -21,6 +21,8 @@ document is how to make it stop.
 | a flat mount | see §5 — this is the largest error source and the easiest to get wrong |
 | a display | the calibrator is a GUI. Use the Jetson's own monitor, or `ssh -X` |
 
+No printed board at hand? Show it on a laptop screen, §7.
+
 The board in use here reads:
 
 ```
@@ -342,3 +344,73 @@ on the floor, hover over it, and compare what `pad_map_node` publishes on
 mount transform that is wrong produce a confident, repeatable, wrong answer —
 and `down_cam_mount_xyz` / `down_cam_mount_rpy_deg` are still at BiguaSim's
 virtual airframe values. See [`JETSON-REAL-STACK.md`](JETSON-REAL-STACK.md) §9.
+
+---
+
+## 7. No printed board, and the C922's focus
+
+The C922 replaced the C270 on 2026-11-23. It needs its own calibration, and
+unlike the C270 it has **autofocus**, which has to be off before calibrating
+and while flying.
+
+### Why lock the focus
+
+Over a plain floor, or a pad filling the frame, the autofocus has no contrast
+to work with and hunts mid-descent. The camera also **keeps no settings across
+a power cycle**: every replug or reboot brings it back on autofocus. So the
+value lives in the launch (`down_cam_focus:=N`) and `down_cam_usb_node` sets
+it on every start, after the first frame (some firmware resets controls when
+the stream starts), and reads it back:
+
+```
+focus locked at 15, autofocus off          <- good
+focus NOT locked: asked 15, camera holds autofocus=1 focus_absolute=0
+```
+
+The C922 takes focus in steps of 5 (0 = far, 250 = closest), so ask for a
+multiple of 5. The calibration has to be made at the focus the drone flies
+with, so focus comes first. Moving the focus moves fx by under 0.5% at 1 m, so
+small differences do not matter, but autofocus jumping around does.
+
+### The board on a screen
+
+`scripts/charuco_screen.py` draws the same 9x11 board full screen. Its printed
+size does not matter (§5), and a screen is flatter than paper. Checked
+against synthetic views rendered through a known camera (fx 604, cx 318,
+cy 242): solved to fx 604.1, cx 318.7, cy 242.2, 0.23 px.
+
+### Steps (C922 plugged into a laptop, 640x480 MJPG like the drone)
+
+On a laptop without OpenCV, prefix the commands with
+`uv run --with opencv-python`.
+
+```bash
+v4l2-ctl --list-devices            # the C922's first /dev/videoN
+
+# 1. focus: something with fine detail (the board, a poster) in the middle of
+#    the frame at hover distance (~1.2 m), then again at sweep height
+python3 scripts/v4l2_focus.py --device /dev/videoN
+#    prints a sharpness table and leaves the sharpest value on the camera;
+#    pick one that is good at both distances
+
+# 2. capture, focus locked (terminal 1) with the board on screen (terminal 2)
+xset s off -dpms                   # no screen blanking mid-capture
+python3 scripts/capture_charuco.py --device /dev/videoN --focus N \
+    --nominal-hfov 56 --out cal_c922
+python3 scripts/charuco_screen.py --watch cal_c922
+#    the count of kept views shows beside the board. Move camera or laptop:
+#    all four corners, close (~25 cm) and far (~60 cm), tilted 30-45 deg.
+#    Watch for reflections on a glossy screen in the tilted views.
+
+# 3. solve
+python3 scripts/calibrate_offline.py --images cal_c922 --expect-hfov 56
+```
+
+`56` is an estimate, not a measurement: 78 deg diagonal at 16:9 and a 4:3 crop
+for 640x480, so fx near 604. The sanity check only rejects answers far outside
+it.
+
+Then the drone gets `down_cam_focus:=N` and the fx/fy/cx/cy/distortion from the
+solve, the same way as §4. Check fx once more with no board at all: hold the
+lens H m above a pad, read its width d in pixels, `fx = d * H / 1.0`.
+
