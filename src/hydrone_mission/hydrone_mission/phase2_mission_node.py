@@ -557,9 +557,27 @@ class Phase2MissionNode(Node):
         for u, v, _ in self.kits.fresh(self.fresh_s):
             self._kits_seen.append(self._kit_world_xy((u, v), h))
 
+    def _pads(self):
+        return [(pd.position.x, pd.position.y, pd.height, pd.observations,
+                 pd.is_takeoff_base)
+                for pd in (self.pad_map.pads if self.pad_map else [])]
+
+    def _scan_found_all(self):
+        """Every missing base already found on clear evidence: stop early."""
+        pick, deliv, _ = core.fill_missing(
+            self.pick_xy, self.deliv_xy, self._pads(), self._kits_seen,
+            home=self.home, ground_z=self.ground_z, min_obs=self.scan_min_obs,
+            min_kit_hits=self.min_kit_hits, strict=True)
+        return None not in pick + deliv
+
     def _do_scan(self):
         if self._job is None:
             if self._scan_i >= len(self._scan):
+                self._end_scan()
+                return
+            if self._scan_i > 0 and self._scan_found_all():
+                self._task(f"scan: every missing base found — stopping at "
+                           f"setpoint {self._scan_i}/{len(self._scan)}")
                 self._end_scan()
                 return
             x, y, z, yaw = self._scan[self._scan_i]
@@ -587,9 +605,7 @@ class Phase2MissionNode(Node):
 
     def _end_scan(self):
         self._scanning = False
-        pads = [(pd.position.x, pd.position.y, pd.height, pd.observations,
-                 pd.is_takeoff_base)
-                for pd in (self.pad_map.pads if self.pad_map else [])]
+        pads = self._pads()
         was_p = [q is None for q in self.pick_xy]
         was_d = [q is None for q in self.deliv_xy]
         self.pick_xy, self.deliv_xy, notes = core.fill_missing(

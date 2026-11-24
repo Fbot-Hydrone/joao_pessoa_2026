@@ -85,7 +85,8 @@ def scan_path(plan_bounds, home_yaw, here, *, side="right", inset_m=1.2,
 
 def fill_missing(pick, deliv, pads, kits_xy, *, home, ground_z=0.0,
                  min_obs=3, kit_radius_m=0.6, min_kit_hits=3,
-                 pickup_min_top_m=1.0, known_gap_m=0.8, home_gap_m=1.0):
+                 pickup_min_top_m=1.0, known_gap_m=0.8, home_gap_m=1.0,
+                 strict=False):
     """Fill the None slots of `pick`/`deliv` (map xy) from the scan.
 
     pads     [(x, y, top_z, observations, is_takeoff_base), ...] from pad_map
@@ -95,6 +96,10 @@ def fill_missing(pick, deliv, pads, kits_xy, *, home, ground_z=0.0,
     too few kits were seen, the tallest bases on the 1.5 m block fill in.
     Deliveries are the bases with no kit, most-seen first. A slot nobody can
     fill stays None. Returns (pick, deliv, notes).
+
+    strict: only clear evidence (the mid-scan early stop): pickups by kit
+    only; deliveries seen 2 x min_obs times, no kit, and not at the height
+    of the bases with kits (the block).
     """
     pick, deliv = list(pick), list(deliv)
     known = [p for p in pick + deliv if p is not None]
@@ -125,11 +130,23 @@ def fill_missing(pick, deliv, pads, kits_xy, *, home, ground_z=0.0,
     with_kit = sorted((c for c in cands if c["hits"] >= min_kit_hits),
                       key=lambda c: (-c["hits"], -c["obs"]))
     take(pick, with_kit)
-    tall = sorted((c for c in cands if c["top"] >= pickup_min_top_m),
-                  key=lambda c: (-c["hits"], -c["top"]))
-    take(pick, tall)
-    empty = sorted((c for c in cands if c["hits"] < min_kit_hits),
-                   key=lambda c: -c["obs"])
+    if not strict:
+        tall = sorted((c for c in cands if c["top"] >= pickup_min_top_m),
+                      key=lambda c: (-c["hits"], -c["top"]))
+        take(pick, tall)
+    # strict: a base at the pickups' height with no kit seen may be a pickup
+    # whose kit the scan has not looked at yet
+    kit_tops = [c["top"] for c in cands if c["hits"] >= min_kit_hits]
+    block = sorted(kit_tops)[len(kit_tops) // 2] if kit_tops else None
+
+    def is_empty(c):
+        if not strict:
+            return c["hits"] < min_kit_hits
+        off_block = (abs(c["top"] - block) > 0.2 if block is not None
+                     else c["top"] < pickup_min_top_m)
+        return c["hits"] == 0 and c["obs"] >= 2 * min_obs and off_block
+
+    empty = sorted((c for c in cands if is_empty(c)), key=lambda c: -c["obs"])
     take(deliv, empty)
     return pick, deliv, notes
 

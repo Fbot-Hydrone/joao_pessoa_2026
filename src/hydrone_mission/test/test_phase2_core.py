@@ -202,3 +202,17 @@ def test_one_reading_taken_mid_motion_does_not_turn_the_kit():
 def test_readings_that_disagree_give_no_axis():
     d = math.radians
     assert core.robust_axis([d(-30), d(10), d(50), d(85)]) is None
+
+
+def test_strict_fills_only_on_clear_evidence():
+    """The early stop: a base seen 4 times with no kit is not a delivery yet,
+    a tall base with no kit seen is not a pickup yet, and one at the block's
+    height with no kit could still be a pickup (its kit not seen yet)."""
+    pads = [(2.2, 0.6, 1.5, 6, False), (3.7, 0.6, 1.5, 6, False),
+            (0.5, 3.7, 0.3, 4, False), (3.5, 6.2, 0.0, 8, False),
+            (4.0, 3.7, 1.45, 9, False)]
+    kits = [(2.2, 0.6)] * 3
+    pick, deliv, _ = core.fill_missing([None, None], [None, None], pads, kits,
+                                       home=HOME, strict=True)
+    assert pick == [(2.2, 0.6), None]
+    assert deliv == [(3.5, 6.2), None]
