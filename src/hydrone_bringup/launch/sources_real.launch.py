@@ -159,8 +159,10 @@ def generate_launch_description():
         # ── Belly camera ────────────────────────────────────────────────────
         DeclareLaunchArgument(
             "down_cam_device",
+            # C922 since 2026-11-23 (the C270 was 7F0905D0)
             default_value="/dev/v4l/by-id/"
-                          "usb-046d_0825_7F0905D0-video-index0",
+                          "usb-046d_C922_Pro_Stream_Webcam_D4B65D5F-"
+                          "video-index0",
             description="The belly camera, addressed BY SERIAL NUMBER rather "
                         "than as /dev/videoN. Enumeration order is not stable: "
                         "the C270 and the ZED both register V4L2 nodes, and "
@@ -351,6 +353,8 @@ def generate_launch_description():
             "confirm_timeout_s": ParameterValue(
                 LaunchConfiguration("surface_confirm_timeout_s"),
                 value_type=float),
+            "calibrate_datum": ParameterValue(
+                LaunchConfiguration("calibrate_datum"), value_type=bool),
         }],
     )
 
@@ -401,6 +405,14 @@ def generate_launch_description():
                         "removed (z = height above the arena FLOOR). Needs "
                         "the FCU set by scripts/fcu_surface_offset.py apply; "
                         "false needs it reverted."),
+        # Off since 2026-11-23: the datum's bias pushed RNGFND1 to 3 m on the
+        # ground and the FCU refused every takeoff. Feed = raw + surface; the
+        # EKF's floor offset is measured before the mission instead
+        # (orin_flight/floor_z.py -> ground_z).
+        DeclareLaunchArgument(
+            "calibrate_datum", default_value="false",
+            description="Bias the feed until FCU z = height above the floor "
+                        "(datum.py). Lies to every FCU rangefinder consumer."),
         DeclareLaunchArgument(
             "takeoff_base_height_m", default_value="0.5",
             description="Height of the takeoff base the drone is set on. The "
