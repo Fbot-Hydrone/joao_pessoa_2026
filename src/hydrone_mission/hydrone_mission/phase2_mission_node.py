@@ -280,6 +280,7 @@ class Phase2MissionNode(Node):
         self._give_up_visual = False
         self._touch_xy = None
         self._ours = False                   # armed by us, not landed yet
+        self._settled = True                 # seen disarmed since our landing
         self._takeoff_z0 = 0.0
         self._base_fix, self._base_stamp = [], None
         self._aligned = False
@@ -375,8 +376,11 @@ class Phase2MissionNode(Node):
         if self.mav is None or self.pose is None:
             return False
         airborne = self.pose.pose.position.z - self._takeoff_z0 > 0.3
+        if not self._ours and not self.mav.armed:
+            self._settled = True
         why = core.takeover(self.state, self.mav.armed, self.mav.mode,
-                            ours=self._ours, airborne=airborne)
+                            ours=self._ours, airborne=airborne,
+                            settled=self._settled)
         if why is None:
             return False
         self._abort(f"{why} — safety pilot, failsafe or crash")
@@ -906,7 +910,7 @@ class Phase2MissionNode(Node):
             return
         if not self._job.done:
             return
-        self._ours = False
+        self._ours, self._settled = False, False
         r = self._job.result
         z = r.z if r is not None else float("nan")
         kind = self.target[0]

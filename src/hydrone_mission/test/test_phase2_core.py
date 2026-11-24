@@ -182,3 +182,11 @@ def test_someone_touching_the_drone_on_a_base_ends_the_run():
                          airborne=False)
     assert core.takeover("WAIT", False, "STABILIZE", ours=False,
                          airborne=False) is None
+
+
+def test_a_stale_armed_right_after_our_landing_is_not_a_takeover():
+    """Sim 2026-11-23: LAND -> ACT 2 s before /mavros/state said disarmed."""
+    assert core.takeover("ACT", True, "LAND", ours=False, airborne=False,
+                         settled=False) is None
+    assert core.takeover("ACT", True, "LAND", ours=False, airborne=False,
+                         settled=True)

@@ -185,11 +185,15 @@ FLYING = ("TAKEOFF", "SCAN", "TURN", "GOTO", "DESCEND", "ALIGN", "TOUCH",
 ON_BASE = ("WAIT", "ACT")
 
 
-def takeover(state, armed, mode, *, ours, airborne, landed_mode="LAND"):
+def takeover(state, armed, mode, *, ours, airborne, settled=True,
+             landed_mode="LAND"):
     """Why the vehicle is no longer the mission's, or None.
 
     ours      the mission armed it and has not landed it yet
     airborne  off the base (a refused takeoff disarms on the base: not a pilot)
+    settled   on a base: the mission has SEEN it disarmed since the landing.
+              The land job can end before our /mavros/state copy shows the
+              disarm (sim 2026-11-23: 2 s), so until then "armed" is stale.
     The RC is kill-only (and in Phase 2 a human may send it home): any arm,
     disarm or mode change the mission did not ask for ends the run for good.
     """
@@ -198,7 +202,7 @@ def takeover(state, armed, mode, *, ours, airborne, landed_mode="LAND"):
             return f"disarmed in {state} without being told"
         if armed and mode != "GUIDED":
             return f"mode {mode} in {state}, not GUIDED"
-    if state in ON_BASE and not ours:
+    if state in ON_BASE and not ours and (state == "WAIT" or settled):
         if armed:
             return f"armed in {state} by someone else"
         if state == "ACT" and mode not in (landed_mode, "GUIDED"):
