@@ -101,12 +101,14 @@ def generate_launch_description():
         }.items(),
     )
 
-    # No launch_arguments at all: every mission argument reaches
-    # phase1.launch.py by inheritance, keeping its defaults in one file. See the
-    # note above `args`.
+    # Every mission argument reaches phase1.launch.py by inheritance, keeping
+    # its defaults in one file (see the note above `args`). The one exception
+    # is a sim fact, not a tuning default: SITL's rangefinder is what MAVROS
+    # sends it on /mavros/rangefinder, there is no FCU echo topic in sim.
     autonomy = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(launch_dir, "phase1.launch.py")),
+        launch_arguments={"fcu_range_topic": "/mavros/rangefinder"}.items(),
     )
 
     return LaunchDescription(args + [sources, autonomy])

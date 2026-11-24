@@ -13,6 +13,7 @@ from rclpy.qos import qos_profile_sensor_data
 from geometry_msgs.msg import PoseStamped
 from mavros_msgs.msg import State, StatusText
 from mavros_msgs.srv import CommandBool, CommandLong, CommandTOL, SetMode
+from sensor_msgs.msg import Range
 
 
 def tilt_deg_of(pose: PoseStamped) -> float:
@@ -74,6 +75,7 @@ class FcuLink:
 
         self.state = State()
         self.pose = None
+        self.range, self.range_t = None, -1e9
         self._gripe, self._gripe_t = "", -1e9
 
         node.create_subscription(State, "/mavros/state", self._cb_state, 10,
@@ -123,6 +125,21 @@ class FcuLink:
 
     def now(self) -> float:
         return self.node.get_clock().now().nanoseconds * 1e-9
+
+    def watch_range(self, topic: str):
+        """Follow the rangefinder reading the FCU itself flies on (RNGFND1)."""
+        self.node.create_subscription(Range, topic, self._cb_range,
+                                      qos_profile_sensor_data,
+                                      callback_group=self.cbg)
+
+    def _cb_range(self, msg):
+        self.range, self.range_t = float(msg.range), self.now()
+
+    def range_now(self, max_age_s: float = 1.0):
+        """The FCU's rangefinder reading, or None if stale or never seen."""
+        if self.range is None or self.now() - self.range_t > max_age_s:
+            return None
+        return self.range
 
     def fcu_reason(self) -> str:
         """The FCU's refusal, if recent enough to be about this attempt."""

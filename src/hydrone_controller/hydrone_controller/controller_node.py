@@ -94,6 +94,12 @@ class ControllerNode(Node):
 
         self.fcu = FcuLink(self, setpoint_hz=p("setpoint_hz", 10.0),
                            service_timeout_s=p("service_timeout_s", 30.0))
+        # The rangefinder reading the FCU flies on: its takeoff altitude is a
+        # target of THAT reading (see run_takeoff). Real: MAVROS's echo of
+        # RNGFND1; sim: what MAVROS sends SITL.
+        rng = p("fcu_range_topic", "/mavros/distance_sensor/rangefinder_fcu")
+        if rng:
+            self.fcu.watch_range(rng)
         cbg = self.fcu.cbg
 
         # One motion job at a time. A new goal pre-empts the running one.
@@ -228,12 +234,21 @@ class ControllerNode(Node):
         if not self.fcu.armed or self.fcu.mode != "GUIDED":
             return False, "not armed in GUIDED — send Arm first", 0.0
         start_z = self.fcu.xyz()[2]
+        # GUIDED reads the takeoff altitude as a target of its own rangefinder
+        # reading while that is healthy (mode_guided.cpp, do_user_takeoff_start),
+        # else as metres above home. So send the climb on top of the reading.
+        # 2026-11-24 log 60: 2.50 sent from a 0.67 reading stopped at 2.50,
+        # 0.68 short in z; we called it a failure and sent takeoffs to a
+        # hovering drone for 40 s.
+        r0 = self.fcu.range_now()
+        target = altitude + r0 if r0 is not None else altitude
         deadline = self._now() + self.takeoff_timeout
         accepted, last = False, -1e9
         while True:
             self._check(owner)
             x, y, z = self.fcu.xyz()
             climbed = z - start_z
+            r = self.fcu.range_now()
             if feedback:
                 feedback(climbed)
             tilt = (tilt_deg_of(self.fcu.pose)
@@ -245,18 +260,32 @@ class ControllerNode(Node):
                     f"{climbed:.2f} m up — FORCE DISARM.")
                 self._wait_call(self.fcu.force_disarm(), owner)
                 return (False, f"tip-over at {tilt:.0f} deg, motors cut", z)
-            if climbed >= altitude - self.takeoff_margin:
+            reached = (accepted and r0 is not None and r is not None
+                       and r >= target - self.takeoff_margin)
+            if climbed >= altitude - self.takeoff_margin or reached:
                 self.fcu.go(x, y, z if math.isnan(hold_z) else hold_z,
                             self.fcu.yaw())
                 return True, f"climbed {climbed:.2f} m", z
             if self._now() > deadline:
+                if accepted and climbed >= self.takeoff_guard_height:
+                    # The FCU took off and stopped short of our number: it is
+                    # flying, and another takeoff would only be refused.
+                    self.fcu.go(x, y, z if math.isnan(hold_z) else hold_z,
+                                self.fcu.yaw())
+                    return True, (f"airborne, climbed {climbed:.2f} of "
+                                  f"{altitude:.2f} m"), z
                 return (False, f"takeoff did not lift us from z={start_z:.2f}: "
                         f"{self.fcu.fcu_reason()}", z)
             if (not accepted and climbed < 0.2
                     and self._now() - last >= self.retry_period):
                 last = self._now()
                 accepted = self._wait_call(
-                    self.fcu.takeoff(altitude), owner) == "ok"
+                    self.fcu.takeoff(target), owner) == "ok"
+                if accepted:
+                    self.get_logger().info(
+                        f"takeoff accepted: climb {altitude:.2f} m sent as "
+                        f"{target:.2f} (FCU rangefinder at rest "
+                        f"{'none' if r0 is None else f'{r0:.2f}'})")
             time.sleep(POLL_S)
 
     def run_goto(self, owner, x, y, z, yaw, tol=0.0, timeout_s=0.0,

@@ -1409,15 +1409,52 @@ def test_an_unexpected_disarm_in_flight_aborts(flying):
     assert flying.state == flying.ABORTED
 
 
-def test_a_disarm_on_the_base_during_takeoff_is_left_to_the_retry(flying):
+def test_a_disarm_on_the_base_during_takeoff_aborts(flying):
+    """2026-11-24: the pilot's RC stop on the base was read as a refused
+    takeoff; the retry re-armed and the vehicle flew."""
     set_pose(flying, 0.0, 0.0, z=0.5)
     flying.mav_state.armed = True
     flying._cb_state(flying.mav_state)
     enter(flying, flying.TAKEOFF)
     flying.mav_state.armed = False
-    assert not flying._disarmed_in_flight()
-    set_pose(flying, 0.0, 0.0, z=1.2)            # it HAD left the base
     assert flying._disarmed_in_flight()
+    assert flying.state == flying.ABORTED
+
+
+def test_a_takeoff_that_stopped_short_off_the_base_is_airborne(flying):
+    """2026-11-24 log 60: the FCU took off and stopped 0.68 m short of our
+    number; we sent takeoffs to a hovering drone for 40 s."""
+    set_pose(flying, 0.0, 0.0, z=-0.43)
+    flying.mav_state.armed = True
+    flying._cb_state(flying.mav_state)
+    enter(flying, flying.TAKEOFF)
+    flying.vehicle.next = FakeJob(ok=False, message="takeoff did not lift us")
+    flying._do_takeoff()                 # sends Takeoff
+    set_pose(flying, 0.0, 0.0, z=1.39)
+    flying._do_takeoff()                 # reads the failure
+    assert flying.vehicle.sent == ["takeoff"]
+    assert flying.state == flying.SELECT
+
+
+def test_leaving_guided_while_armed_in_our_hands_aborts(flying):
+    """2026-11-24 log 60: the pilot switched to LAND mid-takeoff and we set
+    GUIDED again 5 s later."""
+    flying.mav_state.armed = True
+    flying.mav_state.mode = "GUIDED"
+    flying._cb_state(flying.mav_state)
+    enter(flying, flying.TAKEOFF)
+    assert not flying._pilot_took_over()
+    flying.mav_state.mode = "LAND"
+    assert flying._pilot_took_over()
+    assert flying.state == flying.ABORTED
+
+
+def test_our_own_land_is_not_a_takeover(flying):
+    flying.mav_state.armed = True
+    flying.mav_state.mode = "LAND"
+    flying._cb_state(flying.mav_state)
+    enter(flying, flying.LAND)
+    assert not flying._pilot_took_over()
 
 
 def test_a_disarm_while_landing_is_not_an_abort(flying):
