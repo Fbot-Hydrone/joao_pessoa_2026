@@ -406,9 +406,19 @@ python3 scripts/charuco_screen.py --watch cal_c922
 python3 scripts/calibrate_offline.py --images cal_c922 --expect-hfov 56
 ```
 
-`56` is an estimate, not a measurement: 78 deg diagonal at 16:9 and a 4:3 crop
-for 640x480, so fx near 604. The sanity check only rejects answers far outside
-it.
+`56` was an estimate (78 deg diagonal at 16:9, 4:3 crop, fx near 604); the
+measured lens is 52 deg, fx 652. The sanity check only rejects answers far
+outside it, so either works.
+
+### Measured 2026-11-23
+
+* Focus sweep at 1.2 m, the board on a second PC's screen: sharpness flat over
+  0-10, down 25% at 20, gone by 25. Locked at **5**, the middle of the flat
+  part; 0 is infinity and is still sharp at 1.2 m.
+* Calibration at focus 5, 45 views kept, 37 usable, 0.13 px: fx 651.80,
+  fy 654.48, cx 316.03, cy 229.94. No close views (size 2/3), so it was
+  re-solved on 20 random halves: fx 644-657, cx 311-321. These are the
+  `sources_real` defaults.
 
 Then the drone gets `down_cam_focus:=N` and the fx/fy/cx/cy/distortion from the
 solve, the same way as §4. Check fx once more with no board at all: hold the
