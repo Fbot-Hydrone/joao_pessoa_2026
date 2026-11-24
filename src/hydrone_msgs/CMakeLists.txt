@@ -15,6 +15,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/PadDetection.msg"
   "msg/Pad.msg"
   "msg/PadMap.msg"
+  "msg/KitAxis.msg"
   "srv/SetPhase.srv"
   "srv/MarkPadVisited.srv"
   "srv/RegisterTakeoffBase.srv"

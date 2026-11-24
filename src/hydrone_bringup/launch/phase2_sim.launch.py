@@ -8,7 +8,8 @@ hydrone_bringup/launch/phase2_sim.launch.py — Fase 2 no simulador, um comando:
     serves /hydrone/gripper/command)
   + phase2.launch.py      (the autonomy, world-agnostic)
 
-A pure wrapper, like phase1_sim.launch.py: no overrides into the autonomy.
+A pure wrapper, like phase1_sim.launch.py: the only override is where the
+task log and the bag go (log_dir, the mounted /ws/logs).
 """
 import os
 
@@ -36,7 +37,10 @@ def generate_launch_description():
             k: LaunchConfiguration(k) for k in (
                 "odom_source", "odom_error", "odom_error_print",
                 "odom_error_dir", "vo_stereo")}.items())
+    # The container keeps only /ws/logs (./logs on the host) after `down`.
     autonomy = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(launch_dir, "phase2.launch.py")))
+            os.path.join(launch_dir, "phase2.launch.py")),
+        launch_arguments={"log_dir": LaunchConfiguration(
+            "log_dir", default="/ws/logs")}.items())
     return LaunchDescription(args + [sources, autonomy])

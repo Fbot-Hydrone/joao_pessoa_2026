@@ -27,6 +27,7 @@ class Layout:
     pickup: list = field(default_factory=list)      # [(x, y, z_top), ...]
     delivery: list = field(default_factory=list)    # [(x, y) or (x, y, z)]
     delivery_z_range: tuple = (0.0, 1.5)
+    grid: dict = field(default_factory=dict)        # how {grid: ...} reads
 
 
 def _point(e, grid):
@@ -58,9 +59,10 @@ def load_layout(path) -> Layout:
     grid = d.get("grid") or {}
     return Layout(
         takeoff=_point(d["takeoff"], grid),
-        pickup=[_point(p, grid) for p in d.get("pickup", [])],
-        delivery=[_point(p, grid) for p in d.get("delivery", [])],
-        delivery_z_range=tuple(d.get("delivery_z_range", (0.0, 1.5))))
+        pickup=[_point(p, grid) for p in d.get("pickup") or []],
+        delivery=[_point(p, grid) for p in d.get("delivery") or []],
+        delivery_z_range=tuple(d.get("delivery_z_range", (0.0, 1.5))),
+        grid=grid)
 
 
 def arena_to_map(p, home_map, takeoff_arena, arena_yaw_deg=-90.0):

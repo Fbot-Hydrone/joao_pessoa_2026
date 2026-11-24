@@ -9,27 +9,38 @@ THE STRATEGY ONLY. Every "how" is a block (docs/ARQUITETURA.md):
   legs           /hydrone/nav/navigate_to             (nav_node: A* over the octomap)
   descend        hydrone_nav.visual_descent           (centre by camera, then LAND)
   where/order    hydrone_nav.arena + route.plan_deliveries
+  the rest       hydrone_mission.phase2_core          (ROS-free, tested)
+
+Where the bases are: one parameter per base (pickup_1..3, delivery_1..3),
+falling back to the layout file. If ANY is unknown the drone first flies
+Phase 1's map sweep and fills the gaps from pad_map (kit on it = pickup).
 
 The cycle, per kit, in the order route.plan_deliveries picks:
 
-  GOTO pickup -> DESCEND on the KIT -> LAND (kit between the legs) -> GRAB
-  -> ARMING/TAKEOFF -> VERIFY (is the kit still on the base?) -> GOTO delivery
-  -> DESCEND on the BASE -> LAND -> RELEASE -> ARMING/TAKEOFF -> next kit
+  GOTO pickup -> DESCEND on the KIT -> ALIGN (turn the kit along the gripper)
+  -> TOUCH (kit between the legs, legs on the base) -> LAND -> GRAB
+  -> ARMING/TAKEOFF -> turn back -> GOTO delivery -> DESCEND on the BASE
+  -> LAND -> RELEASE -> ARMING/TAKEOFF -> next kit
 
 then GOTO home -> LAND -> DONE.
 
-NO TURNS. The heading the vehicle armed with is held for the whole flight:
-yaw changes are where the visual odometry loses itself. The day the kit
-detector learns orientation, aligning to a rotated kit is an option.
+ONE HEADING. The heading the vehicle armed with is held everywhere except
+over a kit, which may lie at any angle (rules) while the gripper only closes
+across it: the drone turns there, standing still, and turns back before the
+next leg. Translation and rotation never happen together.
 
 Rules this encodes (docs/REGRAS-CBR-2026.pdf, Fase 2): every landing gear part
 inside the base on pickup and delivery; one kit at a time; landing off a base
 ends the attempt; 10 min per attempt on the VEHICLE's clock (/clock in sim);
-an autonomous return after >= 1 delivery doubles the score.
+an autonomous return after >= 1 delivery doubles the score; the task log.
+An arm, disarm or mode change the mission did not ask for (the RC is
+kill-only, and a human may send it home) ends the run: never re-armed.
 """
 
 import math
 import os
+import statistics
+import time
 
 import rclpy
 from rclpy.action import ActionClient
@@ -38,16 +49,19 @@ from rclpy.qos import qos_profile_sensor_data
 
 from ament_index_python.packages import get_package_share_directory
 from geometry_msgs.msg import PoseStamped
+from mavros_msgs.msg import State
 from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import CameraInfo, Range
 from std_msgs.msg import String
 
 from hydrone_msgs.action import NavigateTo
-from hydrone_msgs.msg import PadDetection
+from hydrone_msgs.msg import KitAxis, PadDetection, PadMap
+from hydrone_msgs.srv import RegisterTakeoffBase
 
 from hydrone_controller.gripper import Gripper
 from hydrone_controller.vehicle import Job, Vehicle
-from hydrone_nav import route
+from hydrone_mission import phase2_core as core
+from hydrone_nav import coverage, route
 from hydrone_nav.arena import arena_to_map, load_layout
 from hydrone_nav import precision_landing as pl
 from hydrone_nav.precision_landing import body_to_world
@@ -58,6 +72,12 @@ def yaw_of(pose):
     q = pose.pose.orientation
     return math.atan2(2.0 * (q.w * q.z + q.x * q.y),
                       1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+
+
+def tilt_deg(pose):
+    q = pose.pose.orientation
+    c = 1.0 - 2.0 * (q.x * q.x + q.y * q.y)
+    return math.degrees(math.acos(max(-1.0, min(1.0, c))))
 
 
 class Frames:
@@ -81,9 +101,10 @@ class Frames:
 
 
 class Phase2MissionNode(Node):
-    WAIT, ARMING, TAKEOFF, GOTO, DESCEND, TOUCH, LAND, ACT, VERIFY, DONE, \
-        ABORTED = ("WAIT", "ARMING", "TAKEOFF", "GOTO", "DESCEND", "TOUCH",
-                   "LAND", "ACT", "VERIFY", "DONE", "ABORTED")
+    WAIT, ARMING, TAKEOFF, SCAN, TURN, GOTO, DESCEND, ALIGN, TOUCH, LAND, \
+        ACT, VERIFY, DONE, ABORTED = (
+            "WAIT", "ARMING", "TAKEOFF", "SCAN", "TURN", "GOTO", "DESCEND",
+            "ALIGN", "TOUCH", "LAND", "ACT", "VERIFY", "DONE", "ABORTED")
 
     def __init__(self, **kwargs):
         super().__init__("phase2_mission", **kwargs)
@@ -92,8 +113,16 @@ class Phase2MissionNode(Node):
             get_package_share_directory("hydrone_bringup"),
             "config", "phase2_bases.yaml")
         self.layout = load_layout(p("layout_file", "") or default_layout)
+        # One per base, arena frame like the layout: "" = the layout's entry,
+        # "scan" = unknown, else "[x, y]" / "[x, y, z]" / "{grid: [c, r]}".
+        self.pick_text = [p(f"pickup_{i}", "") for i in (1, 2, 3)]
+        self.deliv_text = [p(f"delivery_{i}", "") for i in (1, 2, 3)]
         self.arena_yaw = p("arena_yaw_deg", -90.0)
-        self.cruise = p("cruise_alt", 2.5)
+        # The arena floor in the FCU's z (sim -0.7; real 0 with surface_offset).
+        self.ground_z = p("ground_z", -0.7)
+        # Cruise height ABOVE THE FLOOR. 3.2 in the sim = the old 2.5 in map z.
+        self.cruise_alt = p("cruise_alt", 3.2)
+        self.cruise = self.ground_z + self.cruise_alt
         self.climb = p("takeoff_climb_m", 1.0)
         self.budget = p("mission_budget_s", 600.0)
         self.reserve = p("return_reserve_s", 60.0)
@@ -109,7 +138,8 @@ class Phase2MissionNode(Node):
         self.verify_centre_px = p("verify_centre_px", 160.0)
         self.pick_retries = p("pick_retries", 1)
         # Pickup, kit lost on the way down: climb back to cruise over the known
-        # position and look again this many times before going in blind.
+        # position and look again this many times, then SKIP the kit. Landing
+        # blind on a pickup base can put a leg on an off-centre kit, 1.5 m up.
         self.takeoff_ok_range = p("takeoff_ok_range_m", 0.7)
         self.reacquire_max = p("reacquire_max", 2)
         self._reacquires = 0
@@ -140,6 +170,43 @@ class Phase2MissionNode(Node):
         self.touch_track_min_h = p("touch_track_min_m", 0.35)
         self.touch_track_gate = p("touch_track_gate_m", 0.35)
         self.touch_track_gain = p("touch_track_gain", 0.5)
+        # Legs on the pickup base: the kit may sit anywhere in the 0.8 m ring
+        # but the whole gear must stay on the 1 m base. The drone centre may
+        # be this far from the base centre: 0.5 (base) - 0.22 (farthest foot,
+        # CAD v3 feet: skids at +-0.18 side, +-0.127 fore-aft) - 0.06 margin.
+        # A circle, so it holds at any heading the kit alignment picks.
+        self.touch_max_off = p("touch_max_off_m", 0.22)
+        # Pulled further in than this, the fingers miss the kit and a foot can
+        # land on it: skip the kit instead.
+        self.touch_skip_shift = p("touch_skip_shift_m", 0.05)
+        # Base centre seen on the way down (base YOLO), kept within this of
+        # the known position; < 3 looks -> the known position.
+        self.base_fix_gate = p("base_fix_gate_m", 0.6)
+        # Turn the kit along the gripper before touching down. The fingers
+        # close sideways (gripper_axis_deg 0 = kit nose to tail).
+        self.align_kit = p("align_kit", True)
+        self.gripper_axis = math.radians(p("gripper_axis_deg", 0.0))
+        self.align_min = math.radians(p("align_min_deg", 5.0))
+        self.align_look_s = p("align_look_s", 2.0)
+        self.align_min_coh = p("align_min_coherence", 0.3)
+        self.turn_tol = math.radians(p("turn_tol_deg", 4.0))
+        self.turn_timeout = p("turn_timeout_s", 12.0)
+        # Phase 1's guard: stopped tilted on a base = a foot on something.
+        # A takeoff from there flips the drone off the block.
+        self.tip_rearm_max = p("tip_rearm_max_deg", 12.0)
+        # An FCU that keeps refusing to re-arm on a base was most likely
+        # stopped by the kill switch; when that is released, arming would
+        # take off in someone's hands.
+        self.rearm_timeout = p("rearm_timeout_s", 30.0)
+        # The scan (only when a base is unknown): Phase 1's map sweep.
+        self.plan_bounds = list(p("plan_bounds",
+                                  [-5.0, -5.0, 0.3, 5.0, 5.0, 3.0]))
+        self.sweep_side = p("sweep_side", "right")
+        self.survey_inset = p("survey_inset_m", 1.2)
+        self.sweep_overlap = p("sweep_overlap", 0.25)
+        self.sweep_max_surface = p("sweep_max_surface_m", 1.6)
+        self.scan_min_obs = p("scan_min_observations", 3)
+        self.min_kit_hits = p("scan_min_kit_hits", 3)
         self.descend = VisualDescent(
             descend_to_m=p("visual_descend_to_m", 1.2),
             fine_px=p("visual_fine_px", 40.0),
@@ -151,6 +218,9 @@ class Phase2MissionNode(Node):
         # drone moves the webcam off the gripper's axis so the carried kit
         # does not cover the base (2026-10-16); the sim camera is on the axis.
         self.belly_offset = tuple(p("belly_offset_xy", [0.0, 0.0]))
+        # The task log the rules ask for, as its own file ("" = ROS log only).
+        self.task_path = os.path.expanduser(p("task_log", ""))
+        self._task_file = None
 
         self.vehicle = Vehicle(self)
         self.gripper = Gripper(self)
@@ -170,7 +240,8 @@ class Phase2MissionNode(Node):
         # from base A.
         self.blind_xy_tol = p("blind_xy_tol_m", 0.10)
 
-        self.pose, self.range_m, self.fx, self.sim_clock = None, None, None, None
+        self.pose, self.range_m, self.cam, self.sim_clock = None, None, None, None
+        self.mav, self.pad_map, self.axes_seen = None, None, []
         self.create_subscription(PoseStamped, "/mavros/local_position/pose",
                                  lambda m: setattr(self, "pose", m),
                                  qos_profile_sensor_data)
@@ -178,14 +249,24 @@ class Phase2MissionNode(Node):
                                           "/mavros/distance_sensor/rangefinder"),
                                  self._cb_range, qos_profile_sensor_data)
         self.create_subscription(CameraInfo, "/down_cam/camera_info",
-                                 lambda m: setattr(self, "fx", float(m.k[0])),
+                                 lambda m: setattr(self, "cam", m),
                                  qos_profile_sensor_data)
         self.create_subscription(Clock, "/clock", self._cb_clock,
                                  qos_profile_sensor_data)
+        self.create_subscription(State, "/mavros/state",
+                                 lambda m: setattr(self, "mav", m), 10)
+        self.create_subscription(PadMap, "/hydrone/pads/map",
+                                 lambda m: setattr(self, "pad_map", m), 10)
+        self.create_subscription(KitAxis, p("kit_axis_topic",
+                                            "/hydrone/kits/axis"),
+                                 self._cb_axis, 20)
+        self.cli_register = self.create_client(
+            RegisterTakeoffBase, "/hydrone/pads/register_takeoff_base")
         self.pub_status = self.create_publisher(String, "/hydrone/mission/status", 10)
 
         self.state, self._since, self._job = self.WAIT, self.now(), None
-        self.home = self.home_yaw = None
+        self.home = self.home_yaw = self.hold_yaw = None
+        self.pick_xy, self.deliv_xy = [], []
         self.tour, self.leg = [], 0          # [(pickup_i, delivery_i)], index
         self.carrying = False
         self.retries = 0
@@ -198,11 +279,19 @@ class Phase2MissionNode(Node):
         self._blind = False
         self._give_up_visual = False
         self._touch_xy = None
+        self._ours = False                   # armed by us, not landed yet
+        self._takeoff_z0 = 0.0
+        self._base_fix, self._base_stamp = [], None
+        self._aligned = False
+        self._turn_to = self._after_turn = self._turn_xyz = None
+        self._turn_in = None
+        self._scan, self._scan_i, self._scanning = [], 0, False
+        self._kits_seen, self._kit_stamp = [], None
         self.create_timer(0.1, self._tick)
         self.get_logger().info(
-            f"phase2_mission ready — {len(self.layout.pickup)} kit(s), "
-            f"{len(self.layout.delivery)} delivery base(s), cruise "
-            f"{self.cruise} m, heading held (no turns).")
+            f"phase2_mission ready — cruise {self.cruise_alt} m above the "
+            f"floor (z {self.cruise:.2f}), kit alignment "
+            f"{'on' if self.align_kit else 'off'}.")
 
     # ── plumbing ────────────────────────────────────────────────────────────
     def now(self):
@@ -218,9 +307,15 @@ class Phase2MissionNode(Node):
     def _cb_range(self, m):
         self.range_m = float(m.range) if math.isfinite(m.range) else None
 
+    def _cb_axis(self, m):
+        self.axes_seen.append((self.now(), m.u, m.v, m.angle, m.coherence))
+        del self.axes_seen[:-50]
+
     def _enter(self, state):
         if state != self.state:
             self.get_logger().info(f"[{self.state} -> {state}]")
+        if state == self.TAKEOFF and self.pose is not None:
+            self._takeoff_z0 = self.pose.pose.position.z
         self.state, self._since, self._job = state, self.now(), None
 
     def _elapsed(self):
@@ -234,7 +329,21 @@ class Phase2MissionNode(Node):
 
     def _task(self, text):
         """The task log the rules ask for (kit picked, delivered, ...)."""
-        self.get_logger().info(f"TASK: {text} {self._clock_note()}")
+        line = f"TASK: {text} {self._clock_note()}"
+        self.get_logger().info(line)
+        if not self.task_path:
+            return
+        try:
+            if self._task_file is None:
+                os.makedirs(os.path.dirname(self.task_path) or ".",
+                            exist_ok=True)
+                self._task_file = open(self.task_path, "a")
+            self._task_file.write(
+                f"{time.strftime('%Y-%m-%d %H:%M:%S')} {line}\n")
+            self._task_file.flush()
+        except OSError as e:
+            self.get_logger().error(f"task log {self.task_path}: {e}",
+                                    throttle_duration_sec=30.0)
 
     def _map(self, p_arena):
         return arena_to_map(p_arena, self.home, self.layout.takeoff,
@@ -242,17 +351,36 @@ class Phase2MissionNode(Node):
 
     def _hold(self):
         p = self.pose.pose.position
-        self.vehicle.setpoint(p.x, p.y, p.z, self.home_yaw)
+        self.vehicle.setpoint(p.x, p.y, p.z, self.hold_yaw)
+
+    def _abort(self, why):
+        self._task(f"ABORTED: {why}. The mission will not arm again.")
+        self._enter(self.ABORTED)
 
     # ── tick ────────────────────────────────────────────────────────────────
     def _tick(self):
         if self.state in (self.DONE, self.ABORTED):
             return
+        if self._taken_over():
+            return
         self._check_budget()
+        if self._scanning:
+            self._collect_kits()
         getattr(self, f"_do_{self.state.lower()}")()
         self.pub_status.publish(String(data=(
             f"state={self.state} kit={self.leg + 1}/{len(self.tour) or '?'} "
             f"carrying={self.carrying} delivered={self.delivered}")))
+
+    def _taken_over(self):
+        if self.mav is None or self.pose is None:
+            return False
+        airborne = self.pose.pose.position.z - self._takeoff_z0 > 0.3
+        why = core.takeover(self.state, self.mav.armed, self.mav.mode,
+                            ours=self._ours, airborne=airborne)
+        if why is None:
+            return False
+        self._abort(f"{why} — safety pilot, failsafe or crash")
+        return True
 
     def _check_budget(self):
         if self.t0 is None or self.target and self.target[0] == "home":
@@ -262,6 +390,9 @@ class Phase2MissionNode(Node):
         if self.mission_now() - self.t0 < self.budget - self.reserve:
             return
         self.get_logger().warn(f"BUDGET: going home {self._clock_note()}")
+        if self._job is not None:
+            self._job.cancel()
+        self._scanning = False
         self._go_home()
 
     # ── states ──────────────────────────────────────────────────────────────
@@ -275,27 +406,72 @@ class Phase2MissionNode(Node):
             return
         p = self.pose.pose.position
         self.home, self.home_yaw = (p.x, p.y), yaw_of(self.pose)
-        pick = [self._map(q[:2]) for q in self.layout.pickup]
-        deliv = [self._map(q[:2]) for q in self.layout.delivery]
-        self.pick_xy, self.deliv_xy = pick, deliv
-        self.tour = route.plan_deliveries(self.home, pick, deliv)
-        self.get_logger().info(
-            "home = ({:.2f}, {:.2f}); tour (pickup->delivery): {}".format(
-                *self.home, ", ".join(f"{a + 1}->{chr(65 + b)}"
-                                      for a, b in self.tour)))
-        self.after_takeoff = self._next_target
+        self.hold_yaw = self.home_yaw
+        grid = self.layout.grid
+        pick = core.merge_positions(self.pick_text, self.layout.pickup, grid)
+        deliv = core.merge_positions(self.deliv_text, self.layout.delivery,
+                                     grid)
+        self.pick_xy = [self._map(q[:2]) if q else None for q in pick]
+        self.deliv_xy = [self._map(q[:2]) if q else None for q in deliv]
+        missing = ([f"pickup {i + 1}" for i, q in enumerate(pick) if q is None]
+                   + [f"delivery {i + 1}" for i, q in enumerate(deliv)
+                      if q is None])
+        if missing:
+            self._task(f"unknown: {', '.join(missing)} — scanning the arena "
+                       "(Phase 1's map sweep) before the first kit")
+            self.after_takeoff = self._start_scan
+        else:
+            self._plan_tour()
+            self.after_takeoff = self._next_target
         self._job = self.gripper.open()      # start with an open gripper
         self._enter(self.ARMING)
 
+    def _plan_tour(self):
+        pi = [i for i, q in enumerate(self.pick_xy) if q is not None]
+        di = [i for i, q in enumerate(self.deliv_xy) if q is not None]
+        tour = route.plan_deliveries(self.home, [self.pick_xy[i] for i in pi],
+                                     [self.deliv_xy[i] for i in di])
+        self.tour = [(pi[a], di[b]) for a, b in tour]
+        self.get_logger().info(
+            "home = ({:.2f}, {:.2f}); tour (pickup->delivery): {}".format(
+                *self.home, ", ".join(f"{a + 1}->{chr(65 + b)}"
+                                      for a, b in self.tour) or "none"))
+
     def _do_arming(self):
+        if self._job is None and self.t0 is not None:
+            # Re-arming on a base: the guards that keep a kill a kill.
+            if self.tip_rearm_max > 0.0 and tilt_deg(self.pose) > self.tip_rearm_max:
+                self._abort(f"stopped {tilt_deg(self.pose):.0f} deg tilted on a "
+                            "base (a foot on the kit or the edge); a takeoff "
+                            "from here flips")
+                return
+            if self._elapsed() > self.rearm_timeout:
+                self._abort(f"FCU refused to re-arm for {self.rearm_timeout:.0f}"
+                            " s (kill switch?)")
+                return
         if self._job is None:
             self._job = self.vehicle.arm()
         elif self._job.done:
             if self._job.ok:
+                self._ours = True
+                if self.t0 is None:
+                    self._register_takeoff_base()
                 self._enter(self.TAKEOFF)
             else:
-                self.get_logger().warn(f"arm: {self._job.message} — retrying")
+                self.get_logger().warn(f"arm: {self._job.message} — retrying",
+                                       throttle_duration_sec=2.0)
                 self._job = None
+
+    def _register_takeoff_base(self):
+        """pad_map maps nothing before this, and never counts home as a base."""
+        if not self.cli_register.service_is_ready():
+            self.get_logger().warn("pad_map not up: the takeoff base is not "
+                                   "registered (only matters for the scan).")
+            return
+        req = RegisterTakeoffBase.Request()
+        p = self.pose.pose.position
+        req.position.x, req.position.y, req.position.z = p.x, p.y, p.z
+        self.cli_register.call_async(req)
 
     def _do_takeoff(self):
         if self._job is None:
@@ -328,11 +504,99 @@ class Phase2MissionNode(Node):
             f"{math.degrees(roll):.0f} pitch {math.degrees(pitch):.0f} deg, "
             f"z {self.pose.pose.position.z:.2f}, range {self.range_m}")
         if self.takeoff_tries > 3:
-            self.get_logger().error(f"takeoff refused 3x: {self._job.message}")
-            self._enter(self.ABORTED)
+            self._abort(f"takeoff refused 3x: {self._job.message}")
         else:
             self._enter(self.ARMING)
 
+    # ── the scan: only when a base is unknown ──────────────────────────────
+    def _swath(self):
+        """Belly footprint over the tallest surface (Phase 1's _sweep_swath_m)."""
+        if self.cam is None:
+            return None
+        agl = self.cruise - self.ground_z - self.sweep_max_surface
+        if agl < 0.3:
+            return None
+        across, along = coverage.ground_swath(
+            float(self.cam.k[0]), float(self.cam.k[4]), self.cam.width,
+            self.cam.height, agl)
+        return min(across, along) if across > 0.0 and along > 0.0 else None
+
+    def _start_scan(self):
+        p = self.pose.pose.position
+        swath = self._swath()
+        self._scan = core.scan_path(
+            self.plan_bounds, self.home_yaw, (p.x, p.y), side=self.sweep_side,
+            inset_m=self.survey_inset, z=self.cruise, swath_m=swath,
+            overlap=self.sweep_overlap)
+        self._scan_i, self._scanning, self._kits_seen = 0, True, []
+        self._task(f"scan: {len(self._scan)} setpoints, "
+                   + (f"lanes for a {swath:.2f} m belly swath" if swath
+                      else "perimeter only (no belly CameraInfo / too low)"))
+        self._enter(self.SCAN)
+
+    def _collect_kits(self):
+        """Every kit the belly sees on the scan, in map xy (pickup evidence)."""
+        if self.kits.stamp == self._kit_stamp or self.range_m is None:
+            return
+        self._kit_stamp = self.kits.stamp
+        h = self.range_m
+        self.descend.target_uv = pl.target_uv(self._centre_uv, self.belly_offset,
+                                              self._fx(), h)
+        for u, v, _ in self.kits.fresh(self.fresh_s):
+            self._kits_seen.append(self._kit_world_xy((u, v), h))
+
+    def _do_scan(self):
+        if self._job is None:
+            if self._scan_i >= len(self._scan):
+                self._end_scan()
+                return
+            x, y, z, yaw = self._scan[self._scan_i]
+            p = self.pose.pose.position
+            if (math.hypot(x - p.x, y - p.y) < 0.3
+                    and abs(core.wrap_pi(yaw - yaw_of(self.pose))) > self.turn_tol):
+                self._turn(yaw, self._scan_next)        # a corner: turn standing
+                return
+            g = NavigateTo.Goal(yaw=float(yaw), tolerance=0.25)
+            g.position.x, g.position.y, g.position.z = float(x), float(y), float(z)
+            self.hold_yaw = yaw
+            self._job = Job(self.nav, g)
+            return
+        if not self._job.done:
+            return
+        if not self._job.ok:
+            self.get_logger().warn(f"scan setpoint {self._scan_i}: "
+                                   f"{self._job.message} — skipping it")
+        self._scan_i += 1
+        self._job = None
+
+    def _scan_next(self):
+        self._scan_i += 1
+        self._enter(self.SCAN)
+
+    def _end_scan(self):
+        self._scanning = False
+        pads = [(pd.position.x, pd.position.y, pd.height, pd.observations,
+                 pd.is_takeoff_base)
+                for pd in (self.pad_map.pads if self.pad_map else [])]
+        was_p = [q is None for q in self.pick_xy]
+        was_d = [q is None for q in self.deliv_xy]
+        self.pick_xy, self.deliv_xy, notes = core.fill_missing(
+            self.pick_xy, self.deliv_xy, pads, self._kits_seen,
+            home=self.home, ground_z=self.ground_z, min_obs=self.scan_min_obs,
+            min_kit_hits=self.min_kit_hits)
+        for n in notes:
+            self.get_logger().info(f"scan: {n}")
+        for kind, slots, was in (("pickup", self.pick_xy, was_p),
+                                 ("delivery", self.deliv_xy, was_d)):
+            for i, q in enumerate(slots):
+                if was[i]:
+                    self._task(f"scan: {kind} {i + 1} "
+                               + (f"FOUND at ({q[0]:.2f}, {q[1]:.2f})" if q
+                                  else "NOT found — dropped"))
+        self._plan_tour()
+        self._next_target()
+
+    # ── legs ────────────────────────────────────────────────────────────────
     def _next_target(self):
         """Decide where the next leg goes, from what is being carried."""
         if self.leg >= len(self.tour):
@@ -340,14 +604,49 @@ class Phase2MissionNode(Node):
             return
         pi, di = self.tour[self.leg]
         if self.carrying:
-            self.target = ("delivery", *self.deliv_xy[di])
+            self._leg_to(("delivery", *self.deliv_xy[di]))
         else:
-            self.target = ("pickup", *self.pick_xy[pi])
-        self._enter(self.GOTO)
+            self._new_pickup()
+            self._leg_to(("pickup", *self.pick_xy[pi]))
+
+    def _new_pickup(self):
+        self._aligned, self._base_fix = False, []
 
     def _go_home(self):
-        self.target = ("home", *self.home)
-        self._enter(self.GOTO)
+        self._leg_to(("home", *self.home))
+
+    def _leg_to(self, target):
+        """Every leg flies on the armed heading: turn back first, standing."""
+        self.target = target
+        if abs(core.wrap_pi(yaw_of(self.pose) - self.home_yaw)) > math.radians(10):
+            self._turn(self.home_yaw, lambda: self._enter(self.GOTO))
+        else:
+            self.hold_yaw = self.home_yaw
+            self._enter(self.GOTO)
+
+    def _turn(self, yaw, then):
+        p = self.pose.pose.position
+        self._turn_to, self._after_turn = yaw, then
+        self._turn_xyz, self._turn_in = (p.x, p.y, p.z), None
+        self._enter(self.TURN)
+
+    def _do_turn(self):
+        x, y, z = self._turn_xyz
+        self.vehicle.setpoint(x, y, z, self._turn_to)
+        err = abs(core.wrap_pi(yaw_of(self.pose) - self._turn_to))
+        if err > self.turn_tol:
+            self._turn_in = None
+        elif self._turn_in is None:
+            self._turn_in = self.now()
+        settled = self._turn_in is not None and self.now() - self._turn_in > 0.5
+        if not settled and self._elapsed() < self.turn_timeout:
+            return
+        if not settled:
+            self.get_logger().warn(f"turn: still {math.degrees(err):.0f} deg "
+                                   "off after the timeout — going on")
+        self.hold_yaw = self._turn_to
+        then, self._after_turn = self._after_turn, None
+        then()
 
     def _do_goto(self):
         kind, x, y = self.target
@@ -369,17 +668,22 @@ class Phase2MissionNode(Node):
         blind, self._blind = self._blind, False
         self._enter(self.LAND if kind == "home" or blind else self.DESCEND)
 
+    def _fx(self):
+        return float(self.cam.k[0]) if self.cam is not None else 0.0
+
     def _do_descend(self):
         """Centre on the KIT (pickup) or the BASE (delivery) while descending."""
         kind, tx, ty = self.target
-        h = self.range_m if self.range_m is not None else self.cruise
+        h = self.range_m if self.range_m is not None else self.cruise_alt
         if kind == "pickup":
             dets = [(u, v) for u, v, _ in self.kits.fresh(self.fresh_s)]
         else:
             dets = [(u, v) for u, v, _ in self.bases.fresh(self.fresh_s)
                     + self.rings.fresh(self.fresh_s)]
         self.descend.target_uv = pl.target_uv(self._centre_uv, self.belly_offset,
-                                              self.fx or 0.0, h)
+                                              self._fx(), h)
+        if kind == "pickup":
+            self._fix_base(tx, ty, h)
         if kind == "delivery" and (not dets or self._give_up_visual):
             # The kit covers the middle of the image: from cruise the ring is
             # smaller than the kit and stays hidden until ~1.6 m (MEASURED
@@ -387,7 +691,7 @@ class Phase2MissionNode(Node):
             self.descend.reset()
             self._descend_blind(tx, ty, h)
             return
-        step = self.descend.update(dets, h, self.fx, self.now())
+        step = self.descend.update(dets, h, self._fx() or None, self.now())
         if step.phase == READY:
             self._reacquires = 0
             self.get_logger().info(
@@ -395,8 +699,12 @@ class Phase2MissionNode(Node):
                 + ("touching down on it" if kind == "pickup"
                    and self.pickup_touch else "landing"))
             if kind == "pickup" and self.pickup_touch and step.picked:
-                self._touch_xy = self._kit_world_xy(step.picked, h)
-                self._enter(self.TOUCH)
+                if self.align_kit and not self._aligned:
+                    self._picked_uv = step.picked
+                    self._enter(self.ALIGN)
+                    return
+                if self._set_touch(self._kit_world_xy(step.picked, h)):
+                    self._enter(self.TOUCH)
             else:
                 self._enter(self.LAND)
             return
@@ -411,6 +719,11 @@ class Phase2MissionNode(Node):
             self._task(f"pickup: kit lost at {h:.2f} m — climbing to look again "
                        f"({self._reacquires}/{self.reacquire_max})")
             self._enter(self.GOTO)
+            return
+        if kind == "pickup" and (step.phase == LOST
+                                 or self._elapsed() > self.descent_timeout):
+            self._reacquires = 0
+            self._skip_kit(f"not seen after {self.reacquire_max} more looks")
             return
         if step.phase == LOST or self._elapsed() > self.descent_timeout:
             # Positions are KNOWN (rules): land on the layout position rather
@@ -432,7 +745,81 @@ class Phase2MissionNode(Node):
             wx, wy = body_to_world((step.dx, step.dy), yaw_of(self.pose))
             p = self.pose.pose.position
             self.vehicle.setpoint(p.x + wx, p.y + wy, p.z + step.dz,
-                                  self.home_yaw)
+                                  self.hold_yaw)
+
+    def _fix_base(self, tx, ty, h):
+        """Pickup: where the BASE is, from its detections while it is whole
+        in the frame (above the READY height). The legs are kept on it."""
+        if (h <= self.descend.descend_to + 0.1
+                or self.bases.stamp == self._base_stamp):
+            return
+        self._base_stamp = self.bases.stamp
+        seen = [self._kit_world_xy((u, v), h)
+                for u, v, _ in self.bases.fresh(self.fresh_s)]
+        seen = [w for w in seen
+                if math.hypot(w[0] - tx, w[1] - ty) <= self.base_fix_gate]
+        if seen:
+            self._base_fix.append(min(
+                seen, key=lambda w: math.hypot(w[0] - tx, w[1] - ty)))
+
+    def _base_centre(self):
+        if len(self._base_fix) >= 3:
+            return (statistics.median(w[0] for w in self._base_fix),
+                    statistics.median(w[1] for w in self._base_fix))
+        _, tx, ty = self.target
+        return (tx, ty)
+
+    def _set_touch(self, kit_xy):
+        """Touch point = the kit, kept where every foot stays on the base."""
+        c = self._base_centre()
+        q = core.clamp_to_disc(kit_xy, c, self.touch_max_off)
+        shift = math.hypot(q[0] - kit_xy[0], q[1] - kit_xy[1])
+        off = math.hypot(kit_xy[0] - c[0], kit_xy[1] - c[1])
+        if shift > self.touch_skip_shift:
+            self._skip_kit(f"{off * 100:.0f} cm from the base centre: the "
+                           "legs would leave the base or land on it")
+            return False
+        self._touch_xy = q
+        if shift > 0.01:
+            self.get_logger().info(f"pickup: touch point pulled "
+                                   f"{shift * 100:.0f} cm towards the base centre")
+        return True
+
+    def _skip_kit(self, why):
+        pi, _ = self.tour[self.leg]
+        self._task(f"kit {pi + 1}: SKIPPED — {why}")
+        self.carrying = False
+        self.leg += 1
+        self.retries = 0
+        self._next_target()
+
+    def _do_align(self):
+        """Hold over the kit, read its angle, turn it along the gripper."""
+        self._hold()
+        u0, v0 = self._picked_uv
+        looks = [a for t, u, v, a, c in self.axes_seen
+                 if t >= self._since and c >= self.align_min_coh
+                 and math.hypot(u - u0, v - v0) <= 80.0]
+        if len(looks) < 3 and self._elapsed() < self.align_look_s:
+            return
+        pi, _ = self.tour[self.leg]
+        self._aligned = True
+        if not looks:
+            self._task(f"kit {pi + 1}: no clear angle — touching down on the "
+                       "current heading")
+            self.descend.reset()
+            self._enter(self.DESCEND)
+            return
+        d = core.turn_to_axis(core.mean_axis(looks), self.descend.axes,
+                              self.gripper_axis)
+        if abs(d) <= self.align_min:
+            self.descend.reset()
+            self._enter(self.DESCEND)
+            return
+        self._task(f"kit {pi + 1}: lies {math.degrees(d):.0f} deg off the "
+                   "gripper — turning to it")
+        self.descend.reset()
+        self._turn(yaw_of(self.pose) + d, lambda: self._enter(self.DESCEND))
 
     def _descend_blind(self, tx, ty, h):
         """Delivery without the base in sight: down to visual_descend_to_m
@@ -440,9 +827,9 @@ class Phase2MissionNode(Node):
         p = self.pose.pose.position
         if h > self.descend.descend_to + 0.05:
             self.vehicle.setpoint(tx, ty, p.z - min(0.3, h - self.descend.descend_to),
-                                  self.home_yaw)
+                                  self.hold_yaw)
             return
-        self.vehicle.setpoint(tx, ty, p.z, self.home_yaw)
+        self.vehicle.setpoint(tx, ty, p.z, self.hold_yaw)
         if math.hypot(p.x - tx, p.y - ty) <= self.blind_xy_tol:
             self.get_logger().warn(
                 f"delivery: base not seen down to {h:.2f} m — landing on the "
@@ -456,7 +843,7 @@ class Phase2MissionNode(Node):
         offset, not a fraction of it.
         """
         u0, v0 = self.descend.target_uv
-        m = max(h, 0.2) / (self.fx or 320.0)
+        m = max(h, 0.2) / (self._fx() or 320.0)
         ax_u, ax_v = self.descend.axes
         bx, by = ax_v * (uv[1] - v0) * m, ax_u * (uv[0] - u0) * m
         wx, wy = body_to_world((bx, by), yaw_of(self.pose))
@@ -471,7 +858,7 @@ class Phase2MissionNode(Node):
             return
         self._used_stamp = self.kits.stamp
         self.descend.target_uv = pl.target_uv(self._centre_uv, self.belly_offset,
-                                              self.fx or 0.0, h)
+                                              self._fx(), h)
         kx, ky = self._touch_xy
         seen = [self._kit_world_xy((u, v), h)
                 for u, v, _ in self.kits.fresh(self.fresh_s)]
@@ -481,7 +868,9 @@ class Phase2MissionNode(Node):
             return
         wx, wy = min(seen, key=lambda w: math.hypot(w[0] - kx, w[1] - ky))
         g = self.touch_track_gain
-        self._touch_xy = (kx + g * (wx - kx), ky + g * (wy - ky))
+        self._touch_xy = core.clamp_to_disc(
+            (kx + g * (wx - kx), ky + g * (wy - ky)), self._base_centre(),
+            self.touch_max_off)
         self.get_logger().info(
             f"pickup: kit at {h:.2f} m is {math.hypot(wx - kx, wy - ky) * 100:.0f}"
             " cm from the touch point — correcting",
@@ -497,7 +886,7 @@ class Phase2MissionNode(Node):
                    and self.range_m <= self.touch_range)
         if self._job is None and (touched
                                   or self._elapsed() > self.touch_timeout):
-            self.vehicle.setpoint(kx, ky, p.z, self.home_yaw)   # hold here
+            self.vehicle.setpoint(kx, ky, p.z, self.hold_yaw)   # hold here
             self._job = self.gripper.close()
             self.get_logger().info(
                 f"pickup: at {self.range_m if self.range_m is not None else -1:.2f}"
@@ -506,7 +895,7 @@ class Phase2MissionNode(Node):
         if self._job is None:
             # The controller limits the speed; asking 0.3 m below keeps it
             # coming down steadily without overshooting the contact.
-            self.vehicle.setpoint(kx, ky, p.z - 0.3, self.home_yaw)
+            self.vehicle.setpoint(kx, ky, p.z - 0.3, self.hold_yaw)
             return
         if self._job.done:
             self._enter(self.LAND)
@@ -517,6 +906,7 @@ class Phase2MissionNode(Node):
             return
         if not self._job.done:
             return
+        self._ours = False
         r = self._job.result
         z = r.z if r is not None else float("nan")
         kind = self.target[0]
@@ -575,8 +965,8 @@ class Phase2MissionNode(Node):
             self.retries += 1
             self._task(f"kit {pi + 1}: gripper EMPTY — retry "
                        f"{self.retries}/{self.pick_retries}")
-            self.target = ("pickup", *self.pick_xy[pi])
-            self._enter(self.GOTO)
+            self._new_pickup()
+            self._leg_to(("pickup", *self.pick_xy[pi]))
         else:
             self._task(f"kit {pi + 1}: gripper empty {self.retries + 1}x — "
                        "skipping this kit")
@@ -610,6 +1000,7 @@ class Phase2MissionNode(Node):
                 self._task(f"kit {pi + 1}: still on the base — grab FAILED, "
                            f"retry {self.retries}/{self.pick_retries}")
                 self.descend.reset()
+                self._new_pickup()
                 self._enter(self.DESCEND)
             else:
                 self._task(f"kit {pi + 1}: grab failed {self.retries + 1}x — "

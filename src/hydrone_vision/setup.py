@@ -25,6 +25,7 @@ setup(
             'vision_node = hydrone_vision.vision_node:main',
             'pad_detector_node = hydrone_vision.pad_detector_node:main',
             'ring_detector_node = hydrone_vision.ring_detector_node:main',
+            'kit_axis_node = hydrone_vision.kit_axis_node:main',
         ],
     },
 )

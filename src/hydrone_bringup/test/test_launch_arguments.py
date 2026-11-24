@@ -80,6 +80,9 @@ WRAPPER_PAIRS = [
     # tightly than "nothing" would.
     ("phase1_dry.launch.py", "phase1.launch.py"),
     ("phase1_dry.launch.py", "sources_real.launch.py"),
+    ("phase2_sim.launch.py", "phase2.launch.py"),
+    ("phase2_real.launch.py", "phase2.launch.py"),
+    ("phase2_real.launch.py", "sources_real.launch.py"),
 ]
 
 # {wrapper: {inner: allowed forwards}}. Every entry needs the argument written
@@ -109,6 +112,14 @@ FORWARDING_EXEMPT = {
         {"field_mode", "dry_run", "belly_offset_xy", "ground_z"},
     ("phase1_dry.launch.py", "sources_real.launch.py"):
         {"zed_point_cloud"},
+    # Phase 2: where the container keeps files after `down`.
+    ("phase2_sim.launch.py", "phase2.launch.py"): {"log_dir"},
+    # Facts about this airframe and the real map frame (see the file's
+    # docstring), each a LaunchConfiguration with a default so the CLI wins.
+    ("phase2_real.launch.py", "phase2.launch.py"):
+        {"belly_offset_xy", "ground_z", "arena_yaw_deg", "layout_file",
+         "cruise_alt"},
+    ("phase2_real.launch.py", "sources_real.launch.py"): {"gripper"},
 }
 
 
