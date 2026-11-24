@@ -162,6 +162,9 @@ truth, com viewport):**
 | 4 | kits girados (125°, 30°, 0° no frame da arena), todas as posições dadas | 3/3 entregues, casa em **197 s**. Kit 1 virou certo (eixo 51° → −84° na imagem). Kit 3 sem leitura (janela de 2 s de parede = 0,7 s de sim) e kit 2 leu errado com o drone ainda assentando: pegou na 2ª tentativa |
 | 5 | o mesmo + `pickup_2:=scan delivery_3:=scan`, com as correções do giro | varredura achou as duas a ~14 cm (coleta 2 com 103 vistas de kit, entrega 3 com 0, topo 1,08 m). Giros −85°/+35°/−69° e uma correção de 8° (2ª passada). **3/3, casa em 366 s**, dos quais 166 s de varredura |
 | 7b | o mesmo, com a parada antecipada da varredura | parou no setpoint 16 de 20 (**134 s**), mesmas posições. Giros +34°/−79°/−57° (+5° na 2ª passada). **3/3, casa em 341 s** |
+| 8 | garra nova (24/11): abre antes de armar, fecha no chão | abriu e esperou antes de armar; fechar no chão deu EMPTY ("nothing in reach": o volume do sim só pega antes do pouso), reabriu pairando e voltou para tentar de novo. Daí o `close_in_touch:=true` só no sim |
+| 9 | sim fechando no TOUCH, entrega ainda com LAND de 1,2 m | 3/3 em 177 s, mas o LAND escorregou para a borda da entrega B: tombou 33° na decolagem, o controller cortou, ABORTED sem a volta |
+| 10 | entrega também pelo TOUCH | **3/3, casa em 203 s**, as três entregas descendo em controle de posição |
 
 A varredura só para cedo com evidência clara: coleta = base com ≥ 3 vistas de
 kit; entrega = base vista ≥ 6 vezes, nenhum kit, e fora da altura do bloco (uma
