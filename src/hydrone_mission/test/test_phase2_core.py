@@ -190,3 +190,15 @@ def test_a_stale_armed_right_after_our_landing_is_not_a_takeover():
                          settled=False) is None
     assert core.takeover("ACT", True, "LAND", ours=False, airborne=False,
                          settled=True)
+
+
+def test_one_reading_taken_mid_motion_does_not_turn_the_kit():
+    """Run 4, kit 2: -28, -4, +22 while settling; the still ones near -20."""
+    d = math.radians
+    a = core.robust_axis([d(-20), d(-18), d(-22), d(-19), d(25)])
+    assert a == pytest.approx(d(-19.75), abs=d(0.5))
+
+
+def test_readings_that_disagree_give_no_axis():
+    d = math.radians
+    assert core.robust_axis([d(-30), d(10), d(50), d(85)]) is None

@@ -187,7 +187,14 @@ class Phase2MissionNode(Node):
         self.align_kit = p("align_kit", True)
         self.gripper_axis = math.radians(p("gripper_axis_deg", 0.0))
         self.align_min = math.radians(p("align_min_deg", 5.0))
-        self.align_look_s = p("align_look_s", 2.0)
+        # Vehicle time: hold still `settle` first (a frame grabbed while the
+        # descent settles read 40 deg off, sim 2026-11-23), then up to
+        # `align_looks` readings within `look`; look again after the turn and
+        # correct once more (align_passes).
+        self.align_settle_s = p("align_settle_s", 1.0)
+        self.align_look_s = p("align_look_s", 3.0)
+        self.align_looks = p("align_looks", 5)
+        self.align_passes = p("align_passes", 2)
         self.align_min_coh = p("align_min_coherence", 0.3)
         self.turn_tol = math.radians(p("turn_tol_deg", 4.0))
         self.turn_timeout = p("turn_timeout_s", 12.0)
@@ -283,7 +290,7 @@ class Phase2MissionNode(Node):
         self._settled = True                 # seen disarmed since our landing
         self._takeoff_z0 = 0.0
         self._base_fix, self._base_stamp = [], None
-        self._aligned = False
+        self._aligned, self._align_pass = False, 0
         self._turn_to = self._after_turn = self._turn_xyz = None
         self._turn_in = None
         self._scan, self._scan_i, self._scanning = [], 0, False
@@ -309,7 +316,8 @@ class Phase2MissionNode(Node):
         self.range_m = float(m.range) if math.isfinite(m.range) else None
 
     def _cb_axis(self, m):
-        self.axes_seen.append((self.now(), m.u, m.v, m.angle, m.coherence))
+        self.axes_seen.append((self.mission_now(), m.u, m.v, m.angle,
+                               m.coherence))
         del self.axes_seen[:-50]
 
     def _enter(self, state):
@@ -614,7 +622,7 @@ class Phase2MissionNode(Node):
             self._leg_to(("pickup", *self.pick_xy[pi]))
 
     def _new_pickup(self):
-        self._aligned, self._base_fix = False, []
+        self._aligned, self._align_pass, self._base_fix = False, 0, []
 
     def _go_home(self):
         self._leg_to(("home", *self.home))
@@ -633,17 +641,20 @@ class Phase2MissionNode(Node):
         self._turn_to, self._after_turn = yaw, then
         self._turn_xyz, self._turn_in = (p.x, p.y, p.z), None
         self._enter(self.TURN)
+        # The vehicle's clock: a turn takes vehicle time (the sim runs ~0.35x)
+        self._turn_t0 = self.mission_now()
 
     def _do_turn(self):
         x, y, z = self._turn_xyz
         self.vehicle.setpoint(x, y, z, self._turn_to)
         err = abs(core.wrap_pi(yaw_of(self.pose) - self._turn_to))
+        t = self.mission_now()
         if err > self.turn_tol:
             self._turn_in = None
         elif self._turn_in is None:
-            self._turn_in = self.now()
-        settled = self._turn_in is not None and self.now() - self._turn_in > 0.5
-        if not settled and self._elapsed() < self.turn_timeout:
+            self._turn_in = t
+        settled = self._turn_in is not None and t - self._turn_in > 0.5
+        if not settled and t - self._turn_t0 < self.turn_timeout:
             return
         if not settled:
             self.get_logger().warn(f"turn: still {math.degrees(err):.0f} deg "
@@ -704,7 +715,7 @@ class Phase2MissionNode(Node):
                    and self.pickup_touch else "landing"))
             if kind == "pickup" and self.pickup_touch and step.picked:
                 if self.align_kit and not self._aligned:
-                    self._picked_uv = step.picked
+                    self._align_t0 = self.mission_now()
                     self._enter(self.ALIGN)
                     return
                 if self._set_touch(self._kit_world_xy(step.picked, h)):
@@ -800,29 +811,32 @@ class Phase2MissionNode(Node):
     def _do_align(self):
         """Hold over the kit, read its angle, turn it along the gripper."""
         self._hold()
-        u0, v0 = self._picked_uv
+        u0, v0 = self.descend.target_uv          # the pixel under the centre
+        t0 = self._align_t0 + self.align_settle_s
         looks = [a for t, u, v, a, c in self.axes_seen
-                 if t >= self._since and c >= self.align_min_coh
-                 and math.hypot(u - u0, v - v0) <= 80.0]
-        if len(looks) < 3 and self._elapsed() < self.align_look_s:
+                 if t >= t0 and c >= self.align_min_coh
+                 and math.hypot(u - u0, v - v0) <= 120.0]
+        if (len(looks) < self.align_looks
+                and self.mission_now() - t0 < self.align_look_s):
             return
         pi, _ = self.tour[self.leg]
-        self._aligned = True
-        if not looks:
-            self._task(f"kit {pi + 1}: no clear angle — touching down on the "
-                       "current heading")
-            self.descend.reset()
-            self._enter(self.DESCEND)
-            return
-        d = core.turn_to_axis(core.mean_axis(looks), self.descend.axes,
-                              self.gripper_axis)
-        if abs(d) <= self.align_min:
-            self.descend.reset()
-            self._enter(self.DESCEND)
-            return
-        self._task(f"kit {pi + 1}: lies {math.degrees(d):.0f} deg off the "
-                   "gripper — turning to it")
+        self._align_pass += 1
+        axis = core.robust_axis(looks)
         self.descend.reset()
+        if axis is None:
+            self._aligned = True
+            self._task(f"kit {pi + 1}: no clear angle ({len(looks)} looks) — "
+                       "touching down on the current heading")
+            self._enter(self.DESCEND)
+            return
+        d = core.turn_to_axis(axis, self.descend.axes, self.gripper_axis)
+        if abs(d) <= self.align_min:
+            self._aligned = True
+            self._enter(self.DESCEND)
+            return
+        self._aligned = self._align_pass >= self.align_passes
+        self._task(f"kit {pi + 1}: lies {math.degrees(d):.0f} deg off the "
+                   f"gripper — turning to it (pass {self._align_pass})")
         self._turn(yaw_of(self.pose) + d, lambda: self._enter(self.DESCEND))
 
     def _descend_blind(self, tx, ty, h):

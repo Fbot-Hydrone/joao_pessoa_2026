@@ -164,6 +164,20 @@ def mean_axis(angles):
     return 0.5 * math.atan2(s, c)
 
 
+def robust_axis(angles, keep_deg=20.0):
+    """mean_axis without the outliers: readings more than `keep_deg` off the
+    first mean are dropped (a frame grabbed mid-motion). None if too few
+    agree (< half)."""
+    m = mean_axis(angles)
+    if m is None:
+        return None
+    keep = [a for a in angles
+            if abs(wrap_half_pi(a - m)) <= math.radians(keep_deg)]
+    if len(keep) * 2 < len(angles):
+        return None
+    return mean_axis(keep)
+
+
 def turn_to_axis(axis_img, axes, gripper_axis=0.0):
     """Yaw change that lays the kit along the gripper's grabbing axis.
 
