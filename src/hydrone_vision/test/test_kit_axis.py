@@ -76,3 +76,17 @@ def test_pale_lines_under_the_kit_do_not_pull_the_axis(deg):
     a, coh = kit_axis(img, 320, 240, radius(box))
     assert err_deg(a, math.radians(deg)) < 4.0
     assert coh > 0.4
+
+
+@pytest.mark.parametrize("deg", [0, 35, 100])
+def test_a_dark_blue_tinted_kit_falls_back_to_the_edges(deg):
+    """BiguaSim's kit reflects the scene: dark navy on a blue base, no
+    neutral blob to find. The edges still carry the axis."""
+    img = np.zeros((480, 640, 3), np.uint8)
+    img[:] = (170, 80, 30)
+    box = ((320, 240), (144, 59), deg)
+    p = cv2.boxPoints(box).astype(np.int32)
+    cv2.fillPoly(img, [p], (70, 30, 15))
+    a, coh = kit_axis(img, 320, 240, radius(box))
+    assert err_deg(a, math.radians(deg)) < 4.0
+    assert coh >= 0.35
