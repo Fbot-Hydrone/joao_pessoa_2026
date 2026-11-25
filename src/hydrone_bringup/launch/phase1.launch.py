@@ -385,6 +385,14 @@ def generate_launch_description():
                         "unvisited base would be flown to and landed on twice, "
                         "which is -5 — and logged as unproven."),
         DeclareLaunchArgument(
+            "fcu_range_topic",
+            default_value="/mavros/distance_sensor/rangefinder_fcu",
+            description="The rangefinder reading the FCU flies on (RNGFND1). "
+                        "The controller sends the takeoff climb on top of it, "
+                        "because GUIDED reads the takeoff altitude as a target "
+                        "of that reading. Real: MAVROS's echo; phase1_sim sets "
+                        "the topic MAVROS sends SITL."),
+        DeclareLaunchArgument(
             "disarm_retry_s", default_value="0.4",
             description="How often to re-ask for the disarm, s. Short on "
                         "purpose: the first disarms after touchdown are "
@@ -1108,6 +1116,7 @@ def generate_launch_description():
                 LaunchConfiguration("disarm_timeout_s"), value_type=float),
             "disarm_retry_s": ParameterValue(
                 LaunchConfiguration("disarm_retry_s"), value_type=float),
+            "fcu_range_topic": LaunchConfiguration("fcu_range_topic"),
         }],
     )
 

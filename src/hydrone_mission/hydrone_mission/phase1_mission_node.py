@@ -1262,7 +1262,7 @@ class Phase1MissionNode(Node):
         if self.state in (self.DONE, self.ABORTED):
             return
         self._check_budget()
-        if self._disarmed_in_flight():
+        if self._disarmed_in_flight() or self._pilot_took_over():
             return
         handler = {
             self.WAIT_FCU: self._do_wait_fcu,
@@ -1282,6 +1282,23 @@ class Phase1MissionNode(Node):
     # LAND and DWELL are excluded: a disarm there is the plan.
     _FLYING = ("TAKEOFF", "SELECT", "SETTLE", "TRAVEL", "CONFIRM")
 
+    def _pilot_took_over(self) -> bool:
+        """Armed in our hands but out of GUIDED: the pilot's RC (LAND switch)
+        or an FCU failsafe has the vehicle. 2026-11-24 log 60: the pilot
+        switched to LAND mid-takeoff and we set GUIDED again 5 s later. Stop,
+        and send nothing more.
+        """
+        if (self.dry_run or self.state not in self._FLYING
+                or not self.mav_state.armed
+                or self.mav_state.mode in ("GUIDED", "")):
+            return False
+        self.get_logger().error(
+            f"FCU in {self.mav_state.mode} during {self.state} without being "
+            "told to — pilot or failsafe has it. ABORTING the mission.")
+        self.stream_setpoint = False
+        self._enter(self.ABORTED)
+        return True
+
     def _disarmed_in_flight(self) -> bool:
         """2026-11-17 22:59: the safety pilot cut the motors at 1.5 m and the
         mission went on "searching" for 3.5 min, streaming setpoints at a
@@ -1290,12 +1307,9 @@ class Phase1MissionNode(Node):
         if (self.dry_run or self.state not in self._FLYING
                 or not self._seen_armed or self.mav_state.armed):
             return False
-        if self.state == self.TAKEOFF and (
-                self.pose is None or self.pose.pose.position.z
-                - self._takeoff_start_z < 0.3):
-            # Still on the base: a refused or timed-out take-off disarms
-            # here, and _do_takeoff's retry handles that.
-            return False
+        # No exemption for TAKEOFF on the base any more: 2026-11-24 the pilot's
+        # RC stop on the base was read as a refused takeoff, and the retry
+        # re-armed and flew. A disarm we did not ask for ends the run, always.
         self.get_logger().error(
             f"FCU DISARMED in {self.state} without being told to — safety "
             "pilot, failsafe or crash. ABORTING the mission.")
@@ -1536,6 +1550,16 @@ class Phase1MissionNode(Node):
                 "went over.")
             self.stream_setpoint = False
             self._enter(self.ABORTED)
+            return
+        climbed = (self.pose.pose.position.z - self._takeoff_start_z
+                   if self.pose is not None else 0.0)
+        if self.mav_state.armed and climbed >= 0.3:
+            # Off the base and armed: the FCU took off and stopped short of
+            # our number. Another takeoff would go to a flying vehicle.
+            self.get_logger().warn(
+                f"takeoff job: {self._job.message}, but we are {climbed:.2f} m "
+                "up and armed — airborne, carrying on.")
+            self._airborne(climbed)
             return
         self._takeoff_tries += 1
         if self._takeoff_tries > 3:

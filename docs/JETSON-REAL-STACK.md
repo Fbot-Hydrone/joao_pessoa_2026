@@ -506,3 +506,39 @@ reboot) and by replaying logs 43–47 through the step detector (every 0.5 m
 base crossing found, none invented). The first flight must check, in the
 FCU log: RFND[0] (fed) − RFND[1] (raw) = s + b, constant except at base edges;
 and that XKF1.PD does not jump when crossing a base.
+
+## 11. Takeoff frame and pilot takeover (2026-11-24)
+
+**What happened in the arena.** Pixhawk log 60: the first TAKEOFF Z 2.50 was
+accepted and the drone hovered with RFND[0] at 2.50 for about 75 s. The mission
+had meant "climb 2.50 m in z", saw z stop 0.68 short, logged "takeoff did not
+lift us" and sent takeoffs to a flying drone (Res 4, refused). After the
+pilot's RC LAND it set GUIDED again. After the disarm it re-armed and took off.
+
+**Why.** While its rangefinder is healthy, ArduCopter GUIDED reads the takeoff
+altitude as a target of that reading, not as a climb (`mode_guided.cpp`,
+`do_user_takeoff_start`). SITL on machine 2 with this drone's height params:
+from a 1.72 m reading, alt 1.8 rises 0.16 m, and alt 0.6 is refused.
+
+**Now.**
+- `run_takeoff` sends `climb + FCU reading at rest` (`fcu_range_topic`: the
+  MAVROS echo `rangefinder_fcu` on the drone, `/mavros/rangefinder` in sim).
+  It succeeds on either frame. An accepted takeoff that stops short but more
+  than 0.4 m up counts as airborne.
+- The mission takes a takeoff "failure" with the vehicle armed and at least
+  0.3 m up as airborne. It never sends a second takeoff.
+- Any disarm in TAKEOFF that we did not command aborts (no on-the-base
+  exemption any more). So does leaving GUIDED while armed in TAKEOFF or flight
+  (`_pilot_took_over`). Nothing is sent after that.
+
+Sim check (`machine2/.../claude_phase1`, `mission_probe.py`): 0 refusals, and
+no GUIDED or re-arm in the 75 s after the pilot's LAND, from both a raw and a
++0.5 m feed.
+
+**Open: surface_offset runs away in sim with POSZ=2.** On every sim climb the
+step detector stacked false "raised surface" steps (s 0.5 → 7.0 in 9 s). It
+corrects each step with the EKF's vertical speed, and with the EKF height
+coming from the feed, that speed comes from its own output. It did not happen
+on today's real climbs (no step events). Raw feed + barometer height
+(`EK3_SRC1_POSZ=1`) has no detector at all and held 2.05–2.18 m through an
+emulated 1.5 m base edge.
