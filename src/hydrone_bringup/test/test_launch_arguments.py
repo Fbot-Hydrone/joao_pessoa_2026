@@ -105,6 +105,9 @@ FORWARDING_EXEMPT = {
     # front of whichever camera is doing the detecting in THIS mission.
     ("phase1_zed_detect_real.launch.py", "phase1_zed_detect.launch.py"):
         {"field_mode"},
+    # fcu_range_topic: a sim fact, not tuning. SITL has no FCU echo of RNGFND1,
+    # its rangefinder is what MAVROS sends it on /mavros/rangefinder.
+    ("phase1_sim.launch.py", "phase1.launch.py"): {"fcu_range_topic"},
     # The dry launch exists to override its includes. Neither is tuning
     # somebody would edit elsewhere and expect to win, and dry_run is asserted
     # to actually arrive by test_the_dry_launch_really_is_dry.
