@@ -75,6 +75,9 @@ fi
 if [ "$NOSURF" = 1 ]; then
     SURF_ARGS="surface_offset:=false"
     FLOOR_CMD="python3 floor_plain.py"
+    # in PLAIN there is no rangefinder_fcu: the FCU's own sensor is here, and
+    # the takeoff climb has to be sent on top of it
+    EXTRA="$EXTRA fcu_range_topic:=/mavros/distance_sensor/rangefinder"
 else
     SURF_ARGS="takeoff_base_height_m:=$SURFACE calibrate_datum:=false"
     FLOOR_CMD="python3 floor_z.py --surface $SURFACE --log $LOG/floor.csv"
