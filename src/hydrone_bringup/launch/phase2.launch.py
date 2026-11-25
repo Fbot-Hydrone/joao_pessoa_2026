@@ -190,6 +190,12 @@ def generate_launch_description():
             description="cpu ou 0 (CUDA). A Orin tem CUDA (torch 2.8)."),
         DeclareLaunchArgument("range_topic",
                               default_value="/mavros/distance_sensor/rangefinder"),
+        DeclareLaunchArgument(
+            "fcu_range_topic",
+            default_value="/mavros/distance_sensor/rangefinder_fcu",
+            description="Leitura em que a FCU voa (RNGFND1), como em phase1. "
+                        "Sem surface_offset (PLAIN) nao existe o eco: "
+                        "/mavros/distance_sensor/rangefinder."),
         DeclareLaunchArgument("record", default_value="true",
                               description="ros2 bag + log de tarefas em log_dir."),
         DeclareLaunchArgument("record_images", default_value="false"),
@@ -200,7 +206,9 @@ def generate_launch_description():
 
     controller = Node(package="hydrone_controller",
                       executable="controller_node", name="hydrone_controller",
-                      output="screen")
+                      output="screen",
+                      parameters=[{"fcu_range_topic":
+                                   LaunchConfiguration("fcu_range_topic")}])
     cloud_filter = Node(package="hydrone_map", executable="cloud_filter_node",
                         name="cloud_filter", output="screen")
     octomap = Node(

@@ -48,6 +48,11 @@ deslocados por ele, `auto_start:=false`, e faz a contagem e o
 `/hydrone/mission/start`. O código vai para a Orin numa worktree separada
 (`deploy_phase2.sh`). Run sheet: `orin_flight/PHASE2.md`.
 
+As flags são as do `run_phase1.sh`: `NOGO=1` ensaio, `COUNTDOWN=` (padrão 0)
+e `NOSURFACE=1`, que volta o Pixhawk ao rangefinder dele (PLAIN), mede o chão
+com `floor_plain.py` e passa `fcu_range_topic:=/mavros/distance_sensor/rangefinder`
+(no PLAIN não existe o `rangefinder_fcu`). Os dois scripts estão em `orin_flight/`.
+
 Cada execução grava `log_dir/phase2_<data>/` (padrão `~/hydrone_logs`, no sim
 `/ws/logs` = `./logs`): `tasks.log` (o log de tarefas da regra) e `bag/`
 (`record:=false` desliga, `record_images:=true` inclui a câmera de barriga,
@@ -145,6 +150,7 @@ que a regra pede. A varredura conta no relógio.
 | `auto_start` | `true` | `false`: espera `/hydrone/mission/start` (a contagem da arena) |
 | `close_in_touch` | `false` (sim: `true`) | fechar no ar no TOUCH e reaproveitar no ACT (versão da Orin de 24/11). O volume de pega do sim só pega ANTES do pouso (fechar no chão deu "nothing in reach"); os dedos reais, o contrário |
 | `yolo_device` | `cpu` | `0` = CUDA (o `run_phase2.sh` usa `0`) |
+| `fcu_range_topic` | `/mavros/distance_sensor/rangefinder_fcu` | leitura da FCU em que a decolagem é somada (PLAIN: `/mavros/distance_sensor/rangefinder`) |
 | `pickup_touch` | `true` | descer até encostar no kit em controle de posição |
 | `touch_range_m` | `0.22` | altura (rangefinder) em que a garra fecha |
 | `pick_check` | `gripper` | como confirmar a pega (`gripper` / `vision`) |
