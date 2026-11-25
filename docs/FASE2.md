@@ -140,6 +140,7 @@ que a regra pede. A varredura conta no relógio.
 |---|---|---|
 | `layout_file` | `config/phase2_bases.yaml` | onde estão as bases (real: `phase2_bases_real.yaml`) |
 | `pickup_1..3`, `delivery_1..3` | `""` | uma base: `""` = a do layout, `scan` = desconhecida, `"[x, y]"` ou `"{grid: [c, l]}"` |
+| `kits` | `3` | quantos kits há na arena (1..3): só `pickup/delivery_1..kits` existem, a varredura não procura nem preenche os outros (o `run_phase2.sh` usa `KITS=1` para o teste com um pacote) |
 | `arena_yaw_deg` | `-90` | rotação arena → map (sim). Real: `0` |
 | `ground_z` | `-0.7` | o chão no z da FCU (real: o `ground_z()` da Fase 1) |
 | `cruise_alt` | `3.2` | altura das pernas, m acima do CHÃO (real: `3.0`) |

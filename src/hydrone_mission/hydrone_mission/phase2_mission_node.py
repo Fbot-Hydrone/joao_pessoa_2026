@@ -12,7 +12,8 @@ THE STRATEGY ONLY. Every "how" is a block (docs/ARQUITETURA.md):
   the rest       hydrone_mission.phase2_core          (ROS-free, tested)
 
 Where the bases are: one parameter per base (pickup_1..3, delivery_1..3),
-falling back to the layout file. If ANY is unknown the drone first flies
+falling back to the layout file; `kits` (default 3) keeps only slots 1..kits.
+If ANY of those is unknown the drone first flies
 Phase 1's map sweep and fills the gaps from pad_map (kit on it = pickup).
 
 The cycle, per kit, in the order route.plan_deliveries picks:
@@ -119,6 +120,13 @@ class Phase2MissionNode(Node):
         # "scan" = unknown, else "[x, y]" / "[x, y, z]" / "{grid: [c, r]}".
         self.pick_text = [p(f"pickup_{i}", "") for i in (1, 2, 3)]
         self.deliv_text = [p(f"delivery_{i}", "") for i in (1, 2, 3)]
+        # How many kits are in the arena: only pickup/delivery 1..kits exist,
+        # so the scan neither waits for nor fills the slots above it.
+        kits = p("kits", 3)
+        if not 1 <= kits <= 3:
+            raise ValueError(f"kits must be 1..3, got {kits}")
+        self.pick_text, self.deliv_text = (self.pick_text[:kits],
+                                           self.deliv_text[:kits])
         self.arena_yaw = p("arena_yaw_deg", -90.0)
         # The arena floor in the FCU's z (sim -0.7; real 0 with surface_offset).
         self.ground_z = p("ground_z", -0.7)

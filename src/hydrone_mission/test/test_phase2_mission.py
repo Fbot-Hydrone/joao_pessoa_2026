@@ -208,3 +208,47 @@ def test_a_delivery_comes_down_under_position_control_and_never_closes():
         assert node.gripper.calls == []
     finally:
         node.destroy_node()
+
+
+def _start_with(**params):
+    """A fresh node through _do_wait with these parameters (sim layout)."""
+    from rclpy.parameter import Parameter
+    node = Phase2MissionNode(parameter_overrides=[
+        Parameter(k, value=v) for k, v in params.items()])
+    node.gripper, node.vehicle, node.nav = FakeGripper(), FakeVehicle(), FakeNav()
+    node.pose = _make_pose()
+    node.state = node.WAIT
+    node._do_wait()
+    return node
+
+
+def test_one_kit_known_flies_one_leg_and_no_scan():
+    node = _start_with(kits=1)
+    try:
+        assert len(node.pick_xy) == len(node.deliv_xy) == 1
+        assert node.after_takeoff == node._next_target
+        assert node.tour == [(0, 0)]
+    finally:
+        node.destroy_node()
+
+
+def test_one_kit_unknown_scans_only_for_its_two_bases():
+    node = _start_with(kits=1, pickup_1="scan", delivery_1="scan",
+                       pickup_2="scan")       # above kits: ignored
+    try:
+        assert node.pick_xy == [None] and node.deliv_xy == [None]
+        assert node.after_takeoff == node._start_scan
+        # both found -> the scan stops early (it used to wait for 2 and 3)
+        node._pads = lambda: [(2.0, 2.0, 1.5, 9, False),
+                              (4.0, 5.0, 0.0, 9, False)]
+        node._kits_seen = [(2.0, 2.0)] * 5
+        node.ground_z = 0.0
+        assert node._scan_found_all()
+    finally:
+        node.destroy_node()
+
+
+def test_kits_out_of_range_refuses_to_start():
+    from rclpy.parameter import Parameter
+    with pytest.raises(ValueError):
+        Phase2MissionNode(parameter_overrides=[Parameter("kits", value=4)])

@@ -23,8 +23,9 @@ phase2_real.launch.py put the sources under it.
   ros2 bag             record:=true, with the task log in the same folder
 
 Positions: pickup_1..3 / delivery_1..3 (arena frame, "" = layout_file's
-entry, "scan" = unknown), else hydrone_bringup/config/phase2_bases.yaml. Any
-unknown base -> the mission scans the arena first.
+entry, "scan" = unknown), else hydrone_bringup/config/phase2_bases.yaml.
+kits:=N (1..3) keeps only pickup/delivery 1..N. Any unknown base among them
+-> the mission scans the arena first.
 """
 import os
 import time
@@ -119,6 +120,7 @@ def _planned(context):
         "touch_max_off_m": float(_f(context, "touch_max_off_m")),
         "close_in_touch": bool(_f(context, "close_in_touch")),
         "auto_start": bool(_f(context, "auto_start")),
+        "kits": int(_f(context, "kits")),
         "task_log": os.path.join(run, "tasks.log"),
     }
     for b in BASES:
@@ -154,6 +156,10 @@ def generate_launch_description():
                               description="Chao da arena no z da FCU. Sim: -0.7."),
         DeclareLaunchArgument("cruise_alt", default_value="3.2",
                               description="Cruzeiro, m acima do CHAO."),
+        DeclareLaunchArgument(
+            "kits", default_value="3",
+            description="Quantos kits ha na arena (1..3): so pickup/delivery "
+                        "1..kits existem, a varredura nao procura os outros."),
         DeclareLaunchArgument("mission_budget_s", default_value="600.0"),
         # Belly webcam from the vehicle centre, m [x forward, y right]. Real
         # drone: measure the mount. Sim: on the axis.
