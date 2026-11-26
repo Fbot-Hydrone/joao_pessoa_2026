@@ -199,7 +199,16 @@ def _launch_setup(context, *args, **kwargs):
             leds = [LogInfo(msg='WARNING: no hydrone_leds in this image, LEDs stay off '
                                 '(jetson_up.sh --rebuild, or --build34)')]
 
-    return [livox] + lio + [adapter, prior, mavros, streams, lio_nav, lio_map, maze] + known + leds
+    # QR codes off the front camera -> /hydrone/qr (the known mission counts them)
+    qr = []
+    if lc('qr').lower() == 'true':
+        qp = {'camera': lc('qr_camera')}
+        if lc('qr_backend'):
+            qp['backend'] = lc('qr_backend')
+        qr = [Node(package='hydrone_vision', executable='qr_reader_node', output='screen',
+                   parameters=[qp])]
+
+    return [livox] + lio + [adapter, prior, mavros, streams, lio_nav, lio_map, maze] + known + leds + qr
 
 
 def generate_launch_description():
@@ -246,5 +255,12 @@ def generate_launch_description():
             'leds', default_value='white',
             description="LED strip color while running ('red blue', 'cyan', ...); "
                         'none = no LED node. Off again when the launch stops.'),
+        DeclareLaunchArgument(
+            'qr', default_value='true',
+            description='qr_reader_node on the front camera, publishing /hydrone/qr. '
+                        'false when something else holds the camera (phase 3 gestures).'),
+        DeclareLaunchArgument('qr_camera', default_value='/dev/video0'),
+        DeclareLaunchArgument('qr_backend', default_value='',
+                              description="hydrone_vision/qr_reader.py backend; '' = the node's default."),
         OpaqueFunction(function=_launch_setup),
     ])

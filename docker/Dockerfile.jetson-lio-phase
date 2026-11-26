@@ -1,0 +1,16 @@
+# Thin layer over hydrone-jetson-lio:humble for one phase's worktree on the Nano
+# (nano_flight/deploy_phase3.sh / deploy_phase4.sh build it as :phase3 / :phase4).
+#
+# jetson_up.sh live-mounts each package's src over the image's, so node code and
+# existing launch/config files are already current. What isn't is what colcon
+# makes: a new package or a new entry point. Only those packages are built
+# here (PKGS), in a minute or two instead of the full --build34.
+ARG BASE=hydrone-jetson-lio:humble
+FROM ${BASE}
+ARG PKGS="hydrone_leds hydrone_vision"
+WORKDIR /ws
+COPY src/ /tmp/src/
+RUN for p in $PKGS; do rm -rf src/$p && cp -r /tmp/src/$p src/$p; done && rm -rf /tmp/src \
+    && . /opt/ros/humble/setup.sh && . /opt/livox_ws/install/setup.sh && . /ws/install/setup.sh \
+    && colcon build --symlink-install --packages-select $PKGS \
+    && rm -rf log
