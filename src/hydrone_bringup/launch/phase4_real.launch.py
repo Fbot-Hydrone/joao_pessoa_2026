@@ -156,6 +156,7 @@ def _launch_setup(context, *args, **kwargs):
 
     lio_map = Node(
         package='hydrone_lio', executable='lio_map_node', output='screen',
+        condition=IfCondition(LaunchConfiguration('lio_map')),
         parameters=[{
             'map_name': LaunchConfiguration('map_name'),
             'load_map': LaunchConfiguration('load_map'),
@@ -238,6 +239,11 @@ def generate_launch_description():
             'map_name', default_value='phase4',
             description='Saved under $HYDRONE_MAPS/<map_name>/.'),
         DeclareLaunchArgument('load_map', default_value='false'),
+        DeclareLaunchArgument(
+            'lio_map', default_value='true',
+            description='lio_map_node (the saved map, nothing in the mission reads it). '
+                        'false on the Nano: ~45% of a core and its memory grows with the '
+                        'drone standing still (2026-11-26, 650 MB in 2 min).'),
         DeclareLaunchArgument(
             'mission', default_value='none',
             description="'maze' runs phase4_maze_node, 'known' the known-map stack "
