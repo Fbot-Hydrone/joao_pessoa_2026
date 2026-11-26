@@ -152,3 +152,39 @@ the vocabulary and step math headless.
 In BiguaSim (see above) every step reported "concluído" within `arrive_tol_m`.
 Not flown yet there: RETURN_HOME and the automatic return after
 `target_bases`, and the spawn is phase 4's (there is no phase 3 arena).
+
+## On the real Kopis (Jetson Nano)
+
+One command on the Nano, like the main drone's `orin_flight/run_phase1.sh`:
+`nano_flight/run_phase3.sh` (in the competition folder, deployed with
+`nano_flight/deploy.sh 3` to `~/nano_flight`, code in its own worktree
+`~/cbr2026/jp_phase3`, image `hydrone-jetson-lio:phase3`).
+
+```bash
+NOGO=1 ./run_phase3.sh      # rehearsal: every check, never starts
+./run_phase3.sh             # the run
+```
+
+The drone sits on its takeoff base first. It brings up `jetson_up.sh --phase3`
+(Super-LIO **coarse**, MAVROS on the Cube's UART, LEDs, `phase3_hri_node`,
+`gesture_camera` on the first `/dev/v4l/by-id` camera, no QR reader) in tmux
+`p3`. `scripts/start_gate.py` waits for READY (FCU home, disarmed, fresh EKF
+and LIO, mission in `WAIT_START`, still and level), then gyro cal + the FCU's
+PreArm check, then `COUNTDOWN`, all checks again and the call to
+`/hydrone/phase3/start`. Settings (takeoff height, approach, bases, camera)
+are in the script's block. No bag; logs in `~/nano_flight/logs/p3_<date>/`.
+The judge's terminal is window `stack`.
+
+**The RC only kills.** A disarm or mode change the mission did not ask for
+(in ARMING once GUIDED was reached, in TAKEOFF, in the air, or leaving LAND)
+ends the mission: ABORTED, no more setpoints or commands, never re-armed. A
+GUIDED the FCU refuses is still retried, the landing's own disarm is a
+landing, and a TAKEOFF gesture on a base still re-arms (the operator asked).
+A takeoff that never lifts lands and aborts after `takeoff_tries` (3); one
+that stops short above 0.3 m carries on from there, so no takeoff is ever
+sent to a drone in the air. `test/test_phase3_pilot.py`, on a fake FCU.
+
+Not measured yet: CPU with MediaPipe + coarse LIO on the Nano. Fine voxels +
+the webcam node + a full bag lost the LIO in 70 s (2026-11-24). Do the NOGO
+rehearsal with everything up and look for `LIO LOST` in `stack.log` (the gate
+refuses to start on stale LIO odometry).
