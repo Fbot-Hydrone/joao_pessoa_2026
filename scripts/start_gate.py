@@ -29,7 +29,7 @@ from geometry_msgs.msg import PoseStamped
 from mavros_msgs.msg import HomePosition, State
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
@@ -52,7 +52,10 @@ class Gate(Node):
         self.hist = []          # (t, x, y, z, tilt_deg)
         sd = qos_profile_sensor_data
         self.create_subscription(State, "/mavros/state", self._state, 10)
-        self.create_subscription(HomePosition, "/mavros/home_position/home", self._home, sd)
+        # MAVROS latches the home (SITL sends it once): a volatile subscriber that starts later never sees it
+        latched = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                             durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.create_subscription(HomePosition, "/mavros/home_position/home", self._home, latched)
         self.create_subscription(PoseStamped, "/mavros/local_position/pose", self._pose, sd)
         self.create_subscription(Odometry, "/hydrone/lio/odom", self._lio, sd)
         if a.status:
