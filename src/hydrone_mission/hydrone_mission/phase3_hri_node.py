@@ -28,6 +28,11 @@ out  /mavros/setpoint_position/local (streamed while airborne in GUIDED)
 srv  /hydrone/phase3/start  (std_srvs/Trigger)  takeoff + approach, when auto_start is off
      /hydrone/phase3/abort  (std_srvs/Trigger)  LAND where it is, mission over
 
+The RC only kills: a disarm or mode change the mission did not ask for is the
+pilot, and ends the mission for good (ABORTED, nothing commanded again, never
+re-armed). A takeoff that does not lift after takeoff_tries attempts lands and
+aborts too.
+
 Everything is in MAVROS local ENU, so it does not matter what the EKF flies on
 (LIO on the Kopis, VO on the Holybro).
 """
@@ -118,6 +123,7 @@ class Phase3HriNode(Node):
             ("yaw_tol_deg", 8.0),
             ("move_timeout_s", 30.0),
             ("takeoff_timeout_s", 60.0),
+            ("takeoff_tries", 3),          # then LAND + ABORTED, never a takeoff loop
             ("land_timeout_s", 90.0),
             ("land_settle_s", 2.0),
             ("land_still_tol_m", 0.05),
@@ -154,6 +160,8 @@ class Phase3HriNode(Node):
         self._last_cmd = 0.0
         self._takeoff_z = 0.0
         self._takeoff_acked = False
+        self._takeoff_n = 0           # attempts in this takeoff
+        self._mode_seen = False       # the mode this state asked for was reached
         self._after_takeoff = self.APPROACH
         self._auto_home_at = None     # time to fly home by itself, after the last base
         self._land_z = None
@@ -357,6 +365,14 @@ class Phase3HriNode(Node):
     # ── state machine ─────────────────────────────────────────────────────────
 
     def _tick(self):
+        why = self._pilot_override()
+        if why is not None:
+            self.stream = False
+            self.get_logger().error(
+                f"[FASE 3] PILOTO ASSUMIU ({why}) em {self.state}: missão encerrada, "
+                "nada mais é comandado e não rearma.")
+            self._enter(self.ABORTED)
+            return
         if self.stream and self.sp is not None:
             self._publish_sp()
         handler = {
@@ -372,6 +388,30 @@ class Phase3HriNode(Node):
         }.get(self.state)
         if handler is not None:
             handler()
+
+    def _pilot_override(self):
+        """A disarm or mode change the mission did not ask for, else None.
+
+        Only once the asked-for mode was reached: GUIDED refused by the FCU is
+        retried, GUIDED left afterwards is the RC. A disarm in LAND is the
+        landing itself."""
+        m = self.mav
+        if not m.connected:
+            return None
+        if self.state == self.ARMING:
+            if self._mode_seen and m.mode != "GUIDED":
+                return f"modo {m.mode}"
+            self._mode_seen = self._mode_seen or m.mode == "GUIDED"
+        elif self.state == self.TAKEOFF or self.state in self.AIRBORNE:
+            if not m.armed:
+                return "desarmado"
+            if m.mode != "GUIDED":
+                return f"modo {m.mode}"
+        elif self.state == self.LAND:
+            if self._mode_seen and m.armed and m.mode != "LAND":
+                return f"modo {m.mode}"
+            self._mode_seen = self._mode_seen or m.mode == "LAND"
+        return None
 
     def _do_wait_fcu(self):
         if not (self.mav.connected and self.pose is not None):
@@ -407,13 +447,18 @@ class Phase3HriNode(Node):
         # climbed, not absolute z: the second takeoff leaves from a base whose
         # top is not the plane the first one left from
         climbed = self.pose.pose.position.z - self._takeoff_z
-        if climbed >= self.p["takeoff_alt"] - 0.15:
+        timed_out = self.now() - self._since > self.p["takeoff_timeout_s"]
+        if timed_out and climbed >= 0.3:
+            # flying, just short of the height: never send a takeoff to a drone in the air
+            self.get_logger().warn(f"takeoff stopped {climbed:.2f} m up: carrying on from there")
+        if climbed >= self.p["takeoff_alt"] - 0.15 or (timed_out and climbed >= 0.3):
             pp = self.pose.pose.position
             # the height asked for, not the one the handover caught it at
             z = min(self._takeoff_z + self.p["takeoff_alt"], self.home[2] + self.p["max_alt"])
             self.sp = [pp.x, pp.y, z, yaw_of(self.pose)]
             self.stream = True
             self.moving = None
+            self._takeoff_n = 0
             self.get_logger().info(f"airborne — {climbed:.2f} m up, holding z {z:.2f}")
             if self._after_takeoff == self.APPROACH:
                 yaw = self.sp[3]
@@ -427,12 +472,18 @@ class Phase3HriNode(Node):
             else:
                 self._enter(self.COMMAND)
             return
-        if self.now() - self._since > self.p["takeoff_timeout_s"]:
-            self.get_logger().warn("takeoff did not lift it; re-arming")
-            self._enter(self.ARMING)
-            return
-        if self.mav.mode != "GUIDED" or not self.mav.armed:
-            self._enter(self.ARMING)       # disarmed on the ground before the command landed
+        if timed_out:
+            self._takeoff_n += 1
+            if self._takeoff_n >= self.p["takeoff_tries"]:
+                self.get_logger().error(
+                    f"takeoff did not lift it {self._takeoff_n}x: LAND, mission over")
+                self._set_mode("LAND")
+                self.stream = False
+                self._enter(self.ABORTED)
+                return
+            self.get_logger().warn(
+                f"takeoff did not lift it ({self._takeoff_n}/{self.p['takeoff_tries']}): again")
+            self._enter(self.TAKEOFF)
             return
         status = self._poll()
         if status == "ok":
@@ -626,6 +677,7 @@ class Phase3HriNode(Node):
         if state == self.TAKEOFF and self.pose is not None:
             self._takeoff_z = self.pose.pose.position.z
             self._takeoff_acked = False
+        self._mode_seen = False
         self.state = state
         self._since = self.now()
         self._call = None
