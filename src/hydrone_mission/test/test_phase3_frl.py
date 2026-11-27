@@ -47,10 +47,10 @@ def test_a_bent_or_uncertain_arm_is_nothing():
 def test_debouncer_needs_the_hold_and_brakes_fast():
     d = frl_core.Debouncer()
     assert d.update("APROXIMAR", 0.0) == ("HOVER", False)
-    assert d.update("APROXIMAR", 0.4) == ("HOVER", False)
-    assert d.update("APROXIMAR", 0.5) == ("APROXIMAR", True)
-    assert d.update("NENHUM", 0.6) == ("APROXIMAR", False)
-    assert d.update("NENHUM", 0.85) == ("HOVER", True)
+    assert d.update("APROXIMAR", 0.2) == ("HOVER", False)
+    assert d.update("APROXIMAR", 0.3) == ("APROXIMAR", True)
+    assert d.update("NENHUM", 0.4) == ("APROXIMAR", False)
+    assert d.update("NENHUM", 0.65) == ("HOVER", True)
 
 
 def test_every_streamed_name_is_understood_by_the_mission():

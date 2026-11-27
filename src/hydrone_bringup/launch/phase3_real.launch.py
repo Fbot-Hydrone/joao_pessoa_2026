@@ -60,6 +60,8 @@ def generate_launch_description():
             "flip": ParameterValue(LaunchConfiguration("camera_flip"), value_type=bool),
             "show": False,
             "view_port": ParameterValue(LaunchConfiguration("view_port"), value_type=int),
+            "model_complexity": ParameterValue(LaunchConfiguration("pose_model"), value_type=int),
+            "vest": ParameterValue(LaunchConfiguration("vest"), value_type=bool),
         }],
     )
 
@@ -67,6 +69,10 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "camera", default_value="/dev/video0",
             description="The camera facing the operator: /dev/videoN or an index."),
+        DeclareLaunchArgument("pose_model", default_value="0",
+            description="MediaPipe: 0 lite (~7.6 fps na Nano), 1 normal (~5), 2 pesado."),
+        DeclareLaunchArgument("vest", default_value="false",
+            description="true: so quem veste o colete (maps/vest.json) e o operador."),
         DeclareLaunchArgument(
             "view_port", default_value="0",
             description="Bench only: >0 serves the camera with the skeleton as MJPEG on this port."),

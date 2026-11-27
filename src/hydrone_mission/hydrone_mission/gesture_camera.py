@@ -26,6 +26,7 @@ it keypoints. MediaPipe's landmarks are mapped to COCO-17 by MP_TO_COCO, with
 
 import http.server
 import socketserver
+import os
 import threading
 import time
 
@@ -69,6 +70,9 @@ class GestureCamera(Node):
             ("flip", False),              # mirror the image before classifying
             ("show", True),               # preview window (needs a display)
             ("model_complexity", 1),      # MediaPipe: 0 fast, 1 default, 2 accurate
+            ("vest", False),              # operador = quem veste o colete (cor em vest_file)
+            ("vest_file", "/ws/maps/vest.json"),  # calibrar: touch maps/vest_calibrate (host)
+            ("vest_min_frac", 0.20),
             ("view_port", 0),             # >0: MJPEG with the skeleton on http://<jetson>:<port>/ (bench only)
             ("gesture_topic", "/hydrone/vision/human_gesture"),
         ])
@@ -79,6 +83,16 @@ class GestureCamera(Node):
         self._last = None
         self._stop = threading.Event()
         self._jpeg = None
+        self.vest = {"h_lo": 25, "h_hi": 50, "s_lo": 90, "v_lo": 90}  # verde-limão
+        try:
+            import json
+            self.vest.update(json.load(open(self.p["vest_file"])))
+        except (OSError, ValueError):
+            pass
+        self._calib_until, self._calib_px = 0.0, []
+        self._vest_frac = None
+        if self.p["vest"]:
+            self.get_logger().info(f"[FASE 3] colete LIGADO {self.vest}")
         self._jpeg_lock = threading.Lock()
         if self.p["view_port"] > 0:
             self._start_view(self.p["view_port"])
@@ -100,6 +114,12 @@ class GestureCamera(Node):
             return
         self.get_logger().info(f"camera '{src}' open — publishing on {self.p['gesture_topic']}")
 
+        if self.p["model_complexity"] == 0:
+            import shutil
+            dst = os.path.join(os.path.dirname(mp.__file__), "modules", "pose_landmark", "pose_landmark_lite.tflite")
+            src_m = "/ws/src/hydrone_mission/models/pose_landmark_lite.tflite"
+            if not os.path.exists(dst) and os.path.exists(src_m):
+                shutil.copy(src_m, dst)
         pose = mp.solutions.pose.Pose(model_complexity=self.p["model_complexity"],
                                       min_detection_confidence=0.5,
                                       min_tracking_confidence=0.5)
@@ -116,11 +136,15 @@ class GestureCamera(Node):
                 gesture, detail = None, None
                 if res.pose_landmarks:
                     kpts, conf = mediapipe_to_coco(res.pose_landmarks.landmark, w, h)
-                    raw, states, angles = frl_core.classify(kpts, conf)
-                    gesture, _changed = self.debouncer.update(raw, time.monotonic())
-                    detail = (raw, states, angles)
-                    self._publish(gesture, kpts, conf)
-                    self._report(gesture, detail)
+                    self._vest_step(cv2, frame, kpts, conf)
+                    if self.p["vest"] and self._vest_frac < self.p["vest_min_frac"]:
+                        pass   # sem colete: não é o operador, nada publicado (o drone freia)
+                    else:
+                        raw, states, angles = frl_core.classify(kpts, conf)
+                        gesture, _changed = self.debouncer.update(raw, time.monotonic())
+                        detail = (raw, states, angles)
+                        self._publish(gesture, kpts, conf)
+                        self._report(gesture, detail)
                 if self.p["view_port"] > 0:
                     try:
                         view = frame.copy()
@@ -176,6 +200,57 @@ class GestureCamera(Node):
                 back.sendto(f"{gesture}  (bruto {raw})".encode(), ("127.0.0.1", port + 1))
             except OSError:
                 pass
+
+    def _torso_hsv(self, cv2, frame, kpts, conf):
+        if min(conf[5], conf[6]) < frl_core.MIN_CONF:
+            return None
+        xs = [kpts[5][0], kpts[6][0]]
+        y0 = min(kpts[5][1], kpts[6][1])
+        hips = [kpts[i][1] for i in (11, 12) if conf[i] >= frl_core.MIN_CONF]
+        w = abs(xs[1] - xs[0])
+        y1 = max(hips) if hips else y0 + 1.3 * w
+        x0, x1 = min(xs) + 0.15 * w, max(xs) - 0.15 * w
+        y0, y1 = y0 + 0.10 * (y1 - y0), y1 - 0.10 * (y1 - y0)
+        H, W_ = frame.shape[:2]
+        x0, x1, y0, y1 = int(max(0, x0)), int(min(W_, x1)), int(max(0, y0)), int(min(H, y1))
+        if x1 - x0 < 4 or y1 - y0 < 4:
+            return None
+        return cv2.cvtColor(frame[y0:y1, x0:x1], cv2.COLOR_BGR2HSV)
+
+    def _vest_step(self, cv2, frame, kpts, conf):
+        """Fração do tronco com a cor do colete; calibração por arquivo-gatilho."""
+        import json
+        trig = os.path.join(os.path.dirname(self.p["vest_file"]), "vest_calibrate")
+        if os.path.exists(trig):
+            os.remove(trig)
+            self._calib_until, self._calib_px = time.monotonic() + 3.0, []
+            self.get_logger().info("[FASE 3] calibrando o colete por 3 s: operador SOZINHO na imagem")
+        hsv = self._torso_hsv(cv2, frame, kpts, conf)
+        if self._calib_until:
+            if hsv is not None:
+                self._calib_px.append(hsv.reshape(-1, 3))
+            if time.monotonic() > self._calib_until:
+                self._calib_until = 0.0
+                px = np.concatenate(self._calib_px) if self._calib_px else np.zeros((0, 3))
+                sat = px[(px[:, 1] > 60) & (px[:, 2] > 50)]
+                if len(sat) < 50:
+                    self.get_logger().error("[FASE 3] calibração do colete FALHOU: tronco sem cor forte")
+                else:
+                    h = int(np.median(sat[:, 0]))
+                    self.vest.update({"h_lo": max(0, h - 10), "h_hi": min(179, h + 10),
+                                      "s_lo": max(60, int(np.percentile(sat[:, 1], 20) * 0.7)),
+                                      "v_lo": max(50, int(np.percentile(sat[:, 2], 20) * 0.6))})
+                    try:
+                        json.dump(self.vest, open(self.p["vest_file"], "w"))
+                    except OSError as e:
+                        self.get_logger().warn(f"vest_file: {e}")
+                    self.get_logger().info(f"[FASE 3] colete calibrado: {self.vest}")
+        if hsv is None:
+            self._vest_frac = 0.0
+        else:
+            v = self.vest
+            m = cv2.inRange(hsv, (v["h_lo"], v["s_lo"], v["v_lo"]), (v["h_hi"], 255, 255))
+            self._vest_frac = float(np.count_nonzero(m)) / m.size
 
     def _start_view(self, port):
         node = self
@@ -242,7 +317,7 @@ class GestureCamera(Node):
             for (x, y), c in zip(kpts, conf):
                 if c >= frl_core.MIN_CONF:
                     cv2.circle(frame, (int(x), int(y)), 4, (0, 200, 255), -1)
-        text = gesture or "sem operador"
+        text = gesture or "sem operador / sem colete"
         cv2.putText(frame, text, (10, 35), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (0, 0, 255), 3)
         if detail is not None:
             raw, (sl, sr), _ = detail

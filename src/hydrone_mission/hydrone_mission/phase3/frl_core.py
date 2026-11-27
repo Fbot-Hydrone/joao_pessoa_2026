@@ -79,7 +79,7 @@ COMMANDS = {
     "SUBIR": (0, 0, 1), "DESCER": (0, 0, -1),
 }
 HOLD_S = {"HOVER": 0.25, "STOP": 0.25, "POUSAR": 1.2}  # tempo que o gesto precisa ser mantido
-DEFAULT_HOLD = 0.5
+DEFAULT_HOLD = 0.3   # 0.5 ate 2026-11-27; com a pose na GPU (~14 fps) 0.3 s sao ~4 quadros
 
 
 class Debouncer:

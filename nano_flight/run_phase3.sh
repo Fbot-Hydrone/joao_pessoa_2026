@@ -27,7 +27,8 @@ TARGET_BASES=6                  # landings before flying home by itself
 CAMERA=""                       # "" = the first /dev/v4l/by-id camera
 CAMERA_FLIP=false               # true if DIREITA/ESQUERDA come out swapped
 LEDS=white                      # one word (jetson_up splits on spaces); none = off
-GPU=${GPU:-1}                   # 1 = pose na GPU (pose_gpu.py, poseNet TensorRT ~15 fps); 0 = MediaPipe no container (~5 fps)
+GPU=${GPU:-1}                   # 1 = YOLOv8n-pose na GPU (pose_gpu.py, ~20 fps, acerta braco p/ cima com o colete); 0 = MediaPipe lite no container (~7.6 fps)
+VEST=${VEST:-1}                  # 1 = operador e so quem veste o colete (vest.json; calibrar: touch /tmp/vest_calibrate (GPU=1) ou ~/cbr2026/jp_phase3/maps/vest_calibrate (GPU=0)); 0 = qualquer pessoa
 LIO_MAP=false                   # lio_map_node: nothing reads it, costs ~45% of a core and grows in memory
 COUNTDOWN=${COUNTDOWN:-0}       # s after READY + the FCU checks
 # ────────────────────────────────────────────────────────────────────────────
@@ -58,18 +59,25 @@ CAM_ARG=$CAMERA; [ "$GPU" = 1 ] && CAM_ARG=udp:5600
 ARGS="$ARGS target_bases:=$TARGET_BASES camera:=$CAM_ARG camera_flip:=$CAMERA_FLIP leds:=$LEDS"
 # MAVROS forwards the FCU to 14550 locally, for gyrocal.py / preflight.py on the host
 VP=${VIEW:-0}; [ "$GPU" = 1 ] && VP=0   # com GPU a imagem sai do pose_gpu.py
-ARGS="$ARGS view_port:=$VP"   # VIEW=8090 ./run_phase3.sh: imagem com esqueleto no navegador (bancada)
+ARGS="$ARGS view_port:=$VP pose_model:=0 vest:=$([ "$VEST" = 1 ] && echo true || echo false)"   # VIEW=8090 ./run_phase3.sh: imagem com esqueleto no navegador (bancada)
 ARGS="$ARGS lio_map:=$LIO_MAP gcs_url:=udp://:14556@127.0.0.1:14550"
 cat > "$LOG/settings" <<EOF
 TAKEOFF_ALT=$TAKEOFF_ALT APPROACH_M=$APPROACH_M TURN_DEG=$TURN_DEG TARGET_BASES=$TARGET_BASES
-CAMERA=$CAMERA GPU=$GPU FLIP=$CAMERA_FLIP LEDS=$LEDS LIO_MAP=$LIO_MAP COUNTDOWN=$COUNTDOWN NOGO=${NOGO:-0}
+CAMERA=$CAMERA GPU=$GPU VEST=$VEST FLIP=$CAMERA_FLIP LEDS=$LEDS LIO_MAP=$LIO_MAP COUNTDOWN=$COUNTDOWN NOGO=${NOGO:-0}
 image $IMAGE $(docker image inspect -f '{{.Created}}' "$IMAGE")
 commit $(git -C "$WS" log -1 --format='%h %s' 2>/dev/null)
 EOF
 
+# clocks de CPU/GPU/memoria travados no maximo (pose e LIO mais rapidos; esquenta mais)
+sudo -n jetson_clocks 2>/dev/null && echo "jetson_clocks: ligado" || echo "WARNING: jetson_clocks falhou (sudo?)"
+
+# camera: foco travado no infinito (o autofoco da C922 fica cacando) e sem cair o fps no escuro
+CAMDEV=$(readlink -f "$CAMERA")
+v4l2-ctl -d "$CAMDEV" -c focus_auto=0 -c focus_absolute=${FOCUS:-0} -c exposure_auto_priority=0 2>/dev/null && echo "camera: foco ${FOCUS:-0} travado" || echo "WARNING: nao travou o foco da camera (v4l2-ctl)"
+
 # 0. pose do operador na GPU (fora do Docker), antes da stack
 if [ "$GPU" = 1 ]; then
-    tmux new-session -d -s p$PH -n pose "bash -c 'python3 -u $HERE/pose_gpu.py $CAMERA ${VIEW:-0} 2>&1 | tee $LOG/pose.log; exec bash'"
+    tmux new-session -d -s p$PH -n pose "bash -c 'VEST=$VEST python3 -u $HERE/pose_gpu.py $CAMERA ${VIEW:-0} 2>&1 | tee $LOG/pose.log; exec bash'"
     t0=$(date +%s)
     until grep -q "pose_gpu\] camera" "$LOG/pose.log" 2>/dev/null; do
         [ $(( $(date +%s) - t0 )) -gt 90 ] && die "pose_gpu.py nao subiu em 90 s (tmux attach -t p$PH, janela pose; ou GPU=0)"
