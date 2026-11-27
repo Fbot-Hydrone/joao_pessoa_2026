@@ -43,6 +43,8 @@ ARGS = [
     ("approach_turn_deg", "90.0", float, "Autonomous approach: then turn this much to the RIGHT."),
     ("step_m", "0.5", float, "One horizontal gesture moves this far, m."),
     ("step_z_m", "0.3", float, "One up/down gesture moves this far, m."),
+    ("vel_speed", "0.5", float, "m/s while APROXIMAR/AFASTAR/DIREITA/ESQUERDA is held."),
+    ("vel_speed_z", "0.3", float, "m/s while SUBIR/DESCER is held."),
     ("yaw_step_deg", "45.0", float, "One turn gesture turns this much."),
     ("target_bases", "6", int,
      "Landings before flying home by itself. 6 with one drone, 3 each with two."),

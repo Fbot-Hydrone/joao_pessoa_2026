@@ -23,6 +23,8 @@ set -e
 TAKEOFF_ALT=1.5                 # m above the takeoff base; the camera has to frame the operator
 APPROACH_M=2.0                  # straight ahead after takeoff
 TURN_DEG=90                     # then turn this much to the RIGHT to face the operator
+VEL=0.3                         # m/s na horizontal enquanto o gesto e mantido (era 0.5)
+VEL_Z=0.2                       # m/s na vertical (SUBIR/DESCER; era 0.3)
 TARGET_BASES=6                  # landings before flying home by itself
 CAMERA=""                       # "" = the first /dev/v4l/by-id camera
 CAMERA_FLIP=false               # true if DIREITA/ESQUERDA come out swapped
@@ -56,13 +58,14 @@ ping -c1 -W2 192.168.1.145 >/dev/null || die "the Livox (192.168.1.145) does not
 mkdir -p "$LOG"
 ARGS="auto_start:=false takeoff_alt:=$TAKEOFF_ALT approach_forward_m:=$APPROACH_M approach_turn_deg:=$TURN_DEG"
 CAM_ARG=$CAMERA; [ "$GPU" = 1 ] && CAM_ARG=udp:5600
+ARGS="$ARGS vel_speed:=$VEL vel_speed_z:=$VEL_Z"
 ARGS="$ARGS target_bases:=$TARGET_BASES camera:=$CAM_ARG camera_flip:=$CAMERA_FLIP leds:=$LEDS"
 # MAVROS forwards the FCU to 14550 locally, for gyrocal.py / preflight.py on the host
 VP=${VIEW:-0}; [ "$GPU" = 1 ] && VP=0   # com GPU a imagem sai do pose_gpu.py
 ARGS="$ARGS view_port:=$VP pose_model:=0 vest:=$([ "$VEST" = 1 ] && echo true || echo false)"   # VIEW=8090 ./run_phase3.sh: imagem com esqueleto no navegador (bancada)
 ARGS="$ARGS lio_map:=$LIO_MAP gcs_url:=udp://:14556@127.0.0.1:14550"
 cat > "$LOG/settings" <<EOF
-TAKEOFF_ALT=$TAKEOFF_ALT APPROACH_M=$APPROACH_M TURN_DEG=$TURN_DEG TARGET_BASES=$TARGET_BASES
+TAKEOFF_ALT=$TAKEOFF_ALT APPROACH_M=$APPROACH_M TURN_DEG=$TURN_DEG TARGET_BASES=$TARGET_BASES VEL=$VEL VEL_Z=$VEL_Z
 CAMERA=$CAMERA GPU=$GPU VEST=$VEST FLIP=$CAMERA_FLIP LEDS=$LEDS LIO_MAP=$LIO_MAP COUNTDOWN=$COUNTDOWN NOGO=${NOGO:-0}
 image $IMAGE $(docker image inspect -f '{{.Created}}' "$IMAGE")
 commit $(git -C "$WS" log -1 --format='%h %s' 2>/dev/null)
