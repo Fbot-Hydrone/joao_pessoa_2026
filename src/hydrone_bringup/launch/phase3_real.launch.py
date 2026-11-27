@@ -59,6 +59,7 @@ def generate_launch_description():
             "camera": LaunchConfiguration("camera"),
             "flip": ParameterValue(LaunchConfiguration("camera_flip"), value_type=bool),
             "show": False,
+            "view_port": ParameterValue(LaunchConfiguration("view_port"), value_type=int),
         }],
     )
 
@@ -66,6 +67,9 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "camera", default_value="/dev/video0",
             description="The camera facing the operator: /dev/videoN or an index."),
+        DeclareLaunchArgument(
+            "view_port", default_value="0",
+            description="Bench only: >0 serves the camera with the skeleton as MJPEG on this port."),
         DeclareLaunchArgument(
             "camera_flip", default_value="false",
             description="true if DIREITA/ESQUERDA come out swapped."),

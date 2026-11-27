@@ -24,6 +24,8 @@ it keypoints. MediaPipe's landmarks are mapped to COCO-17 by MP_TO_COCO, with
 `visibility` as the per-keypoint confidence.
 """
 
+import http.server
+import socketserver
 import threading
 import time
 
@@ -67,6 +69,7 @@ class GestureCamera(Node):
             ("flip", False),              # mirror the image before classifying
             ("show", True),               # preview window (needs a display)
             ("model_complexity", 1),      # MediaPipe: 0 fast, 1 default, 2 accurate
+            ("view_port", 0),             # >0: MJPEG with the skeleton on http://<jetson>:<port>/ (bench only)
             ("gesture_topic", "/hydrone/vision/human_gesture"),
         ])
         self.p = {q.name: q.value for q in p}
@@ -75,8 +78,14 @@ class GestureCamera(Node):
         self.debouncer = frl_core.Debouncer()
         self._last = None
         self._stop = threading.Event()
+        self._jpeg = None
+        self._jpeg_lock = threading.Lock()
+        if self.p["view_port"] > 0:
+            self._start_view(self.p["view_port"])
 
     def run(self):
+        if str(self.p["camera"]).startswith("udp:"):
+            return self._run_udp(int(str(self.p["camera"])[4:]))
         import cv2
         import mediapipe as mp
 
@@ -112,6 +121,16 @@ class GestureCamera(Node):
                     detail = (raw, states, angles)
                     self._publish(gesture, kpts, conf)
                     self._report(gesture, detail)
+                if self.p["view_port"] > 0:
+                    try:
+                        view = frame.copy()
+                        self._draw(cv2, view, res, gesture, detail)
+                        ok_j, buf = cv2.imencode(".jpg", view, [cv2.IMWRITE_JPEG_QUALITY, 60])
+                        if ok_j:
+                            with self._jpeg_lock:
+                                self._jpeg = buf.tobytes()
+                    except Exception as e:  # the view must never stop the gestures
+                        self.get_logger().warn(f"view: {e}", throttle_duration_sec=10.0)
                 if self.p["show"]:
                     self._draw(cv2, frame, res, gesture, detail)
                     cv2.imshow("Fase 3 - gestos", frame)
@@ -122,6 +141,70 @@ class GestureCamera(Node):
             cap.release()
             if self.p["show"]:
                 cv2.destroyAllWindows()
+
+    def _run_udp(self, port):
+        """Keypoints from pose_gpu.py (GPU) by UDP; same classify/debounce/publish."""
+        import json
+        import socket
+        rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        rx.bind(("127.0.0.1", port))
+        rx.settimeout(0.5)
+        back = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.get_logger().info(f"keypoints da GPU (pose_gpu.py) em udp:{port} — publishing on {self.p['gesture_topic']}")
+        while rclpy.ok() and not self._stop.is_set():
+            try:
+                data = rx.recv(65536)
+            except socket.timeout:
+                continue
+            try:
+                m = json.loads(data)
+                kpts = np.array([[k[0], k[1]] for k in m["kp"]], dtype=float)
+                conf = np.array([k[2] for k in m["kp"]], dtype=float)
+                if self.p["flip"]:
+                    kpts[:, 0] = m["w"] - kpts[:, 0]
+                    kpts[[1, 3, 5, 7, 9, 11, 13, 15]], kpts[[2, 4, 6, 8, 10, 12, 14, 16]] = \
+                        kpts[[2, 4, 6, 8, 10, 12, 14, 16]].copy(), kpts[[1, 3, 5, 7, 9, 11, 13, 15]].copy()
+                    conf[[1, 3, 5, 7, 9, 11, 13, 15]], conf[[2, 4, 6, 8, 10, 12, 14, 16]] = \
+                        conf[[2, 4, 6, 8, 10, 12, 14, 16]].copy(), conf[[1, 3, 5, 7, 9, 11, 13, 15]].copy()
+            except (ValueError, KeyError, IndexError):
+                continue
+            raw, states, angles = frl_core.classify(kpts, conf)
+            gesture, _changed = self.debouncer.update(raw, time.monotonic())
+            self._publish(gesture, kpts, conf)
+            self._report(gesture, (raw, states, angles))
+            try:
+                back.sendto(f"{gesture}  (bruto {raw})".encode(), ("127.0.0.1", port + 1))
+            except OSError:
+                pass
+
+    def _start_view(self, port):
+        node = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+                self.end_headers()
+                try:
+                    while not node._stop.is_set():
+                        with node._jpeg_lock:
+                            jpg = node._jpeg
+                        if jpg is not None:
+                            self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpg + b"\r\n")
+                        time.sleep(0.15)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
+        class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
+            daemon_threads = True
+            allow_reuse_address = True
+
+        srv = Server(("0.0.0.0", port), Handler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.get_logger().info(f"[FASE 3] imagem com esqueleto em http://<jetson>:{port}/")
 
     def _publish(self, gesture, kpts, conf):
         msg = HumanGesture()
